@@ -1,0 +1,30 @@
+dapr app-port bilgisi uygulamanın çalıştığı port bilgisi ile uyuşmalıdır
+
+ - dapr run --app-id order --app-port <your_app_port> --dapr-http-port 6050--dapr-grpc-port 60002 dotnet run
+
+iç içe projelerin olduğu bir çözümde dockerfile'ı build etmek için ana dizinden yol gösterilerek build edilmelidir
+
+dapr run --app-id order --app-port 6002 --dapr-http-port 6050--dapr-grpc-port 60002 dotnet run
+
+dizin: src:
+
+ - docker build -f ./samples/Sample.Consumer/Dockerfile .
+
+
+ ---------------------------------------------------------------------------------------
+
+producer çalıştırma:
+dapr run --app-id orderprocessing --app-port 6001 --dapr-http-port 3601 --dapr-grpc-port 60001 dotnet run
+
+
+consumer çalıştırma 
+(debug)
+ dapr run --app-id order --app-port 5017 --dapr-http-port 3602 dotnet run 
+
+dockerfile:
+
+docker build -t sample-consumer -f ./samples/Sample.Consumer/Dockerfile .
+
+docker run -d -p 6001:6000 -e ASPNETCORE_URLS=http://+:6000
+
+
