@@ -1,10 +1,17 @@
-﻿using Lycia.Dapr.Messages;
+﻿using Lycia.Dapr.Enums;
+using Lycia.Dapr.Messages;
 
 namespace Lycia.Dapr;
 
-public class Product : Event
+public class OrderCreated : Event
 {
-    public Product(string name)
+    // public OrderCreated(OrderStatus orderStatus)
+    // {
+    //     Status = orderStatus;
+    // }
+    //    public OrderStatus Status { get; }
+    
+    public OrderCreated(string name)
     {
         Name = name;
     }

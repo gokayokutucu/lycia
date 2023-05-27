@@ -1,10 +1,10 @@
 ﻿using Dapr.Client;
 using Lycia.Dapr;
+using Lycia.Dapr.Enums;
 
 const string PUBSUB_NAME = "pubsub";
-const string TOPIC_NAME = "orders";
 
-var product = new Product("RayBan");
+var orderCreated = new OrderCreated(OrderStatus.Created.ToString());
 
 //Using Dapr SDK to publish a topic
 
@@ -16,9 +16,9 @@ while (true)
 
     CancellationToken cancellationToken = source.Token;
 
-    await client.PublishEventAsync(PUBSUB_NAME, TOPIC_NAME, product, cancellationToken);
+    await client.PublishEventAsync(PUBSUB_NAME, "OrderCreatedCommand", orderCreated, cancellationToken);
 
-    Console.WriteLine("Data was sent");
+    Console.WriteLine("Order is created");
 
     System.Threading.Thread.Sleep(5000);
 }
