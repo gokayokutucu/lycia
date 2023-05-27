@@ -19,7 +19,7 @@ dapr run --app-id orderprocessing --app-port 6001 --dapr-http-port 3601 --dapr-g
 
 consumer çalıştırma 
 (debug)
- dapr run --app-id order --app-port 5017 --dapr-http-port 3602 dotnet run 
+dapr run --app-id order --app-port 5017 --dapr-http-port 3602 dotnet run
 
 dockerfile:
 
