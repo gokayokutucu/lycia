@@ -28,3 +28,7 @@ docker build -t sample-consumer -f ./samples/Sample.Consumer/Dockerfile .
 docker run -d -p 6001:6000 -e ASPNETCORE_URLS=http://+:6000
 
 
+
+https://github.com/dotnet-architecture/eShopOnContainers
+https://github.com/dotnet-architecture/eShopOnDapr
+
