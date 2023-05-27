@@ -8,9 +8,7 @@ namespace Sample.Consumer.Controllers;
 [Route("[controller]")]
 public class OrderController : ControllerBase
 {
-    const string TOPIC_NAME = "orders";
     const string PUBSUB_NAME = "pubsub";
-
     
     private readonly ILogger<OrderController> _logger;
 
@@ -21,10 +19,11 @@ public class OrderController : ControllerBase
     
 
     [HttpPost]
-    [Topic(PUBSUB_NAME, TOPIC_NAME)]
-    public IActionResult OrderHandler(Product product)
+    [Topic(PUBSUB_NAME, "OrderCreatedCommand")]
+    public Task HandlerAsync(OrderCreated orderCreated)
     {
-        _logger.LogInformation("Subscriber received: " + product.Name);
-        return Ok(product);
+        _logger.LogInformation("Order status is " + orderCreated.Name);
+
+        return Task.CompletedTask;
     }
 }

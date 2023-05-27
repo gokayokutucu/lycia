@@ -1,8 +1,13 @@
+using Dapr;
+using Lycia.Dapr;
+using Lycia.Dapr.Enums;
+using Lycia.Dapr.Messages;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 
-builder.Services.AddControllers();
+//builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -16,14 +21,14 @@ app.UseCloudEvents();
 // needed for Dapr pub/sub routing
 app.MapSubscribeHandler();
 
-// const string PUBSUB_NAME = "pubsub";
-// const string TOPIC_NAME = "orders";
+const string PUBSUB_NAME = "pubsub";
+const string TOPIC_NAME = "OrderCreatedCommand";
 
-// app.MapPost("/orders", [Topic(PUBSUB_NAME, TOPIC_NAME)] (Product product) =>
-// {
-//     Console.WriteLine("Subscriber received : " + product.Name);
-//     return Results.Ok(product);
-// });
+app.MapPost("/orders", [Topic(PUBSUB_NAME, TOPIC_NAME)] (OrderCreated @event) =>
+{
+    Console.WriteLine("Subscriber received : " + @event);
+    return Results.Ok(@event);
+});
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -36,6 +41,6 @@ app.UseHttpsRedirection();
 
 //app.UseAuthorization();
 
-app.MapControllers();
+//app.MapControllers();
 
 app.Run();
