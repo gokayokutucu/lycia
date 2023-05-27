@@ -8,22 +8,20 @@ namespace Sample.Consumer.Controllers;
 [Route("[controller]")]
 public class OrderController : ControllerBase
 {
-    const string PUBSUB_NAME = "pubsub";
-    
+    private const string PUBSUB_NAME = "pubsub";
+
     private readonly ILogger<OrderController> _logger;
 
     public OrderController(ILogger<OrderController> logger)
     {
         _logger = logger;
     }
-    
 
     [HttpPost]
     [Topic(PUBSUB_NAME, "OrderCreatedCommand")]
-    public Task HandlerAsync(OrderCreated orderCreated)
+    public async Task HandlerAsync(OrderCreated @event,
+        [FromServices] OrderCreatedEventHandler handler)
     {
-        _logger.LogInformation("Order status is " + orderCreated.Name);
-
-        return Task.CompletedTask;
+        await handler.Handle(@event);
     }
 }

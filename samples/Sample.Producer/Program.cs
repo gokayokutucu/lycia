@@ -4,9 +4,9 @@ using Lycia.Dapr.Enums;
 
 const string PUBSUB_NAME = "pubsub";
 
-var orderCreated = new OrderCreated(OrderStatus.Created.ToString());
+var orderCreated = new OrderCreated(OrderStatus.Created);
 
-//Using Dapr SDK to publish a topic
+// Using Dapr SDK to publish a topic
 
 while (true)
 {
@@ -20,5 +20,5 @@ while (true)
 
     Console.WriteLine("Order is created");
 
-    System.Threading.Thread.Sleep(5000);
+    System.Threading.Thread.Sleep(3000);
 }
