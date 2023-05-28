@@ -2,7 +2,7 @@
 
 namespace Lycia.Dapr;
 
-public class OrderCreatedEventHandler : MyEventHandler<OrderCreated>
+public class OrderCreatedEventHandler : Messages.EventHandler<OrderCreated>
 {
     public override Task Handle(OrderCreated @event)
     {

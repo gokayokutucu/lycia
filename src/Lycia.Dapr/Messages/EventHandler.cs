@@ -2,7 +2,7 @@
 
 namespace Lycia.Dapr.Messages;
 
-public abstract class MyEventHandler<TEvent> : IEventHandler<TEvent>
+public abstract class EventHandler<TEvent> : IEventHandler<TEvent>
     where TEvent : IEvent
 {
     public abstract Task Handle(TEvent @event);
