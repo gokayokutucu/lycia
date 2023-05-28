@@ -1,4 +1,6 @@
-﻿namespace Sample.Consumer.Extensions;
+﻿using Microsoft.AspNetCore.Builder;
+
+namespace Lycia.Dapr.Extensions;
 
 /// <summary>
 /// Builds conventions that will be used for customization of Hub <see cref="EndpointBuilder"/> instances.

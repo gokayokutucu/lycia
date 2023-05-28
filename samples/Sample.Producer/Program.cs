@@ -1,6 +1,7 @@
 ﻿using Dapr.Client;
 using Lycia.Dapr;
-using Lycia.Dapr.Enums;
+using Sample.Domain.Enums;
+using Sample.Domain.Messages;
 
 const string PUBSUB_NAME = "pubsub";
 

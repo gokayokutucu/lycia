@@ -1,15 +1,14 @@
-using Dapr;
-using Lycia.Dapr;
-using Lycia.Dapr.Enums;
+using System.Diagnostics;
+using Lycia.Dapr.Extensions;
 using Lycia.Dapr.Messages;
 using Lycia.Dapr.Messages.Abstractions;
-using Sample.Consumer.Extensions;
+using Sample.Consumer.Handlers;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 
-builder.Services.AddControllers();
+//builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -18,15 +17,18 @@ builder.Services.AddScoped<OrderCreatedEventHandler>();
 builder.Services.AddSingleton<IEventBus, DaprEventBus>();
 
 //Add dapr
-builder.Services.AddDaprClient();
+builder.Services
+    .AddDaprClient();
 
 var app = builder.Build();
 
+#if DEBUG
+Debugger.Launch();
+#endif
+
 // Dapr will send serialized event object vs. being raw CloudEvent
 app.UseCloudEvents();
-// needed for Dapr pub/sub routing
-app.MapSubscribeHandler();
-app.MapDaprEventBus();
+
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -37,6 +39,9 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-app.MapControllers();
+//app.MapControllers();
+// needed for Dapr pub/sub routing
+app.MapSubscribeHandler();
+app.MapDaprEventBus();
 
 app.Run();

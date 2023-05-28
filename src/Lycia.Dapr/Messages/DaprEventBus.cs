@@ -9,6 +9,6 @@ public class DaprEventBus : IEventBus
 
     public DaprEventBus()
     {
-        Topics.Add("OrderCreatedCommand", new List<IEventHandler> { new OrderCreatedEventHandler() });
+        //Topics.Add("OrderCreatedCommand", new List<IEventHandler> { new OrderCreatedEventHandler() });
     }
 }

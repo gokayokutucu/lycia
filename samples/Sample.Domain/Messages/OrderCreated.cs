@@ -1,8 +1,7 @@
-﻿using Lycia.Dapr.Enums;
-using Lycia.Dapr.Messages;
-using System.Text.Json.Serialization;
+﻿using Lycia.Dapr.Messages;
+using Sample.Domain.Enums;
 
-namespace Lycia.Dapr;
+namespace Sample.Domain.Messages;
 
 public class OrderCreated : Event
 {

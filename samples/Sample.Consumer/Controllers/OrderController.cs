@@ -1,6 +1,8 @@
 using Dapr;
 using Lycia.Dapr;
 using Microsoft.AspNetCore.Mvc;
+using Sample.Consumer.Handlers;
+using Sample.Domain.Messages;
 
 namespace Sample.Consumer.Controllers;
 
@@ -17,11 +19,11 @@ public class OrderController : ControllerBase
         _logger = logger;
     }
 
-    [HttpPost]
-    [Topic(PUBSUB_NAME, "OrderCreatedCommand")]
-    public async Task HandlerAsync(OrderCreated @event,
-        [FromServices] OrderCreatedEventHandler handler)
-    {
-        await handler.Handle(@event);
-    }
+    // [HttpPost]
+    // [Topic(PUBSUB_NAME, "OrderCreatedCommand")]
+    // public async Task HandlerAsync(OrderCreated @event,
+    //     [FromServices] OrderCreatedEventHandler handler)
+    // {
+    //     await handler.Handle(@event);
+    // }
 }

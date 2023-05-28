@@ -1,6 +1,6 @@
 using System.ComponentModel;
 
-namespace Lycia.Dapr.Enums;
+namespace Sample.Domain.Enums;
 
 public enum OrderStatus
 {
