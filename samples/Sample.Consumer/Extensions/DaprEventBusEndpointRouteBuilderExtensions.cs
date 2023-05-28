@@ -33,6 +33,8 @@ public static class DaprEventBusEndpointRouteBuilderExtensions
 
         async Task HandleMessage(HttpContext context)
         {
+            var path = context.Request.Path;
+            logger?.LogInformation($"Mapping path: {path}");
             // Get handlers
             var handlers = new List<IEventHandler> { new OrderCreatedEventHandler() };
             var handler1 = handlers!.FirstOrDefault();
