@@ -1,3 +1,5 @@
+using Lycia.Dapr.EventBus;
+using Lycia.Dapr.EventBus.Abstractions;
 using Lycia.Dapr.Extensions;
 using Lycia.Dapr.Messages;
 using Lycia.Dapr.Messages.Abstractions;

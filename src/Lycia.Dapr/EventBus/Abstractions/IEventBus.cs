@@ -1,6 +1,7 @@
 ﻿using System.Reflection;
+using Lycia.Dapr.Messages.Abstractions;
 
-namespace Lycia.Dapr.Messages.Abstractions;
+namespace Lycia.Dapr.EventBus.Abstractions;
 
 public interface IEventBus
 {

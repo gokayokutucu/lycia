@@ -1,10 +1,15 @@
 ﻿using System.Reflection;
+using Lycia.Dapr.EventBus.Abstractions;
 using Lycia.Dapr.Messages.Abstractions;
 
-namespace Lycia.Dapr.Messages;
+namespace Lycia.Dapr.EventBus;
 
 public class DaprEventBus : IEventBus
 {
+    public DaprEventBus()
+    {
+        
+    }
     ///<inheritdoc/>
     public Dictionary<string, IEventHandler> Topics { get; } = new();
 

@@ -1,6 +1,8 @@
 ﻿using System.Net.Mime;
 using System.Text.Json;
 using Dapr.Client;
+using Lycia.Dapr.EventBus;
+using Lycia.Dapr.EventBus.Abstractions;
 using Lycia.Dapr.Messages;
 using Lycia.Dapr.Messages.Abstractions;
 using Microsoft.AspNetCore.Builder;
