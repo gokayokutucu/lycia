@@ -1,15 +1,19 @@
 ﻿using System.Reflection;
 using Lycia.Dapr.EventBus.Abstractions;
 using Lycia.Dapr.Messages.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Lycia.Dapr.EventBus;
 
 public class DaprEventBus : IEventBus
 {
-    public DaprEventBus()
+    private readonly IServiceProvider _serviceProvider;
+
+    public DaprEventBus(IServiceProvider serviceProvider)
     {
-        
+        _serviceProvider = serviceProvider;
     }
+    
     ///<inheritdoc/>
     public Dictionary<string, IEventHandler> Topics { get; } = new();
 
@@ -65,14 +69,21 @@ public class DaprEventBus : IEventBus
                 .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEventHandler<>))
                 ?.GetGenericArguments()[0];
 
-            var handlerInstance = Activator.CreateInstance(eventHandlerType.MakeGenericType(eventType));
-            return (IEventHandler)handlerInstance;
+            using (var scope = _serviceProvider.CreateScope())
+            {
+                var handlerInstance = scope.ServiceProvider.GetRequiredService(eventHandlerType.MakeGenericType(eventType));
+                return (IEventHandler)handlerInstance;
+            }
         }
         else
         {
-            var handlerInstance = Activator.CreateInstance(eventHandlerType);
-            return (IEventHandler)handlerInstance;
+            using (var scope = _serviceProvider.CreateScope())
+            {
+                var handlerInstance = scope.ServiceProvider.GetRequiredService(eventHandlerType);
+                return (IEventHandler)handlerInstance;
+            }
         }
     }
+
 
 }
