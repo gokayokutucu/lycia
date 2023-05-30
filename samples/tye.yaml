@@ -1,0 +1,24 @@
+﻿name: eventbus-simple-pubsub
+extensions:
+
+  # Configuration for dapr goes here.
+- name: dapr
+  log-level: debug
+  components-path: "dapr/components"
+
+# Services to run go here.
+services:
+  
+  # The name will be used as the app-id. For a .NET project, Tye only needs the path to the project file.
+- name: order
+  project: Sample.Consumer/Sample.Consumer.csproj
+  bindings:
+    - port: 5017
+- name: orderprocessing 
+  project: Sample.Producer/Sample.Producer.csproj
+
+  # Containers you want to run need an image name and set of ports to expose.
+#- name: redis
+#  image: redis
+#  bindings:
+#    - port: 6973
