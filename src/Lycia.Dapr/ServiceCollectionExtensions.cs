@@ -1,4 +1,8 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿using System.Reflection;
+using Lycia.Dapr.EventBus;
+using Lycia.Dapr.EventBus.Abstractions;
+using Lycia.Dapr.Messages.Abstractions;
+using Microsoft.Extensions.Configuration;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection
@@ -8,6 +12,21 @@ namespace Microsoft.Extensions.DependencyInjection
     /// </summary>
     public static class ServiceCollectionExtensions
     {
+        public static IServiceCollection AddDaprServiceBus(this IServiceCollection services, Assembly assembly)
+        {
+            var eventHandlerTypes = assembly.GetTypes()
+                .Where(type => type.IsClass && !type.IsAbstract && typeof(IEventHandler).IsAssignableFrom(type));
+
+            foreach (var eventHandlerType in eventHandlerTypes)
+            {
+                services.AddScoped(eventHandlerType);
+            }
+            
+            services.AddSingleton<IEventBus, DaprEventBus>();
+
+            return services;
+        }
+        
         /// <summary>
         /// Adds DaprEventBus services to the provided <see cref="T:IServiceCollection" />.
         /// </summary>

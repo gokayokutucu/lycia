@@ -1,3 +1,4 @@
+using System.Reflection;
 using Lycia.Dapr.EventBus;
 using Lycia.Dapr.EventBus.Abstractions;
 using Lycia.Dapr.Extensions;
@@ -11,8 +12,7 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-builder.Services.AddScoped<OrderCreatedEventHandler>();
-builder.Services.AddSingleton<IEventBus, DaprEventBus>();
+builder.Services.AddDaprServiceBus(typeof(OrderCreatedEventHandler).Assembly);
 
 //Add dapr
 builder.Services.AddDaprClient();
