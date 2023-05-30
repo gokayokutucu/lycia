@@ -30,7 +30,7 @@ app.MapSubscribeHandler();
 app.MapDaprEventBus(eventBus =>
 {
     // Subscribe with a handler
-    eventBus.Subscribe(typeof(OrderCreatedEventHandler).Assembly, "", "v1");
+    eventBus.Subscribe<OrderCreatedEventHandler>(typeof(OrderCreatedEventHandler).Assembly, "", "v1");
 });
 
 // Configure the HTTP request pipeline.

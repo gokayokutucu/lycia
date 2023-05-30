@@ -1,35 +1,38 @@
 ﻿using System.Reflection;
 using Lycia.Dapr.EventBus.Abstractions;
 using Lycia.Dapr.Messages.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Lycia.Dapr.EventBus;
 
 public class DaprEventBus : IEventBus
 {
-    public DaprEventBus()
+    private readonly IServiceScopeFactory _serviceScopeFactory;
+
+    public DaprEventBus(IServiceScopeFactory serviceScopeFactory)
     {
-        
+        _serviceScopeFactory = serviceScopeFactory;
     }
+
     ///<inheritdoc/>
     public Dictionary<string, IEventHandler> Topics { get; } = new();
 
-    public void Subscribe(Assembly assembly, string? prefix = null, string? suffix = null)
+    public void Subscribe<T>(Assembly assembly, string? prefix = null, string? suffix = null) where T : IEventHandler
     {
-        var eventHandlerTypes = assembly.GetTypes()
-            .Where(type => typeof(IEventHandler).IsAssignableFrom(type) && !type.IsInterface && !type.IsAbstract)
-            .ToList();
+        var eventHandlerType = typeof(T);
 
-        foreach (var eventHandlerType in eventHandlerTypes)
-        {
-            var eventTypes = GetEventTypes(eventHandlerType);
-            foreach (var eventType in eventTypes)
-            {
-                var eventName = GetEventName(eventType, prefix, suffix);
-                var eventHandler = CreateEventHandlerInstance(eventHandlerType);
+        var eventHandlerInterface = eventHandlerType.GetInterfaces()
+               .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEventHandler<>));
 
-                Topics.Add(eventName, eventHandler);
-            }
-        }
+        if (eventHandlerInterface is null)
+            throw new InvalidOperationException();
+
+        var eventType = eventHandlerInterface.GetGenericArguments()[0];
+
+        var eventName = GetEventName(eventType, prefix, suffix);
+        var eventHandler = CreateEventHandlerInstance<T>(eventHandlerType);
+
+        Topics.Add(eventName, eventHandler);
     }
 
     private List<Type> GetEventTypes(Type eventHandlerType)
@@ -57,22 +60,25 @@ public class DaprEventBus : IEventBus
         return eventName;
     }
 
-    private IEventHandler CreateEventHandlerInstance(Type eventHandlerType)
+    private IEventHandler CreateEventHandlerInstance<T>(Type eventHandlerType) where T : IEventHandler
     {
-        if (eventHandlerType.IsGenericType)
-        {
-            var eventType = eventHandlerType.GetInterfaces()
-                .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEventHandler<>))
-                ?.GetGenericArguments()[0];
+        using var scope = _serviceScopeFactory.CreateScope();
 
-            var handlerInstance = Activator.CreateInstance(eventHandlerType.MakeGenericType(eventType));
-            return (IEventHandler)handlerInstance;
-        }
-        else
-        {
-            var handlerInstance = Activator.CreateInstance(eventHandlerType);
-            return (IEventHandler)handlerInstance;
-        }
+        return scope.ServiceProvider.GetRequiredService<T>();
+
+        //if (eventHandlerType.IsGenericType)
+        //{
+        //    var eventType = eventHandlerType.GetInterfaces()
+        //        .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEventHandler<>))
+        //        ?.GetGenericArguments()[0];
+
+        //    var handlerInstance = Activator.CreateInstance(eventHandlerType.MakeGenericType(eventType));
+        //    return (IEventHandler)handlerInstance;
+        //}
+        //else
+        //{
+        //    var handlerInstance = Activator.CreateInstance(eventHandlerType);
+        //    return (IEventHandler)handlerInstance;
+        //}
     }
-
 }

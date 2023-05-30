@@ -7,8 +7,5 @@ public interface IEventBus
 {
     Dictionary<string, IEventHandler> Topics { get; }
 
-    void Subscribe(Assembly handler, string? prefix = null, string? suffix = null);
+    void Subscribe<T>(Assembly handler, string? prefix = null, string? suffix = null) where T : IEventHandler;
 }
-
-// Bir eventin birden fazla dinleyicisi olabilir
-// Bu yüzden List<EventHandler> olmalıdır
