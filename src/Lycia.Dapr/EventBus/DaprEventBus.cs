@@ -69,19 +69,15 @@ public class DaprEventBus : IEventBus
                 .FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEventHandler<>))
                 ?.GetGenericArguments()[0];
 
-            using (var scope = _serviceProvider.CreateScope())
-            {
-                var handlerInstance = scope.ServiceProvider.GetRequiredService(eventHandlerType.MakeGenericType(eventType));
-                return (IEventHandler)handlerInstance;
-            }
+            using var scope = _serviceProvider.CreateScope();
+            var handlerInstance = scope.ServiceProvider.GetRequiredService(eventHandlerType.MakeGenericType(eventType));
+            return (IEventHandler)handlerInstance;
         }
         else
         {
-            using (var scope = _serviceProvider.CreateScope())
-            {
-                var handlerInstance = scope.ServiceProvider.GetRequiredService(eventHandlerType);
-                return (IEventHandler)handlerInstance;
-            }
+            using var scope = _serviceProvider.CreateScope();
+            var handlerInstance = scope.ServiceProvider.GetRequiredService(eventHandlerType);
+            return (IEventHandler)handlerInstance;
         }
     }
 
