@@ -13,7 +13,7 @@ public class DaprEventBus : IEventBus
     {
         _serviceProvider = serviceProvider;
     }
-    
+
     ///<inheritdoc/>
     public Dictionary<string, IEventHandler> Topics { get; } = new();
 
@@ -70,6 +70,8 @@ public class DaprEventBus : IEventBus
                 ?.GetGenericArguments()[0];
 
             using var scope = _serviceProvider.CreateScope();
+            if (eventType == null) throw new ArgumentException("Invalid eventTypeHandler: eventType cannot be null");
+
             var handlerInstance = scope.ServiceProvider.GetRequiredService(eventHandlerType.MakeGenericType(eventType));
             return (IEventHandler)handlerInstance;
         }
@@ -80,6 +82,4 @@ public class DaprEventBus : IEventBus
             return (IEventHandler)handlerInstance;
         }
     }
-
-
 }

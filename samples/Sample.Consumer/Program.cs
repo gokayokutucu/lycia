@@ -11,7 +11,7 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-builder.Services.AddScoped<OrderCreatedEventHandler>();
+//builder.Services.AddScoped<OrderCreatedEventHandler>();
 builder.Services.AddSingleton<IEventBus, DaprEventBus>();
 
 //Add dapr
