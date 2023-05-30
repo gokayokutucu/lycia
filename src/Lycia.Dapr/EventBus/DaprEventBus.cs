@@ -1,4 +1,5 @@
-﻿using System.Reflection;
+﻿using System.Collections.Concurrent;
+using System.Reflection;
 using Lycia.Dapr.EventBus.Abstractions;
 using Lycia.Dapr.Messages.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,7 +16,7 @@ public class DaprEventBus : IEventBus
     }
 
     ///<inheritdoc/>
-    public Dictionary<string, IEventHandler> Topics { get; } = new();
+    public ConcurrentDictionary<string, IEventHandler> Topics { get; } = new();
 
     public void Subscribe(Assembly assembly, string? prefix = null, string? suffix = null)
     {
@@ -31,7 +32,7 @@ public class DaprEventBus : IEventBus
                 var eventName = GetEventName(eventType, prefix, suffix);
                 var eventHandler = CreateEventHandlerInstance(eventHandlerType);
 
-                Topics.Add(eventName, eventHandler);
+                Topics.TryAdd(eventName, eventHandler);
             }
         }
     }

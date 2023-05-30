@@ -14,9 +14,6 @@ builder.Services.AddSwaggerGen();
 
 builder.Services.AddDaprServiceBus(typeof(OrderCreatedEventHandler).Assembly);
 
-//Add dapr
-builder.Services.AddDaprClient();
-
 var app = builder.Build();
 
 // Dapr will send serialized event object vs. being raw CloudEvent

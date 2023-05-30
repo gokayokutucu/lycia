@@ -23,6 +23,7 @@ namespace Microsoft.Extensions.DependencyInjection
             }
             
             services.AddSingleton<IEventBus, DaprEventBus>();
+            services.AddDaprClient();
 
             return services;
         }
