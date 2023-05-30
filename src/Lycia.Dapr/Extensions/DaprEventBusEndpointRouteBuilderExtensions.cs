@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
+using System.IO;
 
 namespace Lycia.Dapr.Extensions;
 
@@ -31,6 +32,10 @@ public static class DaprEventBusEndpointRouteBuilderExtensions
         var eventBus = endpoints.ServiceProvider.GetRequiredService<IEventBus>();
         var daprClient = endpoints.ServiceProvider.GetRequiredService<DaprClient>();
 
+        // Configure event bus
+        logger?.LogInformation("Configuring event bus ...");
+        configure?.Invoke(eventBus);
+
         IEndpointConventionBuilder? builder = null;
         foreach (var topic in eventBus.Topics)
         {
@@ -46,32 +51,39 @@ public static class DaprEventBusEndpointRouteBuilderExtensions
         async Task HandleMessage(HttpContext context)
         {
             logger?.LogInformation("Request path: {RequestPath}", context.Request.Path);
-            // Get handlers
-            // var handlers = GetHandlers();
-            // if (handlers != null && handlers.Any()) return;
-            //
-            // // Get event
-            // var @event = await GetEventAsync(context, eventType, daprClient?.JsonSerializerOptions);
-            //
-            // // Process handlers
-            // var errorOccurred = false;
-            // foreach (var handler in handlers!)
-            // {
-            //     try
-            //     {
-            //         if (@event != null) await handler.Handle(@event);
-            //     }
-            //     catch (Exception e)
-            //     {
-            //         logger?.LogInformation("Handler threw exception: {Message}", e);
-            //         errorOccurred = true;
-            //     }
-            // }
-        }
-        
+            //   Get handlers
+            var handler = GetHandlersForRequest(context.Request.Path);
+            if (handler is null) return;
 
-        List<IEventHandler>? GetHandlers()
+            // Get event type
+            var eventType = GetEventType(handler);
+
+            // Get event
+            var @event = await GetEventAsync(context, eventType, daprClient?.JsonSerializerOptions);
+
+            // Process handlers
+            var errorOccurred = false;
+            //foreach (var handler in handlers!)
+            //{
+            try
+            {
+                if (@event != null) await handler.Handle(@event);
+            }
+            catch (Exception e)
+            {
+                logger?.LogInformation("Handler threw exception: {Message}", e);
+                errorOccurred = true;
+            }
+            //}
+        }
+
+        IEventHandler? GetHandlersForRequest(string path)
         {
+            var topic = path.Substring(path.IndexOf("/", StringComparison.Ordinal) + 1);
+            logger?.LogInformation("Topic for request: {Topic}", topic);
+
+            if (eventBus.Topics.TryGetValue(topic, out var handlers))
+                return handlers;
             return null;
         }
 
@@ -81,8 +93,8 @@ public static class DaprEventBusEndpointRouteBuilderExtensions
             if (eventType != null) return eventType;
             return null;
         }
-        
-        async Task<Event?> GetEventAsync(HttpContext context, 
+
+        async Task<Event?> GetEventAsync(HttpContext context,
             Type? eventType, JsonSerializerOptions? serializerOptions)
         {
             // Check content type
@@ -93,7 +105,7 @@ public static class DaprEventBusEndpointRouteBuilderExtensions
                     context.Request.ContentType);
                 return null;
             }
-                
+
             // Get event
             try
             {

@@ -17,7 +17,7 @@ while (true)
 
     CancellationToken cancellationToken = source.Token;
 
-    await client.PublishEventAsync(PUBSUB_NAME, "order", orderCreated, cancellationToken);
+    await client.PublishEventAsync(PUBSUB_NAME, "OrderCreated_v1", orderCreated, cancellationToken);
 
     Console.WriteLine("Order is created");
 
