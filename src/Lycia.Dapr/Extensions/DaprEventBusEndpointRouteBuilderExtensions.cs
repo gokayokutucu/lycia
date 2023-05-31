@@ -52,7 +52,7 @@ public static class DaprEventBusEndpointRouteBuilderExtensions
         {
             logger?.LogInformation("Request path: {RequestPath}", context.Request.Path);
             //   Get handlers
-            var handler = GetHandlersForRequest(context.Request.Path);
+            var handler = GetHandlersForRequest(context.Request.Path, context);
             if (handler is null) return;
 
             // Get event type
@@ -77,13 +77,16 @@ public static class DaprEventBusEndpointRouteBuilderExtensions
             //}
         }
 
-        IEventHandler? GetHandlersForRequest(string path)
+        IEventHandler? GetHandlersForRequest(string path, HttpContext httpContext)
         {
             var topic = path.Substring(path.IndexOf("/", StringComparison.Ordinal) + 1);
             logger?.LogInformation("Topic for request: {Topic}", topic);
 
             if (eventBus.Topics.TryGetValue(topic, out var handlers))
-                return handlers;
+            {
+                return (IEventHandler)httpContext.RequestServices.GetRequiredService(handlers.GetType());
+                //  return handlers;
+            }
             return null;
         }
 
