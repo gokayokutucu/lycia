@@ -44,14 +44,15 @@ public static class DaprEventBusEndpointRouteBuilderExtensions
                     .MapPost(topic.Key, HandleMessage)
                     .WithTopic("pubsub", topic.Key, new Dictionary<string, string>()
                     {
-                        {"event-type","order-created"}
+                        {"endpoint-name",topic.Key},
+                        {"event-handler-type",topic.Value.GetType().Name}
                     });
         }
 
         async Task HandleMessage(HttpContext context)
         {
             logger?.LogInformation("Request path: {RequestPath}", context.Request.Path);
-            //   Get handlers
+            //   Get handler
             var handler = GetHandlersForRequest(context.Request.Path, context);
             if (handler is null) return;
 
@@ -62,7 +63,6 @@ public static class DaprEventBusEndpointRouteBuilderExtensions
             var @event = await GetEventAsync(context, eventType, daprClient?.JsonSerializerOptions);
 
             // Process handlers
-            var errorOccurred = false;
             //foreach (var handler in handlers!)
             //{
             try
@@ -72,7 +72,6 @@ public static class DaprEventBusEndpointRouteBuilderExtensions
             catch (Exception e)
             {
                 logger?.LogInformation("Handler threw exception: {Message}", e);
-                errorOccurred = true;
             }
             //}
         }
@@ -82,19 +81,16 @@ public static class DaprEventBusEndpointRouteBuilderExtensions
             var topic = path.Substring(path.IndexOf("/", StringComparison.Ordinal) + 1);
             logger?.LogInformation("Topic for request: {Topic}", topic);
 
-            if (eventBus.Topics.TryGetValue(topic, out var handlers))
+            if (eventBus.Topics.TryGetValue(topic, out var handler))
             {
-                return (IEventHandler)httpContext.RequestServices.GetRequiredService(handlers.GetType());
-                //  return handlers;
+                return (IEventHandler)httpContext.RequestServices.GetRequiredService(handler.GetType());
             }
             return null;
         }
 
         Type? GetEventType(IEventHandler handler)
         {
-            var eventType = handler.GetType().BaseType?.GenericTypeArguments[0];
-            if (eventType != null) return eventType;
-            return null;
+            return handler.GetType().BaseType?.GenericTypeArguments[0];
         }
 
         async Task<Event?> GetEventAsync(HttpContext context,

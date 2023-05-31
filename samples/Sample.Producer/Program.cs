@@ -21,5 +21,5 @@ while (true)
 
     Console.WriteLine("Order is created");
 
-    System.Threading.Thread.Sleep(3000);
+    System.Threading.Thread.Sleep(15000);
 }
