@@ -7,5 +7,5 @@ public interface IEventBus
 {
     Dictionary<string, IEventHandler> Topics { get; }
 
-    void Subscribe<T>(Assembly handler, string? prefix = null, string? suffix = null) where T : IEventHandler;
+    void Subscribe<T>(string? prefix = null, string? suffix = null) where T : IEventHandler;
 }
