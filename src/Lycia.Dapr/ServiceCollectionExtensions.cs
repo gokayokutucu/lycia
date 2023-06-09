@@ -1,4 +1,9 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿using Amazon.Runtime;
+using Amazon.SQS;
+using Lycia.Dapr.EventBus;
+using Lycia.Dapr.EventBus.Abstractions;
+using Lycia.Dapr.EventBus.Sns;
+using Microsoft.Extensions.Configuration;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection
@@ -15,7 +20,9 @@ namespace Microsoft.Extensions.DependencyInjection
         /// <param name="configuration">The application's <see cref="IConfiguration"/>.</param>
         /// <param name="useSchemaRegistry">True to use schema registry</param>
         /// <returns>The original <see cref="T:IServiceCollection" />.</returns>
-        [Obsolete("This version of AddDaprEventBus is obsolete. Instead use the version that omits the useSchemaRegistry parameter.", true)]
+        [Obsolete(
+            "This version of AddDaprEventBus is obsolete. Instead use the version that omits the useSchemaRegistry parameter.",
+            true)]
         public static IServiceCollection AddDaprEventBus(this IServiceCollection services,
             IConfiguration configuration, bool useSchemaRegistry) =>
             AddDaprEventBus(services, configuration);
@@ -51,6 +58,20 @@ namespace Microsoft.Extensions.DependencyInjection
             //     };
             // }
             // return services.AddDaprEventBus(daprEventBusOptions.PubSubName, configureSchemaOptions);
+            return services;
+        }
+
+        public static IServiceCollection AddAmazonSqs(this IServiceCollection services, IConfiguration configuration)
+        {
+            //Nice To Have amazon sqs options configure here!!!!
+            
+            var opt = configuration.GetAWSOptions();
+            opt.Credentials =
+                new BasicAWSCredentials("AKIAZUSGO2V53OK4BPZV", "VWF0nzutbOH9jSzYBaCrxLrjdEOiKmUu6uZnxEzU");
+
+            services.AddDefaultAWSOptions(opt);
+            services.AddAWSService<IAmazonSQS>();
+
             return services;
         }
     }
