@@ -44,7 +44,7 @@ public class SagaDispatcher : ISagaDispatcher
         }
 
         var compensationHandlerType = typeof(ISagaCompensationHandler<>).MakeGenericType(messageType);
-        var compensationHandlers = serviceProvider.GetServices(compensationHandlerType);
+        var compensationHandlers = _serviceProvider.GetServices(compensationHandlerType);
         var enumerable = compensationHandlers.ToList();
         if (enumerable.Count != 0)
         {
