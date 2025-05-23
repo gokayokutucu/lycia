@@ -1,10 +1,4 @@
-using Microsoft.VisualStudio.TestTools.UnitTesting;
-using Moq;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Text.Json;
-using System.Threading.Tasks;
 using Lycia.Messaging;
 using Lycia.Saga;
 using Lycia.Saga.Abstractions;
@@ -18,12 +12,16 @@ namespace Lycia.Tests
     public class CompensatableTestMessage : IMessage
     {
         public Guid MessageId { get; set; } = Guid.NewGuid();
+        public DateTime Timestamp { get; }
+        public string ApplicationId { get; }
         public string Data { get; set; }
     }
 
     public class AnotherCompensatableTestMessage : IMessage
     {
         public Guid MessageId { get; set; } = Guid.NewGuid();
+        public DateTime Timestamp { get; }
+        public string ApplicationId { get; }
         public int Value { get; set; }
     }
 
