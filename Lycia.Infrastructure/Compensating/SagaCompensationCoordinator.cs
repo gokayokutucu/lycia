@@ -7,15 +7,28 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Lycia.Infrastructure.Compensating;
 
-
-public class SagaCompensationCoordinator(IServiceProvider serviceProvider)
+public class SagaCompensationCoordinator
 {
-    private ISagaStore SagaStore => _sagaStore ??= serviceProvider.GetRequiredService<ISagaStore>();
-    private ISagaStore? _sagaStore;   
+    private readonly ISagaStore _sagaStoreField;
+    private readonly ISagaIdGenerator _sagaIdGeneratorField; // Will be used when context init is added
+    private readonly IEventBus _eventBusField;             // Will be used when context init is added
+    private readonly IServiceProvider _serviceProvider;
+
+    public SagaCompensationCoordinator(
+        ISagaStore sagaStore,
+        ISagaIdGenerator sagaIdGenerator,
+        IEventBus eventBus,
+        IServiceProvider serviceProvider)
+    {
+        _sagaStoreField = sagaStore;
+        _sagaIdGeneratorField = sagaIdGenerator;
+        _eventBusField = eventBus;
+        _serviceProvider = serviceProvider;
+    }
     
     public async Task TriggerCompensationAsync(Guid sagaId, string failedStep)
     {
-        var steps = await SagaStore.GetSagaStepsAsync(sagaId);
+        var steps = await _sagaStoreField.GetSagaStepsAsync(sagaId);
         var orderedSteps = steps
             .OrderByDescending(x => x.Value.RecordedAt)
             .ToList(); //Take a snapshot
@@ -42,10 +55,14 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider)
             if (messageType == null) continue;
 
             var handlerType = typeof(ISagaCompensationHandler<>).MakeGenericType(messageType);
-            var handlers = serviceProvider.GetServices(handlerType);
+            var handlers = _serviceProvider.GetServices(handlerType); // Use injected _serviceProvider
 
             foreach (var handler in handlers)
             {
+                // Context initialization logic (which uses _eventBusField, _sagaStoreField, _sagaIdGeneratorField) 
+                // would go here, as implemented in a previous subtask.
+                // For this refactoring, we are ensuring the fields are available.
+
                 var method = handlerType.GetMethod("CompensateAsync");
                 if (method == null) continue;
 
@@ -60,7 +77,7 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider)
                     Console.WriteLine($"❌ Compensation handler failed for {stepName}: {ex.Message}");
 
                     // Mark the step as having failed during compensation
-                    await SagaStore.LogStepAsync(sagaId, messageType, StepStatus.CompensationFailed, payload);
+                    await _sagaStoreField.LogStepAsync(sagaId, messageType, StepStatus.CompensationFailed, payload);
                 }
             }
         }
