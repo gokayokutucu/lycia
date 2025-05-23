@@ -69,16 +69,78 @@ public class SagaContext<TMessage, TSagaData>(
     public new CoordinatedSagaStepFluent<TStep, TSagaData> PublishWithTracking<TStep>(TStep @event)
         where TStep : IEvent
     {
-        var task = Publish(@event);
-        var context = new SagaContext<TStep, TSagaData>(SagaId, Data, _eventBus, _sagaStore, _sagaIdGenerator);
+        var task = Publish(@event); // This calls the base SagaContext<TMessage>.Publish
+        var context = new StepSpecificSagaContextAdapter<TStep, TSagaData>(this.SagaId, this.Data, this._eventBus, this._sagaStore, this._sagaIdGenerator);
         return new CoordinatedSagaStepFluent<TStep, TSagaData>(context, task);
     }
 
     public new CoordinatedSagaStepFluent<TStep, TSagaData> SendWithTracking<TStep>(TStep command)
         where TStep : ICommand
     {
-        var task = Send(command);
-        var context = new SagaContext<TStep, TSagaData>(SagaId, Data, _eventBus, _sagaStore, _sagaIdGenerator);
+        var task = Send(command); // This calls the base SagaContext<TMessage>.Send
+        var context = new StepSpecificSagaContextAdapter<TStep, TSagaData>(this.SagaId, this.Data, this._eventBus, this._sagaStore, this._sagaIdGenerator);
         return new CoordinatedSagaStepFluent<TStep, TSagaData>(context, task);
+    }
+}
+
+// Private adapter class
+internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter> : ISagaContext<TStepAdapter, TSagaDataAdapter>
+    where TStepAdapter : IMessage
+    where TSagaDataAdapter : SagaData
+{
+    private readonly Guid _sagaId;
+    private readonly TSagaDataAdapter _data;
+    private readonly IEventBus _eventBus;
+    private readonly ISagaStore _sagaStore;
+    private readonly ISagaIdGenerator _sagaIdGenerator;
+
+    public StepSpecificSagaContextAdapter(Guid sagaId, TSagaDataAdapter data, IEventBus eventBus, ISagaStore sagaStore, ISagaIdGenerator sagaIdGenerator)
+    {
+        _sagaId = sagaId;
+        _data = data;
+        _eventBus = eventBus;
+        _sagaStore = sagaStore;
+        _sagaIdGenerator = sagaIdGenerator;
+    }
+
+    public Guid SagaId => _sagaId;
+    public TSagaDataAdapter Data => _data;
+
+    public Task Send<T>(T command) where T : ICommand => _eventBus.Send(command, _sagaId);
+    public Task Publish<T>(T @event) where T : IEvent => _eventBus.Publish(@event, _sagaId);
+    public Task Compensate<T>(T @event) where T : FailedEventBase => _eventBus.Publish(@event, _sagaId);
+
+    public Task MarkAsComplete<TMarkStep>() where TMarkStep : IMessage => _sagaStore.LogStepAsync(_sagaId, typeof(TMarkStep), StepStatus.Completed);
+    public Task MarkAsFailed<TMarkStep>() where TMarkStep : IMessage => _sagaStore.LogStepAsync(_sagaId, typeof(TMarkStep), StepStatus.Failed);
+    public Task MarkAsCompensated<TMarkStep>() where TMarkStep : IMessage => _sagaStore.LogStepAsync(_sagaId, typeof(TMarkStep), StepStatus.Compensated);
+    public Task MarkAsCompensationFailed<TMarkStep>() where TMarkStep : IMessage => _sagaStore.LogStepAsync(_sagaId, typeof(TMarkStep), StepStatus.CompensationFailed);
+    public Task<bool> IsAlreadyCompleted<TMarkStep>() where TMarkStep : IMessage => _sagaStore.IsStepCompletedAsync(_sagaId, typeof(TMarkStep));
+
+    // Fluent Tracking Methods for ISagaContext<TStepAdapter> (base interface part)
+    ReactiveSagaStepFluent<TReactiveStep, TStepAdapter> ISagaContext<TStepAdapter>.PublishWithTracking<TReactiveStep>(TReactiveStep @event)
+    {
+        var task = Publish(@event);
+        return new ReactiveSagaStepFluent<TReactiveStep, TStepAdapter>(this, task);
+    }
+
+    ReactiveSagaStepFluent<TReactiveStep, TStepAdapter> ISagaContext<TStepAdapter>.SendWithTracking<TReactiveStep>(TReactiveStep command)
+    {
+        var task = Send(command);
+        return new ReactiveSagaStepFluent<TReactiveStep, TStepAdapter>(this, task);
+    }
+
+    // Fluent Tracking Methods for ISagaContext<TStepAdapter, TSagaDataAdapter> (the 'new' methods)
+    public CoordinatedSagaStepFluent<TCoordStep, TSagaDataAdapter> PublishWithTracking<TCoordStep>(TCoordStep @event) where TCoordStep : IEvent
+    {
+        var task = Publish(@event);
+        var stepContextForCoordFluent = new StepSpecificSagaContextAdapter<TCoordStep, TSagaDataAdapter>(_sagaId, _data, _eventBus, _sagaStore, _sagaIdGenerator);
+        return new CoordinatedSagaStepFluent<TCoordStep, TSagaDataAdapter>(stepContextForCoordFluent, task);
+    }
+
+    public CoordinatedSagaStepFluent<TCoordStep, TSagaDataAdapter> SendWithTracking<TCoordStep>(TCoordStep command) where TCoordStep : ICommand
+    {
+        var task = Send(command);
+        var stepContextForCoordFluent = new StepSpecificSagaContextAdapter<TCoordStep, TSagaDataAdapter>(_sagaId, _data, _eventBus, _sagaStore, _sagaIdGenerator);
+        return new CoordinatedSagaStepFluent<TCoordStep, TSagaDataAdapter>(stepContextForCoordFluent, task);
     }
 }
