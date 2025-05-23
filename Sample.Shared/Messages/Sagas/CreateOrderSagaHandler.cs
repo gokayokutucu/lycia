@@ -1,0 +1,45 @@
+using Lycia.Messaging;
+using Lycia.Saga.Abstractions;
+using Lycia.Saga.Handlers;
+using Sample.Shared.Messages.Commands;
+using Sample.Shared.Messages.Events;
+
+namespace Sample.Shared.Messages.Sagas;
+
+/// <summary>
+/// Handles the start of the order process in a reactive saga flow and emits an OrderCreatedEvent.
+/// </summary>
+public class CreateOrderSagaHandler :
+    ReactiveSagaHandler<CreateOrderCommand>,
+    ISagaCompensationHandler<OrderShippingFailedEvent>
+{
+    public override async Task HandleStartAsync(CreateOrderCommand command)
+    {
+        // Publish the success response event
+        await Context
+            .PublishWithTracking(new OrderCreatedEvent
+            {
+                OrderId = command.OrderId,
+                UserId = command.UserId,
+                TotalPrice = command.TotalPrice
+            }).ThenMarkAsComplete();
+    }
+
+    public async Task CompensateAsync(OrderShippingFailedEvent @event)
+    {
+        try
+        {
+            // Compensation logic
+            await Context.MarkAsCompensated<CreateOrderCommand>();
+        }
+        catch (Exception ex)
+        {
+            // Log, notify, halt chain, etc.
+            Console.WriteLine($"❌ Compensation failed: {ex.Message}");
+            
+            await Context.MarkAsCompensationFailed<CreateOrderCommand>();
+            // Optionally: rethrow or store for manual retry
+            throw; // Or suppress and log for retry system
+        }
+    }
+}
