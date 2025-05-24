@@ -35,7 +35,7 @@ public class SagaDispatcher : ISagaDispatcher
         var messageType = message.GetType();
 
         var startHandlerType = typeof(ISagaStartHandler<>).MakeGenericType(messageType);
-        var startHandlers = _serviceProvider.GetServices(startHandlerType);
+        var startHandlers = _serviceProvider.GetServices(startHandlerType); // Use injected
         if (startHandlers.Any())
         {
             Console.WriteLine($"[Dispatch] Dispatching {messageType.Name} to start handler: {startHandlerType.Name}");
@@ -44,7 +44,7 @@ public class SagaDispatcher : ISagaDispatcher
         }
 
         var compensationHandlerType = typeof(ISagaCompensationHandler<>).MakeGenericType(messageType);
-        var compensationHandlers = _serviceProvider.GetServices(compensationHandlerType);
+        var compensationHandlers = _serviceProvider.GetServices(compensationHandlerType); // Fixed: Use _serviceProvider
         var enumerable = compensationHandlers.ToList();
         if (enumerable.Count != 0)
         {
@@ -114,7 +114,7 @@ public class SagaDispatcher : ISagaDispatcher
     {
         Console.WriteLine(
             $"[InvokeHandlerAsync] Resolving handler type: {handlerType.Name} for message type: {messageParameterType.Name}");
-        var handlers = _serviceProvider.GetServices(handlerType);
+        var handlers = _serviceProvider.GetServices(handlerType); // Use injected
         var isSingleHandler = IsSingleHandlerExpected(handlerType);
 
         foreach (var handler in handlers)
@@ -147,18 +147,21 @@ public class SagaDispatcher : ISagaDispatcher
                     sagaIdProperty != null && sagaIdProperty.GetValue(message) is Guid value && value != Guid.Empty
                         ? value
                         : isStartHandler
-                            ? _sagaIdGeneratorField.Generate()
+                            ? _sagaIdGeneratorField.Generate() // Use injected
                             : throw new InvalidOperationException("Missing SagaId on a non-starting message.");
 
                 // ISagaHandlerWithContext<TInitialMessage, TSagaData>
+                var contextMessageType = coordinatedHandlerInterface.GetGenericArguments()[0];
                 var sagaDataType = coordinatedHandlerInterface.GetGenericArguments()[1];
-                var loadMethod = typeof(ISagaStore)
-                    .GetMethod("LoadContextAsync")!
-                    .MakeGenericMethod(sagaDataType);
-                var task = (Task)loadMethod.Invoke(_sagaStoreField, [sagaId])!;
-                await task.ConfigureAwait(false);
-                var resultProperty = task.GetType().GetProperty("Result");
-                var context = resultProperty!.GetValue(task)!;
+                
+                var loadDataMethod = typeof(ISagaStore).GetMethod("LoadContextAsync")!.MakeGenericMethod(sagaDataType);
+                var loadTask = (Task)loadDataMethod.Invoke(_sagaStoreField, [sagaId])!; // Use injected
+                await loadTask.ConfigureAwait(false);
+                var resultProperty = loadTask.GetType().GetProperty("Result");
+                var loadedSagaData = resultProperty!.GetValue(loadTask)!; // Fixed: use loadTask
+                // Create the actual SagaContext for ISagaHandlerWithContext<TMessage, TSagaData>
+                var sagaContextType = typeof(SagaContext<,>).MakeGenericType(contextMessageType, sagaDataType);
+                var context = Activator.CreateInstance(sagaContextType, sagaId, loadedSagaData, _eventBusField, _sagaStoreField, _sagaIdGeneratorField);
                 var initializeMethod = coordinatedHandlerInterface.GetMethod("Initialize");
                 initializeMethod?.Invoke(handler, [context]);
             }
@@ -173,20 +176,16 @@ public class SagaDispatcher : ISagaDispatcher
                     sagaIdProperty != null && sagaIdProperty.GetValue(message) is Guid value && value != Guid.Empty
                         ? value
                         : isStartHandler
-                            ? _sagaIdGeneratorField.Generate()
+                            ? _sagaIdGeneratorField.Generate() // Use injected
                             : throw new InvalidOperationException("Missing SagaId on a non-starting message.");
 
-                var context = new SagaContext<IMessage>(sagaId, _eventBusField, _sagaStoreField, _sagaIdGeneratorField); // Assuming reactive context is TMessage not IMessage
-                // The above line is for reactive, not genericless. Let's correct it based on the original structure:
-                // For reactiveHandlerInterface:
-                // var context = new SagaContext(sagaId, _eventBusField, _sagaStoreField, _sagaIdGeneratorField); // This was the original error, no non-generic SagaContext
-                // It should be:
                 var reactiveContextMessageType = reactiveHandlerInterface.GetGenericArguments()[0];
-                var reactiveContextType = typeof(SagaContext<>).MakeGenericType(reactiveContextMessageType);
-                var contextForReactive = Activator.CreateInstance(reactiveContextType, sagaId, _eventBusField, _sagaStoreField, _sagaIdGeneratorField);
+                var contextType = typeof(SagaContext<>).MakeGenericType(reactiveContextMessageType);
+                // Constructor: SagaContext(Guid sagaId, IEventBus eventBus, ISagaStore sagaStore, ISagaIdGenerator sagaIdGenerator)
+                var context = Activator.CreateInstance(contextType, sagaId, _eventBusField, _sagaStoreField, _sagaIdGeneratorField); // Use injected
 
                 var initializeMethod = reactiveHandlerInterface.GetMethod("Initialize");
-                initializeMethod?.Invoke(handler, [contextForReactive]);
+                initializeMethod?.Invoke(handler, [context]);
             }
 
             // Backward compatibility: genericless
@@ -200,13 +199,11 @@ public class SagaDispatcher : ISagaDispatcher
                     sagaIdProperty != null && sagaIdProperty.GetValue(message) is Guid val && val != Guid.Empty
                         ? val
                         : isStartHandler
-                            ? _sagaIdGeneratorField.Generate()
+                            ? _sagaIdGeneratorField.Generate() // Use injected
                             : throw new InvalidOperationException("Missing SagaId on a non-starting message.");
-                
-                // Ensure correct SagaContext<IMessage> is used.
-                var context = new SagaContext<IMessage>(sagaId, _eventBusField, _sagaStoreField, _sagaIdGeneratorField);
+
+                var context = new SagaContext<IMessage>(sagaId, _eventBusField, _sagaStoreField, _sagaIdGeneratorField); // Use injected
                 genericLess.Initialize(context);
-                Console.WriteLine($"[InvokeHandlerAsync] Initialized genericless context (SagaContext<IMessage>) for {genericLess.GetType().Name} with SagaId {sagaId}");
             }
 
             MethodInfo? method;
@@ -277,7 +274,7 @@ public class SagaDispatcher : ISagaDispatcher
                 await (Task)method.Invoke(handler, parameters)!;
                 // After method.Invoke(...)
                 var stepTypeToCheck = stepType ?? messageParameterType;
-                var alreadyMarked = await _sagaStoreField.IsStepCompletedAsync(sagaId, stepTypeToCheck);
+                var alreadyMarked = await _sagaStoreField.IsStepCompletedAsync(sagaId, stepTypeToCheck); // Use injected
                 if (!alreadyMarked)
                 {
                     Console.WriteLine($"Step for {stepTypeToCheck.Name} was not marked as completed, failed, or compensated.");
