@@ -4,14 +4,15 @@ using Lycia.Saga.Abstractions;
 using Lycia.Saga.Enums;
 using Lycia.Saga.Extensions;
 using Microsoft.Extensions.DependencyInjection;
+using Lycia.Saga; // Added for SagaContext<>
 
 namespace Lycia.Infrastructure.Compensating;
 
 public class SagaCompensationCoordinator
 {
     private readonly ISagaStore _sagaStoreField;
-    private readonly ISagaIdGenerator _sagaIdGeneratorField; // Will be used when context init is added
-    private readonly IEventBus _eventBusField;             // Will be used when context init is added
+    private readonly ISagaIdGenerator _sagaIdGeneratorField;
+    private readonly IEventBus _eventBusField;
     private readonly IServiceProvider _serviceProvider;
 
     public SagaCompensationCoordinator(
@@ -28,7 +29,7 @@ public class SagaCompensationCoordinator
     
     public async Task TriggerCompensationAsync(Guid sagaId, string failedStep)
     {
-        var steps = await _sagaStoreField.GetSagaStepsAsync(sagaId);
+        var steps = await _sagaStoreField.GetSagaStepsAsync(sagaId); // Use injected
         var orderedSteps = steps
             .OrderByDescending(x => x.Value.RecordedAt)
             .ToList(); //Take a snapshot
@@ -55,29 +56,53 @@ public class SagaCompensationCoordinator
             if (messageType == null) continue;
 
             var handlerType = typeof(ISagaCompensationHandler<>).MakeGenericType(messageType);
-            var handlers = _serviceProvider.GetServices(handlerType); // Use injected _serviceProvider
+            var handlers = _serviceProvider.GetServices(handlerType); // Use injected
 
             foreach (var handler in handlers)
             {
-                // Context initialization logic (which uses _eventBusField, _sagaStoreField, _sagaIdGeneratorField) 
-                // would go here, as implemented in a previous subtask.
-                // For this refactoring, we are ensuring the fields are available.
-
-                var method = handlerType.GetMethod("CompensateAsync");
-                if (method == null) continue;
+                if (handler == null) continue;
 
                 var payload = JsonSerializer.Deserialize(stepMetadata.MessagePayload, messageType);
+                if (payload == null) 
+                {
+                    Console.WriteLine($"[Compensation] Error: Failed to deserialize payload for step {stepName}, message type {messageType.Name}.");
+                    continue;
+                }
 
                 try
                 {
-                    await (Task)method.Invoke(handler, [payload])!;
+                    // Context Initialization for ISagaCompensationHandler
+                    var contextGenericType = typeof(SagaContext<>).MakeGenericType(messageType);
+                    var contextConstructor = contextGenericType.GetConstructor(new[] { typeof(Guid), typeof(IEventBus), typeof(ISagaStore), typeof(ISagaIdGenerator) });
+                    
+                    if (contextConstructor != null)
+                    {
+                        var context = contextConstructor.Invoke(new object[] { sagaId, _eventBusField, _sagaStoreField, _sagaIdGeneratorField });
+                        var initializeMethodInfo = handler.GetType().GetMethod("Initialize", new[] { typeof(ISagaContext<>).MakeGenericType(messageType) });
+                        initializeMethodInfo?.Invoke(handler, new object[] { context });
+                        Console.WriteLine($"[Compensation] Initialized ISagaContext for handler {handler.GetType().Name} with SagaId {sagaId}");
+                    }
+                    else
+                    {
+                         Console.WriteLine($"[Compensation] Error: Could not find suitable constructor for SagaContext<{messageType.Name}> for handler {handler.GetType().Name}.");
+                    }
+
+                    // Invoke CompensateAsync
+                    var compensateMethod = handlerType.GetMethod("CompensateAsync");
+                    if (compensateMethod == null) 
+                    {
+                        Console.WriteLine($"[Compensation] Error: CompensateAsync method not found on handler {handler.GetType().Name}.");
+                        continue;
+                    }
+                    
+                    await (Task)compensateMethod.Invoke(handler, new object[] { payload })!;
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"❌ Compensation handler failed for {stepName}: {ex.Message}");
 
                     // Mark the step as having failed during compensation
-                    await _sagaStoreField.LogStepAsync(sagaId, messageType, StepStatus.CompensationFailed, payload);
+                    await _sagaStoreField.LogStepAsync(sagaId, messageType, StepStatus.CompensationFailed, payload); // Use injected
                 }
             }
         }

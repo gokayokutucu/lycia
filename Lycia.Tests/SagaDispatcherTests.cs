@@ -1,4 +1,4 @@
-using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Xunit; // Changed
 using Moq;
 using System;
 using System.Collections.Generic;
@@ -13,96 +13,111 @@ using Lycia.Saga.Extensions;
 
 namespace Lycia.Tests
 {
-    // --- Test Stub Classes for Messages ---
-    public class DispatcherTestMessage : IMessage { public Guid MessageId { get; set; } = Guid.NewGuid(); public Guid SagaId { get; set; } }
-    public class DispatcherTestStartCommand : DispatcherTestMessage, ICommand { }
-    public class DispatcherTestEventMessage : DispatcherTestMessage, IEvent { }
-    public class DispatcherTestCompensatableEvent : DispatcherTestEventMessage { }
+    // --- Test Stub Classes for Messages (prefixed to avoid collisions) ---
+    public class Dispatcher_TestMessage : IMessage 
+    { 
+        public Guid MessageId { get; set; } = Guid.NewGuid(); 
+        public Guid SagaId { get; set; }
+        public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+        public string ApplicationId { get; set; } = "DispatcherTestsApp";
+    }
+    public class Dispatcher_TestStartCommand : Dispatcher_TestMessage, ICommand { }
+    public class Dispatcher_TestEventMessage : Dispatcher_TestMessage, IEvent { }
+    public class Dispatcher_TestCompensatableEvent : Dispatcher_TestEventMessage { }
 
+    // Renamed Dispatcher_TestPreviousCommand to Dispatcher_TestOriginalCommand for consistency
+    public class Dispatcher_TestOriginalCommand : Dispatcher_TestMessage, ICommand { }
 
-    public class DispatcherTestOriginalCommand : DispatcherTestMessage, ICommand { }
-    public class DispatcherTestResponseMessage : DispatcherTestMessage, IResponse<DispatcherTestOriginalCommand> { public DispatcherTestOriginalCommand OriginalMessage { get; set; } }
-    public class DispatcherTestSuccessResponseMessage : DispatcherTestResponseMessage, ISuccessResponse<DispatcherTestOriginalCommand> { }
-    public class DispatcherTestFailResponseMessage : DispatcherTestResponseMessage, IFailResponse<DispatcherTestOriginalCommand> { }
-    public class DispatcherTestResponseEventMessage : DispatcherTestEventMessage, IResponse<DispatcherTestOriginalCommand> { public DispatcherTestOriginalCommand OriginalMessage { get; set; } }
+    // Simplified and corrected response stubs
+    public class Dispatcher_TestResponseMessage : Dispatcher_TestMessage, IResponse<Dispatcher_TestOriginalCommand> 
+    { 
+        public Dispatcher_TestOriginalCommand OriginalMessage { get; set; }
+        public Guid CorrelationId { get; set; } = Guid.NewGuid();
+    }
 
+    public class Dispatcher_TestSuccessResponseMessage : Dispatcher_TestResponseMessage, ISuccessResponse<Dispatcher_TestOriginalCommand> { }
+    
+    public class Dispatcher_TestFailResponseMessage : Dispatcher_TestResponseMessage, IFailResponse<Dispatcher_TestOriginalCommand> { }
+    
+    public class Dispatcher_TestResponseEventMessage : Dispatcher_TestEventMessage, IResponse<Dispatcher_TestOriginalCommand> 
+    { 
+        public Dispatcher_TestOriginalCommand OriginalMessage { get; set; }
+        public Guid CorrelationId { get; set; } = Guid.NewGuid(); 
+    }
 
-    public class DispatcherTestSagaData : SagaData { public string DataValue { get; set; } }
+    public class Dispatcher_TestSagaData : SagaData { public string DataValue { get; set; } }
 
-    // --- Mock Handler Implementations ---
-    // ISagaStartHandler<TMsg>, ISagaHandlerWithContext<TMsg, TSagaData>
-    public class MockCoordinatedStartHandler : ISagaStartHandler<DispatcherTestStartCommand>, ISagaHandlerWithContext<DispatcherTestStartCommand, DispatcherTestSagaData>
+    // --- Mock Handler Implementations (prefixed) ---
+    public class Dispatcher_MockCoordinatedStartHandler : ISagaStartHandler<Dispatcher_TestStartCommand>, ISagaHandlerWithContext<Dispatcher_TestStartCommand, Dispatcher_TestSagaData>
     {
         public bool InitializeCalled { get; private set; }
         public bool HandleStartAsyncCalled { get; private set; }
-        public DispatcherTestStartCommand ReceivedMessage { get; private set; }
-        public ISagaContext<DispatcherTestStartCommand, DispatcherTestSagaData> Context { get; private set; }
+        public Dispatcher_TestStartCommand ReceivedMessage { get; private set; }
+        public ISagaContext<Dispatcher_TestStartCommand, Dispatcher_TestSagaData> Context { get; private set; }
 
-        public void Initialize(ISagaContext<DispatcherTestStartCommand, DispatcherTestSagaData> context) { InitializeCalled = true; Context = context; }
-        public Task HandleStartAsync(DispatcherTestStartCommand message) { HandleStartAsyncCalled = true; ReceivedMessage = message; return Task.CompletedTask; }
+        public void Initialize(ISagaContext<Dispatcher_TestStartCommand, Dispatcher_TestSagaData> context) { InitializeCalled = true; Context = context; }
+        public Task HandleStartAsync(Dispatcher_TestStartCommand message) { HandleStartAsyncCalled = true; ReceivedMessage = message; if (Context == null && InitializeCalled == false) throw new InvalidOperationException("Context not initialized"); return Task.CompletedTask; }
     }
     
-    // ISagaStartHandler<TMsg>, ISagaHandlerWithContext<TMsg>
-    public class MockReactiveStartHandler : ISagaStartHandler<DispatcherTestStartCommand>, ISagaHandlerWithContext<DispatcherTestStartCommand>
+    public class Dispatcher_MockReactiveStartHandler : ISagaStartHandler<Dispatcher_TestStartCommand>, ISagaHandlerWithContext<Dispatcher_TestStartCommand>
     {
         public bool InitializeCalled { get; private set; }
         public bool HandleStartAsyncCalled { get; private set; }
-        public DispatcherTestStartCommand ReceivedMessage { get; private set; }
-        public ISagaContext<DispatcherTestStartCommand> Context { get; private set; }
+        public Dispatcher_TestStartCommand ReceivedMessage { get; private set; }
+        public ISagaContext<Dispatcher_TestStartCommand> Context { get; private set; }
 
-        public void Initialize(ISagaContext<DispatcherTestStartCommand> context) { InitializeCalled = true; Context = context; }
-        public Task HandleStartAsync(DispatcherTestStartCommand message) { HandleStartAsyncCalled = true; ReceivedMessage = message; return Task.CompletedTask; }
+        public void Initialize(ISagaContext<Dispatcher_TestStartCommand> context) { InitializeCalled = true; Context = context; }
+        public Task HandleStartAsync(Dispatcher_TestStartCommand message) { HandleStartAsyncCalled = true; ReceivedMessage = message; if (Context == null && InitializeCalled == false) throw new InvalidOperationException("Context not initialized"); return Task.CompletedTask; }
     }
 
-    // ISagaStartHandler<TMsg>, ISagaHandlerWithContext<IMessage>
-    public class MockGenericlessContextHandler : ISagaStartHandler<DispatcherTestStartCommand>, ISagaHandlerWithContext<IMessage>
+    public class Dispatcher_MockGenericlessContextHandler : ISagaStartHandler<Dispatcher_TestStartCommand>, ISagaHandlerWithContext<IMessage>
     {
         public bool InitializeCalled { get; private set; }
         public bool HandleStartAsyncCalled { get; private set; }
         public IMessage ReceivedMessage { get; private set; }
         public ISagaContext<IMessage> Context { get; private set; }
         public void Initialize(ISagaContext<IMessage> context) { InitializeCalled = true; Context = context; }
-        public Task HandleStartAsync(DispatcherTestStartCommand message) { HandleStartAsyncCalled = true; ReceivedMessage = message; return Task.CompletedTask; }
+        public Task HandleStartAsync(Dispatcher_TestStartCommand message) { HandleStartAsyncCalled = true; ReceivedMessage = message; if (Context == null && InitializeCalled == false) throw new InvalidOperationException("Context not initialized"); return Task.CompletedTask; }
     }
     
-    // ISuccessResponseHandler<TResp>, ISagaHandlerWithContext<TResp>
-    public class MockSuccessResponseHandler : ISuccessResponseHandler<DispatcherTestSuccessResponseMessage>, ISagaHandlerWithContext<DispatcherTestSuccessResponseMessage> 
+    public class Dispatcher_MockSuccessResponseHandler : ISuccessResponseHandler<Dispatcher_TestSuccessResponseMessage>, ISagaHandlerWithContext<Dispatcher_TestSuccessResponseMessage> 
     {
         public bool InitializeCalled { get; private set; }
         public bool HandleSuccessResponseAsyncCalled { get; private set; }
-        public ISagaContext<DispatcherTestSuccessResponseMessage> Context { get; private set; }
-        public void Initialize(ISagaContext<DispatcherTestSuccessResponseMessage> context) { InitializeCalled = true; Context = context; }
-        public Task HandleSuccessResponseAsync(DispatcherTestSuccessResponseMessage message) { HandleSuccessResponseAsyncCalled = true; return Task.CompletedTask; }
+        public ISagaContext<Dispatcher_TestSuccessResponseMessage> Context { get; private set; }
+        public void Initialize(ISagaContext<Dispatcher_TestSuccessResponseMessage> context) { InitializeCalled = true; Context = context; }
+        public Task HandleSuccessResponseAsync(Dispatcher_TestSuccessResponseMessage message) { HandleSuccessResponseAsyncCalled = true; if (Context == null && InitializeCalled == false) throw new InvalidOperationException("Context not initialized"); return Task.CompletedTask; }
     }
 
-    // IFailResponseHandler<TResp>, ISagaHandlerWithContext<TResp>
-    public class MockFailResponseHandler : IFailResponseHandler<DispatcherTestFailResponseMessage>, ISagaHandlerWithContext<DispatcherTestFailResponseMessage> 
+    public class Dispatcher_MockFailResponseHandler : IFailResponseHandler<Dispatcher_TestFailResponseMessage>, ISagaHandlerWithContext<Dispatcher_TestFailResponseMessage> 
     {
         public bool InitializeCalled { get; private set; }
         public bool HandleFailResponseAsyncCalled { get; private set; }
-        public ISagaContext<DispatcherTestFailResponseMessage> Context { get; private set; }
-        public void Initialize(ISagaContext<DispatcherTestFailResponseMessage> context) { InitializeCalled = true; Context = context; }
-        public Task HandleFailResponseAsync(DispatcherTestFailResponseMessage message, FailResponse fail) { HandleFailResponseAsyncCalled = true; return Task.CompletedTask; }
+        public ISagaContext<Dispatcher_TestFailResponseMessage> Context { get; private set; }
+        public void Initialize(ISagaContext<Dispatcher_TestFailResponseMessage> context) { InitializeCalled = true; Context = context; }
+        public Task HandleFailResponseAsync(Dispatcher_TestFailResponseMessage message, FailResponse fail) { HandleFailResponseAsyncCalled = true; if (Context == null && InitializeCalled == false) throw new InvalidOperationException("Context not initialized"); return Task.CompletedTask; }
     }
 
-    // ISagaCompensationHandler<TMsg>
-    public class MockCompensationHandler : ISagaCompensationHandler<DispatcherTestCompensatableEvent>
+    public class Dispatcher_MockCompensationHandler : ISagaCompensationHandler<Dispatcher_TestCompensatableEvent>
     {
-        public bool InitializeCalled { get; private set; } // Initialize was added to ISagaCompensationHandler
+        public bool InitializeCalled { get; private set; }
         public bool CompensateAsyncCalled { get; private set; }
-        public ISagaContext<DispatcherTestCompensatableEvent> Context { get; private set; }
-        public void Initialize(ISagaContext<DispatcherTestCompensatableEvent> context) { InitializeCalled = true; Context = context; }
-        public Task CompensateAsync(DispatcherTestCompensatableEvent message) { CompensateAsyncCalled = true; return Task.CompletedTask; }
+        public ISagaContext<Dispatcher_TestCompensatableEvent> Context { get; private set; }
+        public void Initialize(ISagaContext<Dispatcher_TestCompensatableEvent> context) { InitializeCalled = true; Context = context; }
+        public Task CompensateAsync(Dispatcher_TestCompensatableEvent message) { CompensateAsyncCalled = true; if (Context == null && InitializeCalled == false) throw new InvalidOperationException("Context not initialized for compensation handler."); return Task.CompletedTask; }
     }
     
-    // Handler for testing HandleAsync fallback
-    public class FallbackTestHandler : IMessageHandler // A generic interface not tied to specific InvokeHandlerAsync logic
+    // Using a more specific interface that SagaDispatcher might resolve for a fallback test.
+    // E.g. if a message is dispatched that has no ISagaStartHandler but has this.
+    public interface Dispatcher_Tests_IGenericEventHandler<in TEvent> : Dispatcher_Tests_IMessageHandler where TEvent : IEvent { } // Corrected base interface
+
+    public class Dispatcher_FallbackTestHandler : Dispatcher_Tests_IGenericEventHandler<Dispatcher_TestEventMessage>
     {
         public bool HandleAsyncSpecificCalled { get; private set; }
         public bool HandleAsyncIMessageCalled { get; private set; }
         public IMessage ReceivedMessage { get; private set; }
 
-        public Task HandleAsync(DispatcherTestEventMessage message) 
+        public Task HandleAsync(Dispatcher_TestEventMessage message) 
         {
             HandleAsyncSpecificCalled = true;
             ReceivedMessage = message;
@@ -116,22 +131,21 @@ namespace Lycia.Tests
             return Task.CompletedTask;
         }
     }
-    public interface IMessageHandler { /* Marker for testing fallback */ }
+    public interface Dispatcher_Tests_IMessageHandler { /* Marker for testing fallback */ }
 
-
-    [TestClass]
+    // [TestClass] removed
     public class SagaDispatcherTests
     {
-        private Mock<ISagaStore> _mockSagaStore;
-        private Mock<ISagaIdGenerator> _mockSagaIdGenerator;
-        private Mock<IEventBus> _mockEventBus;
-        private Mock<IServiceProvider> _mockServiceProvider;
-        private SagaDispatcher _dispatcher;
-        private Guid _generatedSagaId;
-        private Guid _providedSagaId;
+        private readonly Mock<ISagaStore> _mockSagaStore;
+        private readonly Mock<ISagaIdGenerator> _mockSagaIdGenerator;
+        private readonly Mock<IEventBus> _mockEventBus;
+        private readonly Mock<IServiceProvider> _mockServiceProvider;
+        private readonly SagaDispatcher _dispatcher;
+        private readonly Guid _generatedSagaId;
+        private readonly Guid _providedSagaId;
 
-        [TestInitialize]
-        public void Setup()
+        // Constructor for xUnit setup (formerly [TestInitialize])
+        public SagaDispatcherTests()
         {
             _mockSagaStore = new Mock<ISagaStore>();
             _mockSagaIdGenerator = new Mock<ISagaIdGenerator>();
@@ -142,9 +156,8 @@ namespace Lycia.Tests
             _providedSagaId = Guid.NewGuid();
             _mockSagaIdGenerator.Setup(g => g.Generate()).Returns(_generatedSagaId);
 
-            // Setup for LoadContextAsync used by InitializeCoordinatedHandlerAsync
-            _mockSagaStore.Setup(s => s.LoadContextAsync<DispatcherTestSagaData>(It.IsAny<Guid>()))
-                          .ReturnsAsync((Guid sagaIdParam) => new DispatcherTestSagaData { SagaId = sagaIdParam, DataValue = "Loaded" });
+            _mockSagaStore.Setup(s => s.LoadContextAsync<Dispatcher_TestSagaData>(It.IsAny<Guid>()))
+                          .ReturnsAsync((Guid sagaIdParam) => new Dispatcher_TestSagaData { SagaId = sagaIdParam, DataValue = "Loaded" });
             
             _mockSagaStore.Setup(s => s.IsStepCompletedAsync(It.IsAny<Guid>(), It.IsAny<Type>())).ReturnsAsync(false);
             
@@ -163,202 +176,210 @@ namespace Lycia.Tests
         }
 
         // --- ISagaStartHandler Tests ---
-        [TestMethod]
+        [Fact] // Changed
         public async Task DispatchAsync_SagaStart_Coordinated_NoSagaId_GeneratesId_InitializesAndHandles()
         {
-            var command = new DispatcherTestStartCommand();
-            var mockHandler = new MockCoordinatedStartHandler();
-            SetupMockHandlerResolution(typeof(ISagaStartHandler<DispatcherTestStartCommand>), new List<object> { mockHandler });
+            var command = new Dispatcher_TestStartCommand();
+            var mockHandler = new Dispatcher_MockCoordinatedStartHandler();
+            SetupMockHandlerResolution(typeof(ISagaStartHandler<Dispatcher_TestStartCommand>), new List<object> { mockHandler });
 
             await _dispatcher.DispatchAsync(command);
 
             _mockSagaIdGenerator.Verify(g => g.Generate(), Times.Once);
-            Assert.IsTrue(mockHandler.InitializeCalled, "Initialize");
-            Assert.IsTrue(mockHandler.HandleStartAsyncCalled, "HandleStartAsync");
-            Assert.AreEqual(_generatedSagaId, mockHandler.Context.SagaId);
-            Assert.AreEqual("Loaded", mockHandler.Context.Data.DataValue);
+            Assert.True(mockHandler.InitializeCalled, "Initialize"); // Changed
+            Assert.True(mockHandler.HandleStartAsyncCalled, "HandleStartAsync"); // Changed
+            Assert.Equal(_generatedSagaId, mockHandler.Context.SagaId); // Changed
+            Assert.Equal("Loaded", mockHandler.Context.Data.DataValue); // Changed
         }
 
-        [TestMethod]
+        [Fact] // Changed
         public async Task DispatchAsync_SagaStart_Reactive_WithSagaId_ReusesId_InitializesAndHandles()
         {
-            var command = new DispatcherTestStartCommand { SagaId = _providedSagaId };
-            var mockHandler = new MockReactiveStartHandler();
-            SetupMockHandlerResolution(typeof(ISagaStartHandler<DispatcherTestStartCommand>), new List<object> { mockHandler });
+            var command = new Dispatcher_TestStartCommand { SagaId = _providedSagaId };
+            var mockHandler = new Dispatcher_MockReactiveStartHandler();
+            SetupMockHandlerResolution(typeof(ISagaStartHandler<Dispatcher_TestStartCommand>), new List<object> { mockHandler });
 
             await _dispatcher.DispatchAsync(command);
 
             _mockSagaIdGenerator.Verify(g => g.Generate(), Times.Never);
-            Assert.IsTrue(mockHandler.InitializeCalled, "Initialize");
-            Assert.IsTrue(mockHandler.HandleStartAsyncCalled, "HandleStartAsync");
-            Assert.AreEqual(_providedSagaId, mockHandler.Context.SagaId);
+            Assert.True(mockHandler.InitializeCalled, "Initialize"); // Changed
+            Assert.True(mockHandler.HandleStartAsyncCalled, "HandleStartAsync"); // Changed
+            Assert.Equal(_providedSagaId, mockHandler.Context.SagaId); // Changed
         }
         
-        [TestMethod]
+        [Fact] // Changed
         public async Task DispatchAsync_SagaStart_GenericlessContext_InitializesAndHandles()
         {
-            var command = new DispatcherTestStartCommand { SagaId = _providedSagaId };
-            var mockHandler = new MockGenericlessContextHandler();
-            SetupMockHandlerResolution(typeof(ISagaStartHandler<DispatcherTestStartCommand>), new List<object> { mockHandler });
+            var command = new Dispatcher_TestStartCommand { SagaId = _providedSagaId };
+            var mockHandler = new Dispatcher_MockGenericlessContextHandler();
+            SetupMockHandlerResolution(typeof(ISagaStartHandler<Dispatcher_TestStartCommand>), new List<object> { mockHandler });
 
             await _dispatcher.DispatchAsync(command);
             
-            Assert.IsTrue(mockHandler.InitializeCalled, "Initialize");
-            Assert.IsTrue(mockHandler.HandleStartAsyncCalled, "HandleStartAsync");
-            Assert.AreEqual(_providedSagaId, mockHandler.Context.SagaId);
+            Assert.True(mockHandler.InitializeCalled, "Initialize"); // Changed
+            Assert.True(mockHandler.HandleStartAsyncCalled, "HandleStartAsync"); // Changed
+            Assert.Equal(_providedSagaId, mockHandler.Context.SagaId); // Changed
         }
 
         // --- ISagaCompensationHandler Tests ---
-        [TestMethod]
+        [Fact] // Changed
         public async Task DispatchAsync_Message_ResolvesCompensationHandler_InitializesAndCompensates()
         {
-            var compensatableEvent = new DispatcherTestCompensatableEvent { SagaId = _providedSagaId };
-            var mockCompHandler = new MockCompensationHandler();
+            var compensatableEvent = new Dispatcher_TestCompensatableEvent { SagaId = _providedSagaId };
+            var mockCompHandler = new Dispatcher_MockCompensationHandler();
 
-            SetupMockHandlerResolution(typeof(ISagaStartHandler<DispatcherTestCompensatableEvent>), new List<object>()); // No start
-            SetupMockHandlerResolution(typeof(ISagaCompensationHandler<DispatcherTestCompensatableEvent>), new List<object> { mockCompHandler });
+            SetupMockHandlerResolution(typeof(ISagaStartHandler<Dispatcher_TestCompensatableEvent>), new List<object>()); 
+            SetupMockHandlerResolution(typeof(ISagaCompensationHandler<Dispatcher_TestCompensatableEvent>), new List<object> { mockCompHandler });
 
             await _dispatcher.DispatchAsync(compensatableEvent);
 
-            Assert.IsTrue(mockCompHandler.InitializeCalled, "Initialize Compensation");
-            Assert.IsTrue(mockCompHandler.CompensateAsyncCalled, "CompensateAsync");
-            Assert.AreEqual(_providedSagaId, mockCompHandler.Context.SagaId);
+            Assert.True(mockCompHandler.InitializeCalled, "Initialize Compensation"); // Changed
+            Assert.True(mockCompHandler.CompensateAsyncCalled, "CompensateAsync"); // Changed
+            Assert.Equal(_providedSagaId, mockCompHandler.Context.SagaId); // Changed
         }
         
         // --- Response Handler Tests ---
-        [TestMethod]
+        [Fact] // Changed
         public async Task DispatchAsync_SuccessResponse_InitializesAndHandles()
         {
-            var originalCmd = new DispatcherTestOriginalCommand { SagaId = _providedSagaId };
-            var successResponse = new DispatcherTestSuccessResponseMessage { SagaId = _providedSagaId, OriginalMessage = originalCmd };
-            var mockHandler = new MockSuccessResponseHandler();
-            SetupMockHandlerResolution(typeof(ISuccessResponseHandler<DispatcherTestSuccessResponseMessage>), new List<object>{mockHandler});
+            var originalCmd = new Dispatcher_TestOriginalCommand { SagaId = _providedSagaId }; 
+            var successResponse = new Dispatcher_TestSuccessResponseMessage { SagaId = _providedSagaId, OriginalMessage = originalCmd, CorrelationId = Guid.NewGuid() };
+            var mockHandlerInstance = new Dispatcher_MockSuccessResponseHandler();
+            SetupMockHandlerResolution(typeof(ISuccessResponseHandler<Dispatcher_TestSuccessResponseMessage>), new List<object>{mockHandlerInstance});
 
-            await _dispatcher.DispatchAsync<DispatcherTestOriginalCommand, DispatcherTestSuccessResponseMessage>(successResponse);
+            // Reverted TMessage in DispatchAsync call to Dispatcher_TestOriginalCommand
+            await _dispatcher.DispatchAsync<Dispatcher_TestOriginalCommand, Dispatcher_TestSuccessResponseMessage>(successResponse);
 
-            Assert.IsTrue(mockHandler.InitializeCalled, "Initialize SuccessResp");
-            Assert.IsTrue(mockHandler.HandleSuccessResponseAsyncCalled, "HandleSuccessResp");
-            Assert.AreEqual(_providedSagaId, mockHandler.Context.SagaId);
+            Assert.True(mockHandlerInstance.InitializeCalled, "Initialize SuccessResp"); 
+            Assert.True(mockHandlerInstance.HandleSuccessResponseAsyncCalled, "HandleSuccessResp"); 
+            Assert.Equal(_providedSagaId, mockHandlerInstance.Context.SagaId); 
         }
 
-        [TestMethod]
+        [Fact] // Changed
         public async Task DispatchAsync_FailResponse_InitializesAndHandles()
         {
-            var originalCmd = new DispatcherTestOriginalCommand { SagaId = _providedSagaId };
-            var failResponseMsg = new DispatcherTestFailResponseMessage { SagaId = _providedSagaId, OriginalMessage = originalCmd };
-            var mockHandler = new MockFailResponseHandler();
-            SetupMockHandlerResolution(typeof(IFailResponseHandler<DispatcherTestFailResponseMessage>), new List<object>{mockHandler});
+            var originalCmd = new Dispatcher_TestOriginalCommand { SagaId = _providedSagaId }; 
+            var failResponseToDispatch = new Dispatcher_TestFailResponseMessage { SagaId = _providedSagaId, OriginalMessage = originalCmd, CorrelationId = Guid.NewGuid() };
+            var mockHandlerInstance = new Dispatcher_MockFailResponseHandler();
+            SetupMockHandlerResolution(typeof(IFailResponseHandler<Dispatcher_TestFailResponseMessage>), new List<object>{mockHandlerInstance});
 
-            await _dispatcher.DispatchAsync<DispatcherTestOriginalCommand, DispatcherTestFailResponseMessage>(failResponseMsg);
+            // Reverted TMessage in DispatchAsync call
+            await _dispatcher.DispatchAsync<Dispatcher_TestOriginalCommand, Dispatcher_TestFailResponseMessage>(failResponseToDispatch);
 
-            Assert.IsTrue(mockHandler.InitializeCalled, "Initialize FailResp");
-            Assert.IsTrue(mockHandler.HandleFailResponseAsyncCalled, "HandleFailResp");
-            Assert.AreEqual(_providedSagaId, mockHandler.Context.SagaId);
+            Assert.True(mockHandlerInstance.InitializeCalled, "Initialize FailResp"); 
+            Assert.True(mockHandlerInstance.HandleFailResponseAsyncCalled, "HandleFailResp"); 
+            Assert.Equal(_providedSagaId, mockHandlerInstance.Context.SagaId); 
         }
 
-        [TestMethod]
+        [Fact] // Changed
         public async Task DispatchAsync_PureResponse_NotSuccessOrFail_DoesNotFallback()
         {
-            var originalCmd = new DispatcherTestOriginalCommand { SagaId = _providedSagaId };
-            var pureResponse = new DispatcherTestResponseMessage { SagaId = _providedSagaId, OriginalMessage = originalCmd };
+            var originalCmd = new Dispatcher_TestOriginalCommand { SagaId = _providedSagaId }; 
+            var pureResponse = new Dispatcher_TestResponseMessage { SagaId = _providedSagaId, OriginalMessage = originalCmd, CorrelationId = Guid.NewGuid() };
             
-            SetupMockHandlerResolution(typeof(ISuccessResponseHandler<DispatcherTestResponseMessage>), new List<object>());
-            SetupMockHandlerResolution(typeof(IFailResponseHandler<DispatcherTestResponseMessage>), new List<object>());
+            SetupMockHandlerResolution(typeof(ISuccessResponseHandler<Dispatcher_TestResponseMessage>), new List<object>());
+            SetupMockHandlerResolution(typeof(IFailResponseHandler<Dispatcher_TestResponseMessage>), new List<object>());
             
-            var mockFallbackStartHandler = new MockReactiveStartHandler(); // Used to detect fallback
-            SetupMockHandlerResolution(typeof(ISagaStartHandler<DispatcherTestResponseMessage>), new List<object> { mockFallbackStartHandler });
+            var mockFallbackStartHandler = new Dispatcher_MockReactiveStartHandler(); 
+            SetupMockHandlerResolution(typeof(ISagaStartHandler<Dispatcher_TestResponseMessage>), new List<object> { mockFallbackStartHandler });
 
-            await _dispatcher.DispatchAsync<DispatcherTestOriginalCommand, DispatcherTestResponseMessage>(pureResponse);
+            // Reverted TMessage in DispatchAsync call
+            await _dispatcher.DispatchAsync<Dispatcher_TestOriginalCommand, Dispatcher_TestResponseMessage>(pureResponse);
 
-            Assert.IsFalse(mockFallbackStartHandler.HandleStartAsyncCalled, "DispatchByMessageTypeAsync should not be called.");
+            Assert.False(mockFallbackStartHandler.HandleStartAsyncCalled, "DispatchByMessageTypeAsync should not be called."); 
         }
 
-        [TestMethod]
+        [Fact] // Changed
         public async Task DispatchAsync_ResponseIsEvent_NotSuccessOrFail_FallsBackToDispatchByMessageType()
         {
-            var originalCmd = new DispatcherTestOriginalCommand { SagaId = _providedSagaId };
-            var responseEvent = new DispatcherTestResponseEventMessage { SagaId = _providedSagaId, OriginalMessage = originalCmd };
+            var originalCmd = new Dispatcher_TestOriginalCommand { SagaId = _providedSagaId }; 
+            var responseEvent = new Dispatcher_TestResponseEventMessage { SagaId = _providedSagaId, OriginalMessage = originalCmd, CorrelationId = Guid.NewGuid() };
             
-            SetupMockHandlerResolution(typeof(ISuccessResponseHandler<DispatcherTestResponseEventMessage>), new List<object>());
-            SetupMockHandlerResolution(typeof(IFailResponseHandler<DispatcherTestResponseEventMessage>), new List<object>());
+            SetupMockHandlerResolution(typeof(ISuccessResponseHandler<Dispatcher_TestResponseEventMessage>), new List<object>());
+            SetupMockHandlerResolution(typeof(IFailResponseHandler<Dispatcher_TestResponseEventMessage>), new List<object>());
 
-            var mockFallbackHandler = new MockReactiveStartHandler(); 
-            SetupMockHandlerResolution(typeof(ISagaStartHandler<DispatcherTestResponseEventMessage>), new List<object> { mockFallbackHandler });
+            var mockFallbackHandler = new Dispatcher_MockReactiveStartHandler(); 
+            SetupMockHandlerResolution(typeof(ISagaStartHandler<Dispatcher_TestResponseEventMessage>), new List<object> { mockFallbackHandler });
             
-            await _dispatcher.DispatchAsync<DispatcherTestOriginalCommand, DispatcherTestResponseEventMessage>(responseEvent);
+            await _dispatcher.DispatchAsync<Dispatcher_TestOriginalCommand, Dispatcher_TestResponseEventMessage>(responseEvent);
 
-            Assert.IsTrue(mockFallbackHandler.HandleStartAsyncCalled, "DispatchByMessageTypeAsync should be called.");
+            Assert.True(mockFallbackHandler.HandleStartAsyncCalled, "DispatchByMessageTypeAsync should be called."); 
         }
         
-        // --- HandleAsync Fallback Test (Conceptual - relies on internal InvokeHandlerAsync structure) ---
-        [TestMethod]
-        public async Task DispatchAsync_InvokeHandlerAsync_Fallback_CallsHandleAsync_TMessage()
-        {
-            // This test assumes InvokeHandlerAsync is called with a handlerType that doesn't have
-            // HandleStartAsync, HandleSuccessResponseAsync etc. which would trigger the HandleAsync fallback.
-            // We use a generic event and a handler that implements a non-specific interface for registration.
-            var eventMessage = new DispatcherTestEventMessage { SagaId = _providedSagaId };
-            var mockFallbackHandler = new FallbackTestHandler();
-
-            // Register FallbackTestHandler for IMessageHandler<DispatcherTestEventMessage>
-            // SagaDispatcher's DispatchByMessageTypeAsync doesn't directly look for IMessageHandler.
-            // To test the fallback in InvokeHandlerAsync, we'd typically need InvokeHandlerAsync to be called
-            // with handlerType = typeof(IMessageHandler) or similar.
-            // The current DispatchByMessageTypeAsync calls InvokeHandlerAsync with ISagaStartHandler or ISagaCompensationHandler.
-            // If InvokeHandlerAsync was refactored to use helpers, those helpers would be tested.
-            // If InvokeHandlerAsync has the direct if/else for method names, then to test fallback:
-            // handlerType must NOT be ISagaStartHandler, ISuccessResponseHandler, IFailResponseHandler.
-            // And the handler instance (mockFallbackHandler) must have HandleAsync(DispatcherTestEventMessage).
-            
-            // For this test, we'll assume a scenario where DispatchByMessageTypeAsync somehow resolves a handler
-            // (e.g., registered for a base event type or a less specific interface if dispatcher logic allowed it)
-            // and then InvokeHandlerAsync is called for it.
-            // Since direct setup for this path is complex with current DispatchByMessageTypeAsync,
-            // this test is more about the *expected behavior of InvokeHandlerAsync's fallback section*.
-
-            // Simulate that IMessageHandler<DispatcherTestEventMessage> was resolved
-            var handlerTypeForInvoke = typeof(IMessageHandler); // This is the key: a type not matching specific methods
-             _mockServiceProvider.Setup(sp => sp.GetServices(handlerTypeForInvoke))
-                                .Returns(new List<object> { mockFallbackHandler });
-
-            // To call InvokeHandlerAsync, we need to bypass the main DispatchAsync routing or find a way through it.
-            // Let's assume a hypothetical DispatchToGenericHandlerAsync for testing this.
-            // For now, we acknowledge this test setup is tricky.
-
-            // The subtask implies testing the fallback "If no specific method like HandleStartAsync is matched by handlerType".
-            // This means the handlerType itself in InvokeHandlerAsync is what causes the fallback.
-            // We can simulate this by directly testing a call to InvokeHandlerAsync if it were testable,
-            // or ensuring one of the existing DispatchAsync paths could lead to such a handlerType.
-            // The current `DispatchByMessageTypeAsync` only calls `InvokeHandlerAsync` for `ISagaStartHandler` or `ISagaCompensationHandler`.
-            // The `InvokeHandlerAsync` from the *previous state* (before helper methods) would look at `handlerType`
-            // and if it's not one of the specific ones, it would try `handler.GetType().GetMethod("HandleAsync")`.
-
-            // This test remains difficult to implement perfectly without either:
-            // 1. Making InvokeHandlerAsync internal/public for direct testing.
-            // 2. Having the full refactored InvokeHandlerAsync (with helpers) in place and testing the helpers.
-            // Given the previous file state discrepancies, I'll assume the *intent* of testing the fallback.
-            // The most practical way with a private InvokeHandlerAsync is if DispatchByMessageTypeAsync
-            // could somehow pass a "generic" handler type to it. It currently does not.
-            
-            // The test will assert the behavior if such a call to InvokeHandlerAsync was made.
-            // This is more of a specification test for InvokeHandlerAsync's internal fallback.
-            // No direct dispatch path currently in SagaDispatcher leads to this for a generic IMessageHandler.
-             Assert.Inconclusive("Directly testing HandleAsync fallback via DispatchAsync is complex due to DispatchByMessageTypeAsync's specific handler lookups. This test assumes InvokeHandlerAsync would be called with a generic handler type.");
-        }
-
-
-        // --- No Handler Found Tests ---
-        [TestMethod]
+        [Fact] // Changed
         public async Task DispatchAsync_NoHandlerFound_ForStartCommand_CompletesSilently()
         {
-            var command = new DispatcherTestStartCommand();
-            SetupMockHandlerResolution(typeof(ISagaStartHandler<DispatcherTestStartCommand>), new List<object>()); 
+            var command = new Dispatcher_TestStartCommand();
+            SetupMockHandlerResolution(typeof(ISagaStartHandler<Dispatcher_TestStartCommand>), new List<object>()); 
 
             await _dispatcher.DispatchAsync(command);
             _mockSagaIdGenerator.Verify(g => g.Generate(), Times.Never);
-             // Also verify no methods on SagaStore or EventBus were called for this command.
             _mockSagaStore.VerifyNoOtherCalls();
             _mockEventBus.VerifyNoOtherCalls();
         }
+        
+        [Fact] // Changed
+        public async Task DispatchAsync_EventMessage_FallbackToHandleAsyncSpecific()
+        {
+            var eventMessage = new Dispatcher_TestEventMessage { SagaId = _providedSagaId };
+            var specificFallbackHandler = new Dispatcher_SpecificFallbackTestHandler();
+             SetupMockHandlerResolution(typeof(ISagaStartHandler<Dispatcher_TestEventMessage>), new List<object> { specificFallbackHandler });
+
+            await _dispatcher.DispatchAsync(eventMessage);
+
+            Assert.True(specificFallbackHandler.HandleAsyncSpecificCalled, "HandleAsync(TMessage) should be called."); // Changed
+            Assert.False(specificFallbackHandler.HandleAsyncIMessageCalled, "HandleAsync(IMessage) should not be called if specific is found."); // Changed
+            Assert.Equal(eventMessage, specificFallbackHandler.ReceivedMessage); // Changed
+        }
+
+        [Fact] // Changed
+        public async Task DispatchAsync_EventMessage_FallbackToHandleAsyncIMessage()
+        {
+            var eventMessage = new Dispatcher_TestEventMessage { SagaId = _providedSagaId };
+            var iMessageFallbackHandler = new Dispatcher_IMessageFallbackTestHandler();
+            SetupMockHandlerResolution(typeof(ISagaStartHandler<Dispatcher_TestEventMessage>), new List<object> { iMessageFallbackHandler });
+
+            await _dispatcher.DispatchAsync(eventMessage);
+
+            Assert.False(iMessageFallbackHandler.HandleAsyncSpecificCalled, "HandleAsync(TMessage) should not be called."); // Changed
+            Assert.True(iMessageFallbackHandler.HandleAsyncIMessageCalled, "HandleAsync(IMessage) should be called."); // Changed
+            Assert.Equal(eventMessage, iMessageFallbackHandler.ReceivedMessage); // Changed
+        }
+    }
+
+    // Handler for testing specific TMessage fallback in HandleAsync
+    public class Dispatcher_SpecificFallbackTestHandler : ISagaStartHandler<Dispatcher_TestEventMessage>
+    {
+        public bool HandleStartAsyncCalled { get; private set; } // Added for interface compliance
+        public bool HandleAsyncSpecificCalled { get; private set; }
+        public bool HandleAsyncIMessageCalled { get; private set; } // Should not be called
+        public IMessage ReceivedMessage { get; private set; }
+
+        public Task HandleStartAsync(Dispatcher_TestEventMessage message) 
+        {
+            HandleStartAsyncCalled = true; 
+            // This method is called if ISagaStartHandler is directly invoked.
+            // For fallback testing, ensure test setup correctly leads to HandleAsync.
+            return Task.CompletedTask; 
+        }
+        public Task HandleAsync(Dispatcher_TestEventMessage message) { HandleAsyncSpecificCalled = true; ReceivedMessage = message; return Task.CompletedTask; }
+        public Task HandleAsync(IMessage message) { HandleAsyncIMessageCalled = true; ReceivedMessage = message; return Task.CompletedTask; }
+    }
+
+    // Handler for testing IMessage fallback in HandleAsync
+    public class Dispatcher_IMessageFallbackTestHandler : ISagaStartHandler<Dispatcher_TestEventMessage>
+    {
+        public bool HandleStartAsyncCalled { get; private set; } // Added for interface compliance
+        // NO HandleAsync(Dispatcher_TestEventMessage message) method to force IMessage fallback
+        public bool HandleAsyncSpecificCalled { get; private set; } // Should not be called
+        public bool HandleAsyncIMessageCalled { get; private set; }
+        public IMessage ReceivedMessage { get; private set; }
+        
+        public Task HandleStartAsync(Dispatcher_TestEventMessage message) 
+        {
+            HandleStartAsyncCalled = true;
+            return Task.CompletedTask;
+        }
+        public Task HandleAsync(IMessage message) { HandleAsyncIMessageCalled = true; ReceivedMessage = message; return Task.CompletedTask; }
     }
 }
