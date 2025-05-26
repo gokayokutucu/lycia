@@ -9,7 +9,8 @@ using Lycia.Saga;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Enums;
 using Lycia.Infrastructure.Dispatching; 
-using Lycia.Saga.Extensions; 
+using Lycia.Saga.Extensions;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Lycia.Tests
 {
@@ -29,23 +30,28 @@ namespace Lycia.Tests
     public class Dispatcher_TestOriginalCommand : Dispatcher_TestMessage, ICommand { }
 
     // Simplified and corrected response stubs
-    public class Dispatcher_TestResponseMessage : Dispatcher_TestMessage, IResponse<Dispatcher_TestOriginalCommand> 
+    public class Dispatcher_TestResponseMessage : Dispatcher_TestMessage, IResponse<Dispatcher_TestOriginalCommand>, ISuccessResponse<IMessage>, IFailResponse<IMessage>
     { 
         public Dispatcher_TestOriginalCommand OriginalMessage { get; set; }
         public Guid CorrelationId { get; set; } = Guid.NewGuid();
     }
 
-    public class Dispatcher_TestSuccessResponseMessage : Dispatcher_TestResponseMessage, ISuccessResponse<Dispatcher_TestOriginalCommand> { }
+    public class Dispatcher_TestSuccessResponseMessage : Dispatcher_TestResponseMessage, ISuccessResponse<Dispatcher_TestOriginalCommand>, ISuccessResponse<IMessage>
+    { }
     
-    public class Dispatcher_TestFailResponseMessage : Dispatcher_TestResponseMessage, IFailResponse<Dispatcher_TestOriginalCommand> { }
+    public class Dispatcher_TestFailResponseMessage : Dispatcher_TestResponseMessage, IFailResponse<Dispatcher_TestOriginalCommand>, IFailResponse<IMessage>
+    { }
     
-    public class Dispatcher_TestResponseEventMessage : Dispatcher_TestEventMessage, IResponse<Dispatcher_TestOriginalCommand> 
+    public class Dispatcher_TestResponseEventMessage : Dispatcher_TestEventMessage, IResponse<Dispatcher_TestOriginalCommand>, ISuccessResponse<IMessage>, IFailResponse<IMessage>
     { 
         public Dispatcher_TestOriginalCommand OriginalMessage { get; set; }
         public Guid CorrelationId { get; set; } = Guid.NewGuid(); 
     }
 
-    public class Dispatcher_TestSagaData : SagaData { public string DataValue { get; set; } }
+    public class Dispatcher_TestSagaData : SagaData
+    {
+        
+    }
 
     // --- Mock Handler Implementations (prefixed) ---
     public class Dispatcher_MockCoordinatedStartHandler : ISagaStartHandler<Dispatcher_TestStartCommand>, ISagaHandlerWithContext<Dispatcher_TestStartCommand, Dispatcher_TestSagaData>
@@ -156,8 +162,14 @@ namespace Lycia.Tests
             _providedSagaId = Guid.NewGuid();
             _mockSagaIdGenerator.Setup(g => g.Generate()).Returns(_generatedSagaId);
 
-            _mockSagaStore.Setup(s => s.LoadContextAsync<Dispatcher_TestSagaData>(It.IsAny<Guid>()))
-                          .ReturnsAsync((Guid sagaIdParam) => new Dispatcher_TestSagaData { SagaId = sagaIdParam, DataValue = "Loaded" });
+            _mockSagaStore.Setup(s => s.LoadContextAsync<Dispatcher_TestMessage, Dispatcher_TestSagaData>(It.IsAny<Guid>()))
+                          .Returns((Guid sagaIdParam) => new Dispatcher_TestSagaData
+                          {
+                              Extras = new Dictionary<string, object>()
+                              {
+                                    { "Test", "Loaded" }
+                              }
+                          });
             
             _mockSagaStore.Setup(s => s.IsStepCompletedAsync(It.IsAny<Guid>(), It.IsAny<Type>())).ReturnsAsync(false);
             
@@ -189,7 +201,7 @@ namespace Lycia.Tests
             Assert.True(mockHandler.InitializeCalled, "Initialize"); // Changed
             Assert.True(mockHandler.HandleStartAsyncCalled, "HandleStartAsync"); // Changed
             Assert.Equal(_generatedSagaId, mockHandler.Context.SagaId); // Changed
-            Assert.Equal("Loaded", mockHandler.Context.Data.DataValue); // Changed
+            Assert.Equal("Loaded", mockHandler.Context.Data.Get<string>("Test")); // Changed
         }
 
         [Fact] // Changed
