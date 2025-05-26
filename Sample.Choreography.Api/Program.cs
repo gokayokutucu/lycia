@@ -15,7 +15,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddOpenApi();
 
 builder.Services.AddScoped<ISagaIdGenerator, DefaultSagaIdGenerator>();
-builder.Services.AddScoped<IEventBus, InMemoryEventBus>();
+builder.Services.AddScoped<IEventBus>(sp =>
+    new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 builder.Services.AddScoped<ISagaStore, InMemorySagaStore>();
 builder.Services.AddScoped<ISagaDispatcher, SagaDispatcher>();
 
