@@ -14,11 +14,8 @@ namespace Lycia.Infrastructure.Stores;
 /// In-memory implementation of ISagaStore for testing or local development.
 /// Not suitable for production environments.
 /// </summary>
-public class InMemorySagaStore : ISagaStore
+public class InMemorySagaStore(IEventBus eventBus, ISagaIdGenerator sagaIdGenerator) : ISagaStore
 {
-    private readonly IEventBus _eventBus;
-    private readonly ISagaIdGenerator _sagaIdGenerator;
-
     // Stores saga data per sagaId
     private readonly ConcurrentDictionary<Guid, SagaData> _sagaData = new();
 
@@ -97,12 +94,6 @@ public class InMemorySagaStore : ISagaStore
         return Task.CompletedTask;
     }
 
-    public InMemorySagaStore(IEventBus eventBus, ISagaIdGenerator sagaIdGenerator)
-    {
-        _eventBus = eventBus;
-        _sagaIdGenerator = sagaIdGenerator;
-    }
-
     public Task<ISagaContext<TStep, TSagaData>> LoadContextAsync<TStep, TSagaData>(Guid sagaId)
         where TSagaData : SagaData, new()
         where TStep : IMessage
@@ -116,9 +107,9 @@ public class InMemorySagaStore : ISagaStore
         ISagaContext<TStep, TSagaData> context = new SagaContext<TStep, TSagaData>(
             sagaId: sagaId,
             data: (TSagaData)data,
-            eventBus: _eventBus, // Use injected field
+            eventBus: eventBus, // Use injected field
             sagaStore: this,
-            sagaIdGenerator: _sagaIdGenerator // Use injected field
+            sagaIdGenerator: sagaIdGenerator // Use injected field
         );
 
         return Task.FromResult(context);
