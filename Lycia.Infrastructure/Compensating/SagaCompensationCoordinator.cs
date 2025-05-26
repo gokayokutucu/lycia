@@ -8,28 +8,15 @@ using Lycia.Saga; // Added for SagaContext<>
 
 namespace Lycia.Infrastructure.Compensating;
 
-public class SagaCompensationCoordinator
+public class SagaCompensationCoordinator(
+    ISagaStore sagaStore,
+    ISagaIdGenerator sagaIdGenerator,
+    IEventBus eventBus,
+    IServiceProvider serviceProvider)
 {
-    private readonly ISagaStore _sagaStoreField;
-    private readonly ISagaIdGenerator _sagaIdGeneratorField;
-    private readonly IEventBus _eventBusField;
-    private readonly IServiceProvider _serviceProvider;
-
-    public SagaCompensationCoordinator(
-        ISagaStore sagaStore,
-        ISagaIdGenerator sagaIdGenerator,
-        IEventBus eventBus,
-        IServiceProvider serviceProvider)
-    {
-        _sagaStoreField = sagaStore;
-        _sagaIdGeneratorField = sagaIdGenerator;
-        _eventBusField = eventBus;
-        _serviceProvider = serviceProvider;
-    }
-    
     public async Task TriggerCompensationAsync(Guid sagaId, string failedStep)
     {
-        var steps = await _sagaStoreField.GetSagaStepsAsync(sagaId); // Use injected
+        var steps = await sagaStore.GetSagaStepsAsync(sagaId); // Use injected
         var orderedSteps = steps
             .OrderByDescending(x => x.Value.RecordedAt)
             .ToList(); //Take a snapshot
@@ -56,7 +43,7 @@ public class SagaCompensationCoordinator
             if (messageType == null) continue;
 
             var handlerType = typeof(ISagaCompensationHandler<>).MakeGenericType(messageType);
-            var handlers = _serviceProvider.GetServices(handlerType); // Use injected
+            var handlers = serviceProvider.GetServices(handlerType); // Use injected
 
             foreach (var handler in handlers)
             {
@@ -77,9 +64,10 @@ public class SagaCompensationCoordinator
                     
                     if (contextConstructor != null)
                     {
-                        var context = contextConstructor.Invoke(new object[] { sagaId, _eventBusField, _sagaStoreField, _sagaIdGeneratorField });
-                        var initializeMethodInfo = handler.GetType().GetMethod("Initialize", new[] { typeof(ISagaContext<>).MakeGenericType(messageType) });
-                        initializeMethodInfo?.Invoke(handler, new object[] { context });
+                        var context = contextConstructor.Invoke([sagaId, eventBus, sagaStore, sagaIdGenerator]);
+                        var initializeMethodInfo = handler.GetType().GetMethod("Initialize", [typeof(ISagaContext<>).MakeGenericType(messageType)
+                        ]);
+                        initializeMethodInfo?.Invoke(handler, [context]);
                         Console.WriteLine($"[Compensation] Initialized ISagaContext for handler {handler.GetType().Name} with SagaId {sagaId}");
                     }
                     else
@@ -95,14 +83,14 @@ public class SagaCompensationCoordinator
                         continue;
                     }
                     
-                    await (Task)compensateMethod.Invoke(handler, new object[] { payload })!;
+                    await (Task)compensateMethod.Invoke(handler, [payload])!;
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"❌ Compensation handler failed for {stepName}: {ex.Message}");
 
                     // Mark the step as having failed during compensation
-                    await _sagaStoreField.LogStepAsync(sagaId, messageType, StepStatus.CompensationFailed, payload); // Use injected
+                    await sagaStore.LogStepAsync(sagaId, messageType, StepStatus.CompensationFailed, payload); // Use injected
                 }
             }
         }
