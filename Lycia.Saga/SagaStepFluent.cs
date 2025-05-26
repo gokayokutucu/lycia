@@ -3,32 +3,33 @@ using Lycia.Saga.Abstractions;
 
 namespace Lycia.Saga;
 
-public class ReactiveSagaStepFluent<TStep, TMarkedStep>(ISagaContext<TMarkedStep> context, Task operation)
+// TInitialMessage is the type of message that the ISagaContext is primarily associated with.
+public class ReactiveSagaStepFluent<TStep, TInitialMessage>(ISagaContext<TInitialMessage> context, Task operation)
     where TStep : IMessage
-    where TMarkedStep : IMessage
+    where TInitialMessage : IMessage
 {
     public async Task ThenMarkAsComplete()
     {
         await operation;
-        await context.MarkAsComplete<TMarkedStep>();
+        await context.MarkAsComplete<TInitialMessage>();
     }
 
     public async Task ThenMarkAsFailed(FailResponse fail)
     {
         await operation;
-        await context.MarkAsFailed<TMarkedStep>();
+        await context.MarkAsFailed<TInitialMessage>();
     }
 
     public async Task ThenMarkAsCompensated()
     {
         await operation;
-        await context.MarkAsCompensated<TMarkedStep>();
+        await context.MarkAsCompensated<TInitialMessage>();
     }
 
     public async Task ThenMarkAsCompensationFailed()
     {
         await operation;
-        await context.MarkAsCompensationFailed<TMarkedStep>();
+        await context.MarkAsCompensationFailed<TInitialMessage>();
     }
 }
 

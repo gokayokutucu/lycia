@@ -8,7 +8,7 @@ public abstract class ResponseBase<TPrevious> :
     IEvent
     where TPrevious : IMessage
 {
-    public Guid MessageId { get; init; } = Guid.CreateVersion7();
+    public Guid MessageId { get; init; } = Guid.NewGuid(); // Changed to NewGuid()
     public DateTime Timestamp { get; init; } = DateTime.UtcNow;
     public string ApplicationId { get; init; } = EventMetadata.ApplicationId;
     public Guid CorrelationId { get; set; }
