@@ -1,4 +1,4 @@
-using Lycia.Saga.Enums;
+using Lycia.Messaging.Enums;
 
 namespace Lycia.Saga;
 

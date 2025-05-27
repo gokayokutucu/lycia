@@ -44,6 +44,12 @@ public class SagaDispatcher(
                     var method = compensationInterface.GetMethod("CompensateAsync");
                     if (method != null)
                     {
+#if UNIT_TESTING    
+                        if (message.__TestStepStatus.HasValue && message.__TestStepType is not null)
+                        {
+                            await sagaStore.LogStepAsync(sagaId, message.__TestStepType, message.__TestStepStatus.Value, message);
+                        }
+#endif
                         await (Task)method.Invoke(handler, [message])!;
                     }
                 }
@@ -259,6 +265,12 @@ public class SagaDispatcher(
                 $"[InvokeHandlerAsync] Invoking method: {method?.Name} on handler: {handler?.GetType().Name}");
             if (method is not null)
             {
+#if UNIT_TESTING    
+                if (message.__TestStepStatus.HasValue && message.__TestStepType is not null)
+                {
+                    await sagaStore.LogStepAsync(sagaId, message.__TestStepType, message.__TestStepStatus.Value, message);
+                }
+#endif
                 await (Task)method.Invoke(handler, parameters)!;
                 // After method.Invoke(...)
                 var stepTypeToCheck = stepType ?? messageParameterType;
