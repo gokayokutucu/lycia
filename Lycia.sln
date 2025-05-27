@@ -10,7 +10,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Samples", "Samples", "{BC1E
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Choreography.Api", "Sample.Choreography.Api\Sample.Choreography.Api.csproj", "{A0A37466-E91D-4199-ABD2-679F8A3A9731}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Orchestration.Worker", "Sample.Orchestration.Worker \Sample.Orchestration.Worker.csproj", "{DFDC4E24-CD6F-40EF-9AF2-D2E3F2CB9976}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Orchestration.Worker", "Sample.Orchestration.Worker\Sample.Orchestration.Worker.csproj", "{DFDC4E24-CD6F-40EF-9AF2-D2E3F2CB9976}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Shared", "Sample.Shared\Sample.Shared.csproj", "{D2CFB436-054B-4795-8B47-40452CD8B143}"
 EndProject
