@@ -13,6 +13,11 @@ public class CreateOrderSagaHandler :
     ReactiveSagaHandler<CreateOrderCommand>,
     ISagaCompensationHandler<OrderShippingFailedEvent>
 {
+    /// <summary>
+    /// For test purposes, we can check if the compensation was called.
+    /// </summary>
+    public bool CompensateCalled { get; private set; }
+    
     public override async Task HandleStartAsync(CreateOrderCommand command)
     {
         // Publish the success response event
@@ -29,6 +34,7 @@ public class CreateOrderSagaHandler :
     {
         try
         {
+            CompensateCalled = true;
             // Compensation logic
             await Context.MarkAsCompensated<CreateOrderCommand>();
         }
