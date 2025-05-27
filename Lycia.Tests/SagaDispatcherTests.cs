@@ -2,8 +2,8 @@ using Lycia.Infrastructure.Abstractions;
 using Lycia.Infrastructure.Dispatching;
 using Lycia.Infrastructure.Eventing;
 using Lycia.Infrastructure.Stores;
+using Lycia.Messaging.Enums;
 using Lycia.Saga.Abstractions;
-using Lycia.Saga.Enums;
 using Lycia.Saga.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 using Sample.Shared.Messages.Commands;
@@ -99,4 +99,152 @@ public class SagaDispatcherTests
         Assert.All(steps.Values, meta =>
             Assert.True(meta.Status is StepStatus.Completed or StepStatus.Failed));
     }
+    
+    [Fact]
+    public async Task DispatchAsync_NoHandlerRegistered_ShouldNotThrow()
+    {
+        var services = new ServiceCollection();
+        services.AddScoped<ISagaIdGenerator, TestSagaIdGenerator>();
+        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
+        services.AddScoped<ISagaStore, InMemorySagaStore>();
+        services.AddScoped<IEventBus>(sp =>
+            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
+        var provider = services.BuildServiceProvider();
+        var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
+
+        var command = new CreateOrderCommand
+        {
+            OrderId = Guid.NewGuid(),
+            UserId = Guid.NewGuid(),
+            TotalPrice = 111
+        };
+
+        // Act & Assert
+        await dispatcher.DispatchAsync(command); // No handler registered, should not throw
+    }
+    
+    // CreateOrder -> OrderCreated (fail) -> Compensation started
+    [Fact]
+    public async Task DispatchAsync_Should_Trigger_Compensation_For_FailedStep()
+    {
+        // Arrange
+        var fixedSagaId = Guid.NewGuid();
+        var services = new ServiceCollection();
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        services.AddScoped<ISagaStore, InMemorySagaStore>();
+        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
+        services.AddScoped<IEventBus>(sp =>
+            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
+
+        // The ShipOrderForCompensationSagaHandler will intentionally fail at this step.
+        services.AddScoped<ISagaStartHandler<CreateOrderCommand>, CreateOrderSagaHandler>();
+        services.AddScoped<ISagaStartHandler<OrderCreatedEvent>, ShipOrderForCompensationSagaHandler>();
+
+        var provider = services.BuildServiceProvider();
+        var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
+        var store = provider.GetRequiredService<ISagaStore>();
+
+        var command = new CreateOrderCommand
+        {
+            OrderId = Guid.NewGuid(),
+            UserId = Guid.NewGuid(),
+            TotalPrice = 10
+        };
+
+        // Act
+        await dispatcher.DispatchAsync(command);
+
+        // Assert - check the status of the steps in the chain
+        var steps = await store.GetSagaStepsAsync(fixedSagaId);
+        Assert.Contains(steps.Keys, x => x.Contains(nameof(CreateOrderCommand)));
+        Assert.Contains(steps.Keys, x => x.Contains(nameof(OrderCreatedEvent)));
+        // The ShipOrderForCompensationSagaHandler step should fail, and compensation should be triggered.
+        Assert.Contains(steps.Values, meta => meta.Status == StepStatus.Failed);
+
+
+        var handler = provider.GetRequiredService<CreateOrderSagaHandler>();
+        // Was the compensation logic triggered?
+        Assert.True(handler.CompensateCalled); 
+        Assert.Contains(steps.Values, meta => meta.Status == StepStatus.Compensated);
+    }
+    
+    [Fact]
+    public async Task DispatchAsync_AllSteps_ShouldBeProcessedInOrder()
+    {
+        var services = new ServiceCollection();
+        var fixedSagaId = Guid.NewGuid();
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        services.AddScoped<ISagaStore, InMemorySagaStore>();
+        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
+        services.AddScoped<IEventBus>(sp =>
+            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
+
+        services.AddScoped<ISagaStartHandler<CreateOrderCommand>, CreateOrderSagaHandler>();
+        services.AddScoped<ISagaStartHandler<OrderCreatedEvent>, ShipOrderSagaHandler>();
+        services.AddScoped<ISagaStartHandler<OrderShippedEvent>, DeliverOrderSagaHandler>();
+
+        var provider = services.BuildServiceProvider();
+        var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
+        var store = provider.GetRequiredService<ISagaStore>();
+
+        var command = new CreateOrderCommand
+        {
+            OrderId = Guid.NewGuid(),
+            UserId = Guid.NewGuid(),
+            TotalPrice = 10
+        };
+
+        // Act
+        await dispatcher.DispatchAsync(command);
+
+        // Assert: Are all steps processed in order and completed?
+        var steps = await store.GetSagaStepsAsync(fixedSagaId);
+
+        var expectedStepTypes = new[] {
+            nameof(CreateOrderCommand),
+            nameof(OrderCreatedEvent),
+            nameof(OrderShippedEvent)
+        };
+
+        foreach (var expected in expectedStepTypes)
+            Assert.Contains(steps.Keys, x => x.Contains(expected));
+
+        Assert.All(steps, kv => Assert.True(kv.Value.Status == StepStatus.Completed));
+    }
+    
+    [Fact]
+    public async Task DispatchAsync_DuplicateStep_ShouldNotProcessTwice()
+    {
+        var services = new ServiceCollection();
+        var fixedSagaId = Guid.NewGuid();
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        services.AddScoped<ISagaStore, InMemorySagaStore>();
+        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
+        services.AddScoped<IEventBus>(sp =>
+            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
+
+        services.AddScoped<ISagaStartHandler<CreateOrderCommand>, CreateOrderSagaHandler>();
+        // Other steps can also be added if needed.
+
+        var provider = services.BuildServiceProvider();
+        var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
+        var store = provider.GetRequiredService<ISagaStore>();
+
+        var command = new CreateOrderCommand
+        {
+            OrderId = Guid.NewGuid(),
+            UserId = Guid.NewGuid(),
+            TotalPrice = 10
+        };
+
+        // Act
+        await dispatcher.DispatchAsync(command);
+        await dispatcher.DispatchAsync(command);
+
+        // Assert: The same step should only be processed once.
+        var steps = await store.GetSagaStepsAsync(fixedSagaId);
+        Assert.Equal(1, steps.Count(x => x.Key.Contains(nameof(CreateOrderCommand))));
+    }
+    
+    
 }
