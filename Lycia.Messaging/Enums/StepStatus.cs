@@ -1,4 +1,4 @@
-namespace Lycia.Saga.Enums;
+namespace Lycia.Messaging.Enums;
 
 /// <summary>
 /// Represents the execution status of a step within a saga.

@@ -5,6 +5,7 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <IsPackable>false</IsPackable>
+        <DefineConstants>UNIT_TESTING</DefineConstants>
     </PropertyGroup>
 
     <ItemGroup>
@@ -19,6 +20,8 @@
     <ItemGroup>
         <Using Include="Xunit"/>
     </ItemGroup>
+    
+    
 
     <ItemGroup>
       <ProjectReference Include="..\Lycia.Infrastructure\Lycia.Infrastructure.csproj" />

@@ -1,6 +1,6 @@
 using Lycia.Messaging;
+using Lycia.Messaging.Enums;
 using Lycia.Saga.Abstractions;
-using Lycia.Saga.Enums;
 using Lycia.Saga.Extensions;
 
 namespace Lycia.Saga;
@@ -23,13 +23,13 @@ public class SagaContext<TMessage>(
     public ReactiveSagaStepFluent<TStep, TMessage> PublishWithTracking<TStep>(TStep @event) where TStep : IEvent
     {
         var task = Publish(@event);
-        return new ReactiveSagaStepFluent<TStep, TMessage>(this, task);
+        return new ReactiveSagaStepFluent<TStep, TMessage>(this, task, @event);
     }
 
     public ReactiveSagaStepFluent<TStep, TMessage> SendWithTracking<TStep>(TStep command) where TStep : ICommand
     {
         var task = Send(command);
-        return new ReactiveSagaStepFluent<TStep, TMessage>(this, task);
+        return new ReactiveSagaStepFluent<TStep, TMessage>(this, task, command);
     }
 
     public Task Compensate<T>(T @event) where T : FailedEventBase =>
@@ -71,16 +71,16 @@ public class SagaContext<TMessage, TSagaData>(
     {
         var task = base.Publish(@event); // Explicitly call base to ensure it's the intended IEventBus.Publish
         // Use the adapter, passing the service instances from this SagaContext<TMessage,TSagaData> instance
-        var adapterContext = new StepSpecificSagaContextAdapter<TStep, TSagaData>(this.SagaId, this.Data, this._eventBus, this._sagaStore, this._sagaIdGenerator);
-        return new CoordinatedSagaStepFluent<TStep, TSagaData>(adapterContext, task);
+        var adapterContext = new StepSpecificSagaContextAdapter<TStep, TSagaData>(SagaId, Data, _eventBus, _sagaStore, _sagaIdGenerator);
+        return new CoordinatedSagaStepFluent<TStep, TSagaData>(adapterContext, task, @event);
     }
 
     public new CoordinatedSagaStepFluent<TStep, TSagaData> SendWithTracking<TStep>(TStep command)
         where TStep : ICommand
     {
         var task = base.Send(command); // Explicitly call base
-        var adapterContext = new StepSpecificSagaContextAdapter<TStep, TSagaData>(this.SagaId, this.Data, this._eventBus, this._sagaStore, this._sagaIdGenerator);
-        return new CoordinatedSagaStepFluent<TStep, TSagaData>(adapterContext, task);
+        var adapterContext = new StepSpecificSagaContextAdapter<TStep, TSagaData>(SagaId, Data, _eventBus, _sagaStore, _sagaIdGenerator);
+        return new CoordinatedSagaStepFluent<TStep, TSagaData>(adapterContext, task, command);
     }
 }
 
@@ -116,13 +116,13 @@ internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
     ReactiveSagaStepFluent<TReactiveStep, TStepAdapter> ISagaContext<TStepAdapter>.PublishWithTracking<TReactiveStep>(TReactiveStep @event)
     {
         var task = Publish(@event); // Calls this adapter's Publish
-        return new ReactiveSagaStepFluent<TReactiveStep, TStepAdapter>(this, task);
+        return new ReactiveSagaStepFluent<TReactiveStep, TStepAdapter>(this, task, @event);
     }
 
     ReactiveSagaStepFluent<TReactiveStep, TStepAdapter> ISagaContext<TStepAdapter>.SendWithTracking<TReactiveStep>(TReactiveStep command)
     {
         var task = Send(command); // Calls this adapter's Send
-        return new ReactiveSagaStepFluent<TReactiveStep, TStepAdapter>(this, task);
+        return new ReactiveSagaStepFluent<TReactiveStep, TStepAdapter>(this, task, command);
     }
 
     // 'new' methods for ISagaContext<TStepAdapter, TSagaDataAdapter>
@@ -131,13 +131,13 @@ internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
         var task = Publish(@event); // Calls this adapter's Publish
         // Create a new adapter for the next step, maintaining the original service instances and data type TSagaDataAdapter
         var nextStepContext = new StepSpecificSagaContextAdapter<TNewStep, TSagaDataAdapter>(sagaId, data, eventBus, sagaStore, sagaIdGenerator);
-        return new CoordinatedSagaStepFluent<TNewStep, TSagaDataAdapter>(nextStepContext, task);
+        return new CoordinatedSagaStepFluent<TNewStep, TSagaDataAdapter>(nextStepContext, task, @event);
     }
 
     public CoordinatedSagaStepFluent<TNewStep, TSagaDataAdapter> SendWithTracking<TNewStep>(TNewStep command) where TNewStep : ICommand
     {
         var task = Send(command); // Calls this adapter's Send
         var nextStepContext = new StepSpecificSagaContextAdapter<TNewStep, TSagaDataAdapter>(sagaId, data, eventBus, sagaStore, sagaIdGenerator);
-        return new CoordinatedSagaStepFluent<TNewStep, TSagaDataAdapter>(nextStepContext, task);
+        return new CoordinatedSagaStepFluent<TNewStep, TSagaDataAdapter>(nextStepContext, task, command);
     }
 }
