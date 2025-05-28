@@ -52,9 +52,9 @@ app.UseHttpsRedirection();
 
 app.MapPost("/order", async (
         [FromBody] CreateOrderCommand command,
-        [FromServices] ISagaDispatcher dispatcher) =>
+        [FromServices] IEventBus eventBus) =>
     {
-        await dispatcher.DispatchAsync(command);
+        await eventBus.Send(command); 
         return Results.Accepted();
     })
     .WithName("CreateOrder");

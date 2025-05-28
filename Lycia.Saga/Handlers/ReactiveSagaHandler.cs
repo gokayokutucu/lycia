@@ -4,8 +4,7 @@ using Lycia.Saga.Abstractions;
 namespace Lycia.Saga.Handlers;
 
 public abstract class ReactiveSagaHandler<TMessage> :   
-    ISagaHandlerWithContext<TMessage>, 
-    ISagaStartHandler<TMessage>
+    ISagaHandlerWithContext<TMessage>
     where TMessage : IMessage
 {
     protected ISagaContext<TMessage> Context { get; private set; } = null!;
@@ -14,8 +13,6 @@ public abstract class ReactiveSagaHandler<TMessage> :
     {
         Context = context;
     }
-
-    public abstract Task HandleStartAsync(TMessage message);
 
     protected Task MarkAsComplete() => Context.MarkAsComplete<TMessage>();
     protected Task MarkAsFailed() => Context.MarkAsFailed<TMessage>();

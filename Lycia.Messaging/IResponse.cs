@@ -3,7 +3,6 @@ namespace Lycia.Messaging;
 public interface IResponse<TPrevious> : IMessage where TPrevious : IMessage
 {
     Guid CorrelationId { get; }
-    Guid SagaId { get; }
 }
 
 public interface ISuccessResponse<TPrevious> : IResponse<TPrevious> where TPrevious : IMessage {}

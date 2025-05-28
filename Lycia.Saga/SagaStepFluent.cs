@@ -5,18 +5,20 @@ using Lycia.Saga.Abstractions;
 namespace Lycia.Saga;
 
 // TInitialMessage is the type of message that the ISagaContext is primarily associated with.
-public class ReactiveSagaStepFluent<TStep, TInitialMessage>(ISagaContext<TInitialMessage> context, Task operation, TStep @event)
+public class ReactiveSagaStepFluent<TStep, TInitialMessage>(ISagaContext<TInitialMessage> context, Func<Task> operation, TStep @event)
     where TStep : IMessage
     where TInitialMessage : IMessage
 {
+    private TStep _event = @event;
+
     public async Task ThenMarkAsComplete()
     {
 #if UNIT_TESTING
-            @event.__TestStepStatus = StepStatus.Completed;
-            @event.__TestStepType = @event.GetType();
-            await operation;
+            _event.__TestStepStatus = StepStatus.Completed;
+            _event.__TestStepType = typeof(TInitialMessage);
+            await operation();
 #else
-        await operation;
+        await operation();
         await context.MarkAsComplete<TInitialMessage>();
 #endif
     }
@@ -24,11 +26,11 @@ public class ReactiveSagaStepFluent<TStep, TInitialMessage>(ISagaContext<TInitia
     public async Task ThenMarkAsFailed(FailResponse fail)
     {
 #if UNIT_TESTING
-            @event.__TestStepStatus = StepStatus.Failed;
-            @event.__TestStepType = @event.GetType();
-            await operation;
+            _event.__TestStepStatus = StepStatus.Failed;
+            _event.__TestStepType = typeof(TInitialMessage);
+            await operation();
 #else
-        await operation;
+        await operation();
         await context.MarkAsFailed<TInitialMessage>();
 #endif
     }
@@ -36,11 +38,11 @@ public class ReactiveSagaStepFluent<TStep, TInitialMessage>(ISagaContext<TInitia
     public async Task ThenMarkAsCompensated()
     {
 #if UNIT_TESTING
-            @event.__TestStepStatus = StepStatus.Compensated;
-            @event.__TestStepType = @event.GetType();
-            await operation;
+            _event.__TestStepStatus = StepStatus.Compensated;
+            _event.__TestStepType = typeof(TInitialMessage);
+            await operation();
 #else
-        await operation;
+        await operation();
         await context.MarkAsCompensated<TInitialMessage>();
 #endif
     }
@@ -48,28 +50,30 @@ public class ReactiveSagaStepFluent<TStep, TInitialMessage>(ISagaContext<TInitia
     public async Task ThenMarkAsCompensationFailed()
     {
 #if UNIT_TESTING
-            @event.__TestStepStatus = StepStatus.CompensationFailed;
-            @event.__TestStepType = @event.GetType();
-            await operation;
+            _event.__TestStepStatus = StepStatus.CompensationFailed;
+            _event.__TestStepType = typeof(TInitialMessage);
+            await operation();
 #else
-        await operation;
+        await operation();
         await context.MarkAsCompensationFailed<TInitialMessage>();
 #endif
     }
 }
 
-public class CoordinatedSagaStepFluent<TStep, TSagaData>(ISagaContext<TStep, TSagaData> context, Task operation, TStep @event)
+public class CoordinatedSagaStepFluent<TStep, TSagaData>(ISagaContext<TStep, TSagaData> context, Func<Task> operation, TStep @event)
     where TStep : IMessage
     where TSagaData : SagaData
 {
+    private TStep _event = @event;
+
     public async Task ThenMarkAsComplete()
     {
 #if UNIT_TESTING
-            @event.__TestStepStatus = StepStatus.Completed;
-            @event.__TestStepType = @event.GetType();
-            await operation;
+            _event.__TestStepStatus = StepStatus.Completed;
+            _event.__TestStepType = _event.GetType();
+            await operation();
 #else
-        await operation;
+        await operation();
         await context.MarkAsComplete<TStep>();
 #endif
     }
@@ -77,11 +81,11 @@ public class CoordinatedSagaStepFluent<TStep, TSagaData>(ISagaContext<TStep, TSa
     public async Task ThenMarkAsFailed(FailResponse fail)
     {
 #if UNIT_TESTING
-            @event.__TestStepStatus = StepStatus.Failed;
-            @event.__TestStepType = @event.GetType();
-            await operation;
+            _event.__TestStepStatus = StepStatus.Failed;
+            _event.__TestStepType = _event.GetType();
+            await operation();
 #else
-        await operation;
+        await operation();
         await context.MarkAsFailed<TStep>();
 #endif
     }
@@ -89,11 +93,11 @@ public class CoordinatedSagaStepFluent<TStep, TSagaData>(ISagaContext<TStep, TSa
     public async Task ThenMarkAsCompensated()
     {
 #if UNIT_TESTING
-            @event.__TestStepStatus = StepStatus.Compensated;
-            @event.__TestStepType = @event.GetType();
-            await operation;
+            _event.__TestStepStatus = StepStatus.Compensated;
+            _event.__TestStepType = _event.GetType();
+            await operation();
 #else
-        await operation;
+        await operation();
         await context.MarkAsCompensated<TStep>();
 #endif
     }
@@ -101,11 +105,11 @@ public class CoordinatedSagaStepFluent<TStep, TSagaData>(ISagaContext<TStep, TSa
     public async Task ThenMarkAsCompensationFailed()
     {
 #if UNIT_TESTING
-            @event.__TestStepStatus = StepStatus.CompensationFailed;
-            @event.__TestStepType = @event.GetType();
-            await operation;
+            _event.__TestStepStatus = StepStatus.CompensationFailed;
+            _event.__TestStepType = _event.GetType();
+            await operation();
 #else
-        await operation;
+        await operation();
         await context.MarkAsCompensationFailed<TStep>();
 #endif
     }

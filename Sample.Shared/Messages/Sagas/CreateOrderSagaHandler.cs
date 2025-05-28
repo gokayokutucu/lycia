@@ -11,6 +11,7 @@ namespace Sample.Shared.Messages.Sagas;
 /// </summary>
 public class CreateOrderSagaHandler :
     ReactiveSagaHandler<CreateOrderCommand>,
+    ISagaStartHandler<CreateOrderCommand>,
     ISagaCompensationHandler<OrderShippingFailedEvent>
 {
     /// <summary>
@@ -18,7 +19,7 @@ public class CreateOrderSagaHandler :
     /// </summary>
     public bool CompensateCalled { get; private set; }
     
-    public override async Task HandleStartAsync(CreateOrderCommand command)
+    public async Task HandleStartAsync(CreateOrderCommand command)
     {
         // Publish the success response event
         await Context
@@ -28,6 +29,15 @@ public class CreateOrderSagaHandler :
                 UserId = command.UserId,
                 TotalPrice = command.TotalPrice
             }).ThenMarkAsComplete();
+
+        // await Context.Publish(new OrderCreatedEvent
+        // {
+        //     OrderId = command.OrderId,
+        //     UserId = command.UserId,
+        //     TotalPrice = command.TotalPrice
+        // });
+        //
+        // await Context.MarkAsComplete<CreateOrderCommand>();
     }
 
     public async Task CompensateAsync(OrderShippingFailedEvent @event)
