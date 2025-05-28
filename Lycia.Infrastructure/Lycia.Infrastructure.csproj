@@ -4,7 +4,12 @@
         <TargetFramework>net9.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <DefineConstants>$(DefineConstants);UNIT_TESTING</DefineConstants>
     </PropertyGroup>
+
+<!--    <PropertyGroup Condition="'$(BuildingTests)' == 'true'">-->
+<!--        <DefineConstants>$(DefineConstants);UNIT_TESTING</DefineConstants>-->
+<!--    </PropertyGroup>-->
 
     <ItemGroup>
       <ProjectReference Include="..\Lycia.Saga\Lycia.Saga.csproj" />

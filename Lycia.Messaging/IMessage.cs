@@ -7,6 +7,7 @@ public interface IMessage
     Guid MessageId { get; }
     DateTime Timestamp { get; }
     string ApplicationId { get; } 
+    Guid? SagaId { get;}
 #if UNIT_TESTING
     StepStatus? __TestStepStatus { get; set; }
     Type? __TestStepType { get; set; }

@@ -5,7 +5,7 @@ namespace Lycia.Saga.Handlers;
 
 
 public abstract class CoordinatedSagaHandler<TInitialMessage, TResponse, TSagaData> :
-    ISagaHandlerWithContext<TInitialMessage, TSagaData>, ISagaStartHandler<TInitialMessage>
+    ISagaHandlerWithContext<TInitialMessage, TSagaData>
     where TInitialMessage : IMessage
     where TResponse : IResponse<TInitialMessage>
     where TSagaData : SagaData, new()
@@ -16,7 +16,4 @@ public abstract class CoordinatedSagaHandler<TInitialMessage, TResponse, TSagaDa
     {
         Context = context;
     }
-
-    public abstract Task HandleStartAsync(TInitialMessage message);
-
 }
