@@ -13,6 +13,8 @@
 
     <ItemGroup>
       <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.5" />
+      <PackageReference Include="RabbitMQ.Client" Version="6.8.1" /> <!-- Added RabbitMQ.Client -->
+      <PackageReference Include="StackExchange.Redis" Version="2.7.33" /> <!-- Added StackExchange.Redis -->
     </ItemGroup>
 
 </Project>
