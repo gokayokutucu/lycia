@@ -1,4 +1,4 @@
-using System; // For Lazy<T>
+// For Lazy<T>
 using Lycia.Infrastructure.Abstractions;
 using Lycia.Messaging;
 using Lycia.Saga.Abstractions; // ISagaDispatcher is likely here or in Lycia.Infrastructure.Abstractions
@@ -11,16 +11,16 @@ namespace Lycia.Infrastructure.Eventing;
 /// </summary>
 public class InMemoryEventBus(Lazy<ISagaDispatcher> sagaDispatcherLazy) : IEventBus
 {
-    public async Task Send<TCommand>(TCommand command, Guid sagaId) where TCommand : ICommand
+    public Task Send<TCommand>(TCommand command, Guid? sagaId = null) where TCommand : ICommand
     {
         // The sagaId parameter passed to Send/Publish is not directly used by DispatchAsync,
         // as DispatchAsync typically resolves SagaId from the message properties or generates it.
         // The original implementation also didn't use the sagaId parameter in its call to DispatchAsync.
-        await sagaDispatcherLazy.Value.DispatchAsync(command);
+        return sagaDispatcherLazy.Value.DispatchAsync(command);
     }
 
-    public async Task Publish<TEvent>(TEvent @event, Guid sagaId) where TEvent : IEvent
+    public Task Publish<TEvent>(TEvent @event, Guid? sagaId = null) where TEvent : IEvent
     {
-        await sagaDispatcherLazy.Value.DispatchAsync(@event);
+        return sagaDispatcherLazy.Value.DispatchAsync(@event);
     }
 }

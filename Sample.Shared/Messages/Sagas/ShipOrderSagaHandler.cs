@@ -19,14 +19,13 @@ public class ShipOrderSagaHandler : ReactiveSagaHandler<OrderCreatedEvent>
                 return;
             }
 
-            await Context.Publish(new OrderShippedEvent
+            await Context.PublishWithTracking(new OrderShippedEvent
             {
                 OrderId = command.OrderId,
                 ShipmentTrackId = Guid.NewGuid(),
                 ShippedAt = DateTime.UtcNow
-            });
-
-            await Context.MarkAsComplete<OrderCreatedEvent>();
+            })
+                .ThenMarkAsComplete();
         }
         catch (Exception ex)
         {

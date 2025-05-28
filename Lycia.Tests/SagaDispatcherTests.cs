@@ -34,7 +34,8 @@ public class SagaDispatcherTests
         services.AddScoped<ISagaStartHandler<OrderShippedEvent>, DeliverOrderSagaHandler>();
 
         var serviceProvider = services.BuildServiceProvider();
-        var dispatcher = serviceProvider.GetRequiredService<ISagaDispatcher>();
+        var eventBus = serviceProvider.GetRequiredService<IEventBus>();
+        var sagaStore = serviceProvider.GetRequiredService<ISagaStore>() as InMemorySagaStore;
 
         var command = new CreateOrderCommand
         {
@@ -44,10 +45,13 @@ public class SagaDispatcherTests
         };
 
         // Act
-        await dispatcher.DispatchAsync(command);
+        // Instead of directly dispatching, publish the command via event bus and mark the step as completed
+        await eventBus.Send(command);
+
+        // Wait for saga steps to be processed (if needed)
+        // For testing purposes, we can simulate step completion by checking the saga store
 
         // Assert
-        var sagaStore = serviceProvider.GetRequiredService<ISagaStore>() as InMemorySagaStore;
         var wasLogged = await sagaStore!.IsStepCompletedAsync(fixedSagaId, typeof(CreateOrderCommand));
         Assert.True(wasLogged);
         var wasShipped = await sagaStore.IsStepCompletedAsync(fixedSagaId, typeof(OrderCreatedEvent));
