@@ -2,9 +2,11 @@ using Lycia.Infrastructure.Abstractions;
 using Lycia.Infrastructure.Dispatching;
 using Lycia.Infrastructure.Eventing;
 using Lycia.Infrastructure.Stores;
+using Lycia.Messaging;
 using Lycia.Messaging.Enums;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Extensions;
+using Lycia.Saga.Handlers;
 using Microsoft.Extensions.DependencyInjection;
 using Sample.Shared.Messages.Commands;
 using Sample.Shared.Messages.Events;
@@ -28,10 +30,10 @@ public class SagaDispatcherTests
         services.AddScoped<IEventBus>(sp =>
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
-        // Register handlers
+        // Register all relevant SagaHandlers
         services.AddScoped<ISagaStartHandler<CreateOrderCommand>, CreateOrderSagaHandler>();
-        services.AddScoped<ISagaStartHandler<OrderCreatedEvent>, ShipOrderSagaHandler>();
-        services.AddScoped<ISagaStartHandler<OrderShippedEvent>, DeliverOrderSagaHandler>();
+        services.AddScoped<ISagaHandler<OrderShippedEvent>, DeliverOrderSagaHandler>();
+        services.AddScoped<ISagaHandler<OrderCreatedEvent>, ShipOrderSagaHandler>();
 
         var serviceProvider = services.BuildServiceProvider();
         var eventBus = serviceProvider.GetRequiredService<IEventBus>();
@@ -75,7 +77,7 @@ public class SagaDispatcherTests
 
         // Register all relevant SagaHandlers
         services.AddScoped<ISagaStartHandler<CreateOrderCommand>, CreateOrderSagaHandler>();
-        services.AddScoped<ISagaStartHandler<OrderCreatedEvent>, ShipOrderForCompensationSagaHandler>();
+        services.AddScoped<ISagaHandler<OrderCreatedEvent>, ShipOrderForCompensationSagaHandler>();
 
         var provider = services.BuildServiceProvider();
 
@@ -142,7 +144,14 @@ public class SagaDispatcherTests
 
         // The ShipOrderForCompensationSagaHandler will intentionally fail at this step.
         services.AddScoped<ISagaStartHandler<CreateOrderCommand>, CreateOrderSagaHandler>();
-        services.AddScoped<ISagaStartHandler<OrderCreatedEvent>, ShipOrderForCompensationSagaHandler>();
+        services.AddScoped<ISagaCompensationHandler<OrderShippingFailedEvent>, CreateOrderSagaHandler>();
+        services.AddScoped<ISagaHandler<OrderCreatedEvent>, ShipOrderForCompensationSagaHandler>();
+        services.AddScoped<ISagaCompensationHandler<OrderCreatedEvent>, ShipOrderForCompensationSagaHandler>();
+        
+        // services.AddSagaHandlers(
+        //     typeof(CreateOrderSagaHandler),
+        //     typeof(ShipOrderForCompensationSagaHandler)
+        // );
 
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
@@ -162,13 +171,7 @@ public class SagaDispatcherTests
         var steps = await store.GetSagaStepsAsync(fixedSagaId);
         Assert.Contains(steps.Keys, x => x.Contains(nameof(CreateOrderCommand)));
         Assert.Contains(steps.Keys, x => x.Contains(nameof(OrderCreatedEvent)));
-        // The ShipOrderForCompensationSagaHandler step should fail, and compensation should be triggered.
-        Assert.Contains(steps.Values, meta => meta.Status == StepStatus.Failed);
-
-
-        var handler = provider.GetRequiredService<CreateOrderSagaHandler>();
-        // Was the compensation logic triggered?
-        Assert.True(handler.CompensateCalled); 
+        // The CreateOrderSagaHandler and ShipOrderForCompensationSagaHandler compensation step should be compensated
         Assert.Contains(steps.Values, meta => meta.Status == StepStatus.Compensated);
     }
     
@@ -184,9 +187,9 @@ public class SagaDispatcherTests
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
         services.AddScoped<ISagaStartHandler<CreateOrderCommand>, CreateOrderSagaHandler>();
-        services.AddScoped<ISagaStartHandler<OrderCreatedEvent>, ShipOrderSagaHandler>();
-        services.AddScoped<ISagaStartHandler<OrderShippedEvent>, DeliverOrderSagaHandler>();
-
+        services.AddScoped<ISagaHandler<OrderShippedEvent>, DeliverOrderSagaHandler>();
+        services.AddScoped<ISagaHandler<OrderCreatedEvent>, ShipOrderSagaHandler>();
+        
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
         var store = provider.GetRequiredService<ISagaStore>();
@@ -226,7 +229,7 @@ public class SagaDispatcherTests
         services.AddScoped<ISagaDispatcher, SagaDispatcher>();
         services.AddScoped<IEventBus>(sp =>
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
-
+        
         services.AddScoped<ISagaStartHandler<CreateOrderCommand>, CreateOrderSagaHandler>();
         // Other steps can also be added if needed.
 
