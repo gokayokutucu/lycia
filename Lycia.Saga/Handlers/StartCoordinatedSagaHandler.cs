@@ -4,12 +4,12 @@ using Lycia.Saga.Abstractions;
 namespace Lycia.Saga.Handlers;
 
 /// <summary>
-/// Represents a step in an orchestration-based saga.
-/// Handles a saga message and maintains saga state via saga data.
-/// Use this as a base for coordinated (stateful) saga step handlers.
+/// Represents the starting point of an orchestration-based saga.
+/// Handles the initial message in a coordinated saga and initializes saga state.
+/// Use this as a base for coordinated saga starters.
 /// </summary>
-public abstract class CoordinatedSagaHandler<TMessage, TResponse, TSagaData> :
-    ISagaHandler<TMessage, TSagaData>
+public abstract class StartCoordinatedSagaHandler<TMessage, TResponse, TSagaData> :
+    ISagaStartHandler<TMessage, TSagaData>
     where TMessage : IMessage
     where TResponse : IResponse<TMessage>
     where TSagaData : SagaData, new()
@@ -21,5 +21,5 @@ public abstract class CoordinatedSagaHandler<TMessage, TResponse, TSagaData> :
         Context = context;
     }
 
-    public abstract Task HandleAsync(TMessage message);
+    public abstract Task HandleStartAsync(TMessage message);
 }

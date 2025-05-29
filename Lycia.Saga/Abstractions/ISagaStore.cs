@@ -15,6 +15,14 @@ public interface ISagaStore
     /// Useful for enforcing idempotency in distributed workflows.
     /// </summary>
     Task<bool> IsStepCompletedAsync(Guid sagaId, Type stepType);
+    
+    /// <summary>
+    /// Gets the status of a specific step in the saga.
+    /// </summary>
+    /// <param name="sagaId"></param>
+    /// <param name="stepType"></param>
+    /// <returns></returns>
+    Task<StepStatus> GetStepStatusAsync(Guid sagaId, Type stepType);
 
     /// <summary>
     /// Retrieves all logged steps and their statuses for the given saga.

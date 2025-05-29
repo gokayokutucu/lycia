@@ -7,5 +7,5 @@ public interface ISagaIdGenerator
 
 public class DefaultSagaIdGenerator : ISagaIdGenerator
 {
-    public Guid Generate() => Guid.NewGuid(); // Changed to NewGuid()
+    public Guid Generate() => Guid.CreateVersion7(); // Changed to NewGuid()
 }

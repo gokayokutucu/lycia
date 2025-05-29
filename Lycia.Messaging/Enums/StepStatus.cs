@@ -7,6 +7,10 @@ namespace Lycia.Messaging.Enums;
 public enum StepStatus
 {
     /// <summary>
+    /// The step has not been executed yet.
+    /// </summary>
+    None,
+    /// <summary>
     /// The step has been started but not yet completed.
     /// </summary>
     Started,

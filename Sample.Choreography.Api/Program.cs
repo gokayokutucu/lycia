@@ -31,10 +31,10 @@ builder.Services.Scan(scan => scan
     .AddClasses(classes => classes.AssignableTo(typeof(ResponseSagaHandler<,>)))
     .AsSelfWithInterfaces()
     .WithScopedLifetime()
-    .AddClasses(classes => classes.AssignableTo(typeof(ISagaHandlerWithContext<>)))
+    .AddClasses(classes => classes.AssignableTo(typeof(ISagaHandler<>)))
     .AsImplementedInterfaces()
     .WithScopedLifetime()
-    .AddClasses(classes => classes.AssignableTo(typeof(ISagaHandlerWithContext<,>)))
+    .AddClasses(classes => classes.AssignableTo(typeof(ISagaHandler<,>)))
     .AsImplementedInterfaces()
     .WithScopedLifetime()
 );
