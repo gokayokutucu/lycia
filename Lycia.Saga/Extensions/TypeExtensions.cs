@@ -16,4 +16,22 @@ public static class TypeExtensions
         }
         return type;
     }
+    
+    public static bool IsSubclassOfRawGeneric(this Type? handlerType, Type interfaceType)
+    {
+        return handlerType?
+            .GetInterfaces()
+            .Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == interfaceType) ?? false;
+    }
+    
+    public static bool IsSubclassOfRawGenericBase(this Type? type, Type genericBaseType)
+    {
+        while (type != null && type != typeof(object))
+        {
+            if (type.IsGenericType && type.GetGenericTypeDefinition() == genericBaseType)
+                return true;
+            type = type.BaseType;
+        }
+        return false;
+    }
 }

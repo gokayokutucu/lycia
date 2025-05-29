@@ -4,12 +4,12 @@ using Lycia.Saga.Abstractions;
 namespace Lycia.Saga.Handlers;
 
 /// <summary>
-/// Represents a single choreography step in a saga workflow (step handler, not a starter).
-/// Implements business logic for a saga message without managing stateful saga data.
-/// Use this as a base for choreography saga steps that react to incoming events.
+/// Represents the starting point of a choreography-based saga.
+/// Handles the initial message in a choreography saga and is responsible for initializing the saga flow.
+/// Use this as a base for handlers that trigger new saga instances.
 /// </summary>
-public abstract class ReactiveSagaHandler<TMessage> :   
-    ISagaHandler<TMessage>
+public abstract class StartReactiveSagaHandler<TMessage> :   
+    ISagaStartHandler<TMessage>
     where TMessage : IMessage
 {
     protected ISagaContext<TMessage> Context { get; private set; } = null!;
@@ -19,7 +19,7 @@ public abstract class ReactiveSagaHandler<TMessage> :
         Context = context;
     }
 
-    public abstract Task HandleAsync(TMessage message);
+    public abstract Task HandleStartAsync(TMessage message);
     
     protected Task MarkAsComplete() => Context.MarkAsComplete<TMessage>();
     protected Task MarkAsFailed() => Context.MarkAsFailed<TMessage>();

@@ -25,15 +25,20 @@ public class InMemorySagaStore(IEventBus eventBus, ISagaIdGenerator sagaIdGenera
         try
         {
             var stepDict = _stepLogs.GetOrAdd(sagaId, _ => new ConcurrentDictionary<string, SagaStepMetadata>());
-            var stepName =
-                stepType.ToSagaStepName(); // Something like "Sample.Messages.Events.OrderShippedEvent, Sample.Messages"
+            var stepName = stepType.ToSagaStepName();
 
-            var messageTypeName = stepType.AssemblyQualifiedName;
-            if (string.IsNullOrWhiteSpace(messageTypeName))
+            var messageTypeName = stepType.AssemblyQualifiedName ?? stepName;
+
+            // State transition validation
+            if (stepDict.TryGetValue(stepName, out var existingMeta))
             {
-                Console.WriteLine(
-                    $"⚠️ Warning: AssemblyQualifiedName was null for {stepType.FullName}, using fallback.");
-                messageTypeName = stepName;
+                var previousStatus = existingMeta.Status;
+                if (!IsValidStepTransition(previousStatus, status))
+                {
+                    Console.WriteLine(
+                        $"Illegal StepStatus transition: {previousStatus} -> {status} for {stepName}");
+                    return Task.CompletedTask;
+                }
             }
 
             var metadata = new SagaStepMetadata
@@ -66,6 +71,18 @@ public class InMemorySagaStore(IEventBus eventBus, ISagaIdGenerator sagaIdGenera
         }
 
         return Task.FromResult(false);
+    }
+
+    public Task<StepStatus> GetStepStatusAsync(Guid sagaId, Type stepType)
+    {
+        if (_stepLogs.TryGetValue(sagaId, out var steps))
+        {
+            steps.TryGetValue(stepType.ToSagaStepName(), out var metadata);
+
+            if (metadata != null) return Task.FromResult(metadata.Status);
+        }
+
+        return Task.FromResult(StepStatus.None);
     }
 
     public Task<IReadOnlyDictionary<string, SagaStepMetadata>> GetSagaStepsAsync(Guid sagaId)
@@ -111,5 +128,19 @@ public class InMemorySagaStore(IEventBus eventBus, ISagaIdGenerator sagaIdGenera
         );
 
         return Task.FromResult(context);
+    }
+    
+    private static bool IsValidStepTransition(StepStatus previous, StepStatus next)
+    {
+        return previous switch
+        {
+            StepStatus.None => next == StepStatus.Started,
+            StepStatus.Started => next is StepStatus.Completed or StepStatus.Failed,
+            StepStatus.Completed => next == StepStatus.Failed, // Retry or compensation can follow completion
+            StepStatus.Failed => next == StepStatus.Compensated,
+            StepStatus.Compensated => next == StepStatus.CompensationFailed,
+            StepStatus.CompensationFailed => false, // Final state
+            _ => false
+        };
     }
 }

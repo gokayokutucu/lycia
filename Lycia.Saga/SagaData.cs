@@ -1,6 +1,6 @@
 namespace Lycia.Saga;
 
-public abstract class SagaData
+public class SagaData
 {
     public Dictionary<string, object> Extras { get; set; } = new();
 

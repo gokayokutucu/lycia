@@ -5,8 +5,7 @@ namespace Lycia.Saga.Handlers;
 
 public abstract class ResponseSagaHandler<TResponse, TSagaData> :
     ISuccessResponseHandler<TResponse>,
-    IFailResponseHandler<TResponse>,
-    ISagaHandlerWithContext<IMessage, TSagaData>
+    IFailResponseHandler<TResponse>
     where TResponse : ISuccessResponse<IMessage>, IFailResponse<IMessage>
     where TSagaData : SagaData, new()
 {
