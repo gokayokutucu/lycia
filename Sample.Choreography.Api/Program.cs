@@ -50,13 +50,13 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 
-app.MapPost("/order", async (
-        [FromBody] CreateOrderCommand command,
+app.MapPost("/start-lycia-saga", async (
+        [FromBody] StartLyciaSagaCommand command, // Changed command type
         [FromServices] IEventBus eventBus) =>
     {
         await eventBus.Send(command); 
         return Results.Accepted();
     })
-    .WithName("CreateOrder");
+    .WithName("StartLyciaSaga"); // Changed name
 
 app.Run();
