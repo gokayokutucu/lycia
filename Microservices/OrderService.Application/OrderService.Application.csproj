@@ -1,9 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\OrderService.Domain\OrderService.Domain.csproj" />
     <ProjectReference Include="..\..\Lycia.Messaging\Lycia.Messaging.csproj" />
     <ProjectReference Include="..\..\Lycia.Saga\Lycia.Saga.csproj" />
-    <ProjectReference Include="..\OrderService.Domain\OrderService.Domain.csproj" />
   </ItemGroup>
 
   <ItemGroup>
