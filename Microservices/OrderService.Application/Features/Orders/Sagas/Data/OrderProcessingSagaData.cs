@@ -7,7 +7,6 @@ namespace OrderService.Application.Features.Orders.Sagas.Data
 {
     public class OrderProcessingSagaData : SagaData
     {
-        public Guid Id { get; set; }
         public Guid OrderId { get; set; }
         public Guid UserId { get; set; }
         public string OrderStatus { get; set; } // e.g., "ProcessingStarted", "PaymentConfirmed", "InventoryUpdated"
@@ -20,7 +19,7 @@ namespace OrderService.Application.Features.Orders.Sagas.Data
         // Constructor for initialization if needed (SagaData is often initialized by handlers)
         public OrderProcessingSagaData(Guid sagaId, Guid orderId, Guid userId, decimal totalPrice, List<OrderItemSagaDto> items)
         {
-            Id = sagaId; // TODO: Gop - SagaData.Id is the SagaInstanceId
+            Id = sagaId; // SagaData.Id is the SagaInstanceId
             OrderId = orderId;
             UserId = userId;
             TotalPrice = totalPrice;
