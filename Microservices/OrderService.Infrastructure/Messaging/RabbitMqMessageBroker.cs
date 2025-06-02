@@ -1,5 +1,8 @@
+using System;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
 using OrderService.Application.Contracts.Infrastructure;
 using RabbitMQ.Client;
@@ -11,7 +14,7 @@ namespace OrderService.Infrastructure.Messaging
     {
         private readonly RabbitMqOptions _options;
         private IConnection _connection;
-        private IChannel _channel;
+        private IModel _channel;
         private readonly object _lock = new object(); // For thread-safe connection/channel creation
 
         public RabbitMqMessageBroker(IOptions<RabbitMqOptions> options)
@@ -41,12 +44,12 @@ namespace OrderService.Infrastructure.Messaging
 
                         try
                         {
-                            _connection = factory.CreateConnectionAsync().GetAwaiter().GetResult();
-                            _channel = _connection.CreateChannelAsync().GetAwaiter().GetResult();
+                            _connection = factory.CreateConnection();
+                            _channel = _connection.CreateModel();
 
                             // Declare the exchange (idempotent)
-                            _channel.ExchangeDeclareAsync(exchange: _options.ExchangeName, type: ExchangeType.Topic, durable: true);
-                            
+                            _channel.ExchangeDeclare(exchange: _options.ExchangeName, type: ExchangeType.Topic, durable: true);
+
                             Console.WriteLine($"RabbitMQ connected to {_options.Hostname} and channel/exchange '{_options.ExchangeName}' established.");
                         }
                         catch (BrokerUnreachableException ex)
@@ -64,9 +67,9 @@ namespace OrderService.Infrastructure.Messaging
                  {
                     if(_channel == null || _channel.IsClosed)
                     {
-                        _channel = _connection?.CreateChannelAsync().GetAwaiter().GetResult();
+                        _channel = _connection?.CreateModel();
                         if(_channel != null) {
-                             _channel.ExchangeDeclareAsync(exchange: _options.ExchangeName, type: ExchangeType.Topic, durable: true);
+                             _channel.ExchangeDeclare(exchange: _options.ExchangeName, type: ExchangeType.Topic, durable: true);
                         } else {
                              Console.WriteLine($"RabbitMQ channel could not be created. Connection might be null.");
                              throw new InvalidOperationException("RabbitMQ channel could not be created.");
@@ -97,28 +100,24 @@ namespace OrderService.Infrastructure.Messaging
                 var messageType = typeof(T).Name; // Basic routing key by type name
                 // In a real app, you might have more sophisticated routing key generation
                 // or get it from message attributes/configuration.
-                var routingKey = $"orders.{messageType.ToLowerInvariant()}"; 
+                var routingKey = $"orders.{messageType.ToLowerInvariant()}";
 
                 var jsonMessage = JsonSerializer.Serialize(message);
                 var body = Encoding.UTF8.GetBytes(jsonMessage);
 
-                var properties = new BasicProperties
-                {
-                    Persistent = true,
-                    ContentType = "application/json",
-                    Type = messageType,
-                    MessageId = Guid.NewGuid().ToString(),
-                    Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds())
-                };
+                var properties = _channel.CreateBasicProperties();
+                properties.Persistent = true; // Make messages persistent
+                properties.ContentType = "application/json";
+                properties.Type = messageType; // Set message type for consumers
+                properties.MessageId = Guid.NewGuid().ToString(); // Unique message ID
+                properties.Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
 
-                // Update the BasicPublishAsync call to match the correct overload signature
-                _channel.BasicPublishAsync(
+                _channel.BasicPublish(
                     exchange: _options.ExchangeName,
                     routingKey: routingKey,
-                    mandatory: false, // Add the 'mandatory' parameter as required by the method signature
                     basicProperties: properties,
-                    body: body).GetAwaiter().GetResult();
-                
+                    body: body);
+
                 Console.WriteLine($"Published {messageType} to {_options.ExchangeName} with routing key {routingKey}");
                 return Task.CompletedTask;
             }

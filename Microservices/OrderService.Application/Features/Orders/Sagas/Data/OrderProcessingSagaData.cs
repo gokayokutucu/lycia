@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using Lycia.Saga; // For SagaData
 using OrderService.Application.Features.Orders.Sagas.Commands; // For OrderItemSagaDto
 
@@ -17,7 +19,7 @@ namespace OrderService.Application.Features.Orders.Sagas.Data
         // Constructor for initialization if needed (SagaData is often initialized by handlers)
         public OrderProcessingSagaData(Guid sagaId, Guid orderId, Guid userId, decimal totalPrice, List<OrderItemSagaDto> items)
         {
-            Extras["Id"] = sagaId; // SagaData.Id is the SagaInstanceId
+            Id = sagaId; // SagaData.Id is the SagaInstanceId
             OrderId = orderId;
             UserId = userId;
             TotalPrice = totalPrice;

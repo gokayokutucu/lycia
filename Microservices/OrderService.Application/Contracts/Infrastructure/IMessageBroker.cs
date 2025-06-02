@@ -1,3 +1,6 @@
+using System.Threading;
+using System.Threading.Tasks;
+
 namespace OrderService.Application.Contracts.Infrastructure
 {
     public interface IMessageBroker
