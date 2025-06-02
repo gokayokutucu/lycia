@@ -1,7 +1,6 @@
-using System;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
+using Lycia.Messaging;
+using Lycia.Messaging.Enums;
 using Lycia.Saga;
 using Lycia.Saga.Abstractions;
 using Microsoft.Extensions.Options; // Required for IOptions
@@ -67,7 +66,7 @@ namespace Lycia.Extensions.Stores.Redis
                 throw new ArgumentNullException(nameof(sagaData));
             }
 
-            var key = _keyPrefix + sagaData.Id.ToString();
+            var key = _keyPrefix + sagaData.Extras["Id"].ToString();
             var serializedSagaData = JsonSerializer.Serialize(sagaData);
 
             // Consider adding expiry, e.g., TimeSpan.FromDays(7)
@@ -78,6 +77,43 @@ namespace Lycia.Extensions.Stores.Redis
         {
             var key = _keyPrefix + sagaId.ToString();
             await _redisDatabase.KeyDeleteAsync(key);
+        }
+
+        public async Task LogStepAsync(Guid sagaId, Type stepType, StepStatus status, object? payload = null)
+        {
+            throw new NotImplementedException();
+        }
+
+        public async Task<bool> IsStepCompletedAsync(Guid sagaId, Type stepType)
+        {
+            throw new NotImplementedException();
+        }
+
+        public async Task<StepStatus> GetStepStatusAsync(Guid sagaId, Type stepType)
+        {
+            throw new NotImplementedException();
+        }
+
+        public async Task<IReadOnlyDictionary<string, SagaStepMetadata>> GetSagaStepsAsync(Guid sagaId)
+        {
+            throw new NotImplementedException();
+        }
+
+        public async Task<SagaData?> LoadSagaDataAsync(Guid sagaId)
+        {
+            throw new NotImplementedException();
+        }
+
+        public async Task SaveSagaDataAsync(Guid sagaId, SagaData data)
+        {
+            throw new NotImplementedException();
+        }
+
+        public async Task<ISagaContext<TMessage, TSagaData>> LoadContextAsync<TMessage, TSagaData>(Guid sagaId)
+            where TMessage : IMessage
+            where TSagaData : SagaData, new()
+        {
+            throw new NotImplementedException();
         }
     }
 }
