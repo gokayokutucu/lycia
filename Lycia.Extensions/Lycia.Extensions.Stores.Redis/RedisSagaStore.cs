@@ -1,6 +1,7 @@
+using System;
 using System.Text.Json;
-using Lycia.Messaging;
-using Lycia.Messaging.Enums;
+using System.Threading;
+using System.Threading.Tasks;
 using Lycia.Saga;
 using Lycia.Saga.Abstractions;
 using Microsoft.Extensions.Options; // Required for IOptions
@@ -22,7 +23,7 @@ namespace Lycia.Extensions.Stores.Redis
                 _keyPrefix += ":";
             }
         }
-        
+
         // Kept the simpler constructor for direct instantiation or if options are not used.
         // Consider removing if IOptions is always expected.
         public RedisSagaStore(IDatabase redisDatabase, string keyPrefix = "sagas:")
@@ -66,54 +67,17 @@ namespace Lycia.Extensions.Stores.Redis
                 throw new ArgumentNullException(nameof(sagaData));
             }
 
-            var key = _keyPrefix + sagaData.Extras["Id"].ToString();
+            var key = _keyPrefix + sagaData.Id.ToString();
             var serializedSagaData = JsonSerializer.Serialize(sagaData);
 
             // Consider adding expiry, e.g., TimeSpan.FromDays(7)
-            await _redisDatabase.StringSetAsync(key, serializedSagaData); 
+            await _redisDatabase.StringSetAsync(key, serializedSagaData);
         }
 
         public async Task DeleteAsync<TSagaData>(Guid sagaId, CancellationToken cancellationToken = default) where TSagaData : SagaData, new()
         {
             var key = _keyPrefix + sagaId.ToString();
             await _redisDatabase.KeyDeleteAsync(key);
-        }
-
-        public async Task LogStepAsync(Guid sagaId, Type stepType, StepStatus status, object? payload = null)
-        {
-            throw new NotImplementedException();
-        }
-
-        public async Task<bool> IsStepCompletedAsync(Guid sagaId, Type stepType)
-        {
-            throw new NotImplementedException();
-        }
-
-        public async Task<StepStatus> GetStepStatusAsync(Guid sagaId, Type stepType)
-        {
-            throw new NotImplementedException();
-        }
-
-        public async Task<IReadOnlyDictionary<string, SagaStepMetadata>> GetSagaStepsAsync(Guid sagaId)
-        {
-            throw new NotImplementedException();
-        }
-
-        public async Task<SagaData?> LoadSagaDataAsync(Guid sagaId)
-        {
-            throw new NotImplementedException();
-        }
-
-        public async Task SaveSagaDataAsync(Guid sagaId, SagaData data)
-        {
-            throw new NotImplementedException();
-        }
-
-        public async Task<ISagaContext<TMessage, TSagaData>> LoadContextAsync<TMessage, TSagaData>(Guid sagaId)
-            where TMessage : IMessage
-            where TSagaData : SagaData, new()
-        {
-            throw new NotImplementedException();
         }
     }
 }

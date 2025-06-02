@@ -1,6 +1,0 @@
-services:
-  orderservice.api:
-    image: ${DOCKER_REGISTRY-}orderserviceapi
-    build:
-      context: .
-      dockerfile: Microservices/OrderService.Api/Dockerfile

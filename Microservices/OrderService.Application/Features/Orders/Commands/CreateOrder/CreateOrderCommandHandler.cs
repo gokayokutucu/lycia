@@ -1,60 +1,79 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using MediatR;
 using OrderService.Application.Contracts.Persistence;
-using OrderService.Domain.Events;          // For OrderCreatedDomainEvent
+using OrderService.Domain.Aggregates.Order;    // For Order and OrderItem domain entities
+using OrderService.Domain.Events;             // For OrderCreatedDomainEvent
+using OrderService.Domain.Events.Dtos;        // For OrderItemDomainDto
 
-namespace OrderService.Application.Features.Orders.Commands.CreateOrder;
-
-public class CreateOrderCommandHandler : IRequestHandler<CreateOrderCommand, Guid>
+namespace OrderService.Application.Features.Orders.Commands.CreateOrder
 {
-    private readonly IOrderRepository _orderRepository;
-    private readonly IPublisher _publisher;
-
-    public CreateOrderCommandHandler(IOrderRepository orderRepository, IPublisher publisher)
+    public class CreateOrderCommandHandler : IRequestHandler<CreateOrderCommand, Guid>
     {
-        _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
-        _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
-    }
+        private readonly IOrderRepository _orderRepository;
+        private readonly IPublisher _publisher;
 
-    public async Task<Guid> Handle(CreateOrderCommand request, CancellationToken cancellationToken)
-    {
-        if (request == null)
+        public CreateOrderCommandHandler(IOrderRepository orderRepository, IPublisher publisher)
         {
-            throw new ArgumentNullException(nameof(request));
-        }
-        if (request.Items == null || !request.Items.Any())
-        {
-            // Or handle this with a FluentValidation validator
-            throw new ArgumentException("Order items cannot be empty.", nameof(request.Items));
+            _orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
+            _publisher = publisher ?? throw new ArgumentNullException(nameof(publisher));
         }
 
-        // Map DTOs to Domain Entities for OrderItems
-        var domainOrderItems = request.Items.Select(dto => new Domain.Aggregates.Order.OrderItem(
-            dto.ProductId,
-            dto.ProductName, // Assuming ProductName in DTO is directly used or enriched if null/empty
-            dto.UnitPrice,
-            dto.Quantity
-        )).ToList();
+        public async Task<Guid> Handle(CreateOrderCommand request, CancellationToken cancellationToken)
+        {
+            if (request == null)
+            {
+                throw new ArgumentNullException(nameof(request));
+            }
+            if (request.Items == null || !request.Items.Any())
+            {
+                // Or handle this with a FluentValidation validator
+                throw new ArgumentException("Order items cannot be empty.", nameof(request.Items));
+            }
 
-        // Create the Order aggregate
-        var order = new Domain.Aggregates.Order.Order(
-            Guid.NewGuid(), // Generate new Order ID
-            request.UserId,
-            domainOrderItems
-        );
+            // Map DTOs to Domain Entities for OrderItems
+            var domainOrderItems = request.Items.Select(dto => new Domain.Aggregates.Order.OrderItem(
+                dto.ProductId,
+                dto.ProductName, // Assuming ProductName in DTO is directly used or enriched if null/empty
+                dto.UnitPrice,
+                dto.Quantity
+            )).ToList();
 
-        // Persist the order
-        await _orderRepository.AddAsync(order, cancellationToken);
+            // Create the Order aggregate
+            var order = new Domain.Aggregates.Order.Order(
+                Guid.NewGuid(), // Generate new Order ID
+                request.UserId,
+                domainOrderItems
+            );
 
-        // Create the domain event
-        var domainEvent = new OrderCreatedDomainEvent(
-            order.Id,
-            order.UserId,
-            order.CreatedDate
-        );
+            // Persist the order
+            await _orderRepository.AddAsync(order, cancellationToken);
 
-        // Publish the domain event
-        await _publisher.Publish(domainEvent, cancellationToken);
+            // Create the domain event
+            // Map domain OrderItems to OrderItemDomainDto for the event
+            var eventOrderItems = order.Items.Select(domainItem => new OrderItemDomainDto
+            {
+                ProductId = domainItem.ProductId,
+                ProductName = domainItem.ProductName,
+                UnitPrice = domainItem.UnitPrice,
+                Quantity = domainItem.Quantity
+            }).ToList();
 
-        return order.Id;
+            var domainEvent = new OrderCreatedDomainEvent(
+                order.Id,
+                order.UserId,
+                order.TotalPrice,
+                eventOrderItems,
+                order.CreatedDate
+            );
+
+            // Publish the domain event
+            await _publisher.Publish(domainEvent, cancellationToken);
+
+            return order.Id;
+        }
     }
 }
