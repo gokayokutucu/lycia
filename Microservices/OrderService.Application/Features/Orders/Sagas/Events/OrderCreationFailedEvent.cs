@@ -1,5 +1,3 @@
-using System;
-
 namespace OrderService.Application.Features.Orders.Sagas.Events
 {
     // This event is intended for publishing to an external message broker (e.g., RabbitMQ)
@@ -10,7 +8,7 @@ namespace OrderService.Application.Features.Orders.Sagas.Events
         public DateTime FailedAt { get; set; }
 
         // Parameterless constructor for deserialization
-        public OrderCreationFailedEvent() {}
+        public OrderCreationFailedEvent() { }
 
         public OrderCreationFailedEvent(Guid orderId, string reason, DateTime failedAt)
         {
