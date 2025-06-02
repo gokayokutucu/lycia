@@ -17,7 +17,7 @@ namespace OrderService.Application.Features.Orders.Sagas.Data
         // Constructor for initialization if needed (SagaData is often initialized by handlers)
         public OrderProcessingSagaData(Guid sagaId, Guid orderId, Guid userId, decimal totalPrice, List<OrderItemSagaDto> items)
         {
-            Id = sagaId; // SagaData.Id is the SagaInstanceId
+            Extras["Id"] = sagaId; // SagaData.Id is the SagaInstanceId
             OrderId = orderId;
             UserId = userId;
             TotalPrice = totalPrice;
