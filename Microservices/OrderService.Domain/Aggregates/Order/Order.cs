@@ -64,7 +64,7 @@ namespace OrderService.Domain.Aggregates.Order
             {
                 _items.Add(item);
             }
-
+            
             RecalculateTotalPrice();
             SetUpdatedDate();
             // TODO: Add domain event if significant
@@ -85,7 +85,7 @@ namespace OrderService.Domain.Aggregates.Order
             SetUpdatedDate();
             // TODO: Add domain event: new OrderStatusChangedDomainEvent(...)
         }
-
+        
         private void RecalculateTotalPrice()
         {
             TotalPrice = _items.Sum(item => item.UnitPrice * item.Quantity);

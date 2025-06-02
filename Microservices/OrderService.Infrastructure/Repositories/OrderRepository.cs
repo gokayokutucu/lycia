@@ -34,7 +34,7 @@ namespace OrderService.Infrastructure.Repositories
                 // For in-memory, we can choose to throw or handle as an update (though AddAsync implies new)
                 throw new InvalidOperationException($"An order with ID {order.Id} already exists.");
             }
-
+            
             _orders.Add(order);
             return Task.CompletedTask;
         }

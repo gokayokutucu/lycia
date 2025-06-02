@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using MediatR;
 
 namespace OrderService.Application.Features.Orders.Commands.CreateOrder
