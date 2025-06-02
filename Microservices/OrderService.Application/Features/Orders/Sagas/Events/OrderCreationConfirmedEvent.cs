@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using OrderService.Application.Features.Orders.Sagas.Commands; // For OrderItemSagaDto
 
 namespace OrderService.Application.Features.Orders.Sagas.Events
@@ -15,7 +13,7 @@ namespace OrderService.Application.Features.Orders.Sagas.Events
         public DateTime ConfirmedAt { get; set; }
 
         // Parameterless constructor for deserialization
-        public OrderCreationConfirmedEvent() {}
+        public OrderCreationConfirmedEvent() { }
 
         public OrderCreationConfirmedEvent(Guid orderId, Guid userId, decimal totalPrice, List<OrderItemSagaDto> items, DateTime confirmedAt)
         {

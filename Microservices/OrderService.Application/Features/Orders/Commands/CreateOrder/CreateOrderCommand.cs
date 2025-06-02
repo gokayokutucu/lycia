@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using MediatR;
 
 namespace OrderService.Application.Features.Orders.Commands.CreateOrder
@@ -17,7 +15,7 @@ namespace OrderService.Application.Features.Orders.Commands.CreateOrder
     {
         public Guid UserId { get; set; }
         public List<OrderItemDto> Items { get; set; } = new List<OrderItemDto>();
-        
+
         // Potential future properties:
         // public string ShippingAddress { get; set; }
         // public PaymentDetailsDto PaymentInfo { get; set; }
