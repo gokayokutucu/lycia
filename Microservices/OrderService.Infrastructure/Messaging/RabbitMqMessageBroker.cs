@@ -34,8 +34,9 @@ namespace OrderService.Infrastructure.Messaging
                             Port = _options.Port,
                             UserName = _options.Username,
                             Password = _options.Password,
-                            VirtualHost = _options.VirtualHost,
-                            DispatchConsumersAsync = true // Recommended for async consumers
+                            VirtualHost = _options.VirtualHost
+                            // DispatchConsumersAsync = true; // This is a property, not part of constructor or object initializer in this context.
+                            // It's also primarily for consumer dispatch, not essential for publisher setup.
                         };
 
                         try
@@ -130,22 +131,22 @@ namespace OrderService.Infrastructure.Messaging
         {
             try
             {
-                _channel?.Close();
+                // Disposing the channel will also close it if it's open.
                 _channel?.Dispose();
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error closing RabbitMQ channel: {ex.Message}");
+                Console.WriteLine($"Error disposing RabbitMQ channel: {ex.Message}"); // Updated log message
             }
 
             try
             {
-                _connection?.Close();
+                // Disposing the connection will also close it if it's open.
                 _connection?.Dispose();
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error closing RabbitMQ connection: {ex.Message}");
+                Console.WriteLine($"Error disposing RabbitMQ connection: {ex.Message}"); // Updated log message
             }
         }
     }

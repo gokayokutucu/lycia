@@ -6,7 +6,7 @@ using OrderService.Application.Features.Orders.Sagas.Events;
 
 namespace OrderService.Application.Features.Orders.Sagas.Handlers
 {
-    public class StartOrderProcessingSagaHandler : StartReactiveSagaHandler<StartOrderProcessingSagaCommand>
+    public class StartOrderProcessingSagaHandler : StartReactiveSagaHandler<StartOrderProcessingSagaCommand, OrderProcessingSagaData>
     {
         private readonly IMessageBroker _messageBroker; // To be defined and implemented later
         private readonly OrderProcessingSagaData SagaData = new(); // Assuming this is the SagaData class for this saga
@@ -24,7 +24,7 @@ namespace OrderService.Application.Features.Orders.Sagas.Handlers
             }
 
             // Initialize SagaData from the command
-            SagaData.Id = command.SagaId.GetValueOrDefault(); // SagaData.Id is the SagaInstanceId, which we set in StartOrderProcessingSagaCommand
+            SagaData.Id = command.SagaId; // SagaData.Id is the SagaInstanceId, which we set in StartOrderProcessingSagaCommand
             SagaData.OrderId = command.OrderId;
             SagaData.UserId = command.UserId;
             SagaData.TotalPrice = command.TotalPrice;
