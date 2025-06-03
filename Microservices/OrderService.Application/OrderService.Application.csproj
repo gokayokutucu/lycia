@@ -10,6 +10,14 @@
     <PackageReference Include="MediatR" Version="12.5.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Features\Orders\Commands\AddOrder\Validator\" />
+    <Folder Include="Features\Orders\Commands\DeleteOrder\Validator\" />
+    <Folder Include="Features\Orders\Commands\UpdateOrder\Validator\" />
+    <Folder Include="Features\Orders\Queries\GetAllOrders\Validator\" />
+    <Folder Include="Features\Orders\Queries\GetOrderById\Validator\" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>

@@ -1,0 +1,27 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Folder Include="Contracts\Infrastructure\" />
+    <Folder Include="Features\Stocks\Commands\AddStock\Validator\" />
+    <Folder Include="Features\Stocks\Commands\DeleteStock\Validator\" />
+    <Folder Include="Features\Stocks\Commands\UpdateStock\Validator\" />
+    <Folder Include="Features\Stocks\Queries\GetAllStocks\Validator\" />
+    <Folder Include="Features\Stocks\Queries\GetStocksById\Validator\" />
+    <Folder Include="Features\Stocks\Sagas\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MediatR" Version="12.5.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\InventoryService.Domain\InventoryService.Domain.csproj" />
+  </ItemGroup>
+
+</Project>
