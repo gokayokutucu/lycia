@@ -26,6 +26,8 @@
     <ItemGroup>
       <ProjectReference Include="..\Lycia.Infrastructure\Lycia.Infrastructure.csproj" />
       <ProjectReference Include="..\Sample.Shared\Sample.Shared.csproj" />
+      <ProjectReference Include="..\Microservices\OrderService.Application\OrderService.Application.csproj" />
+      <ProjectReference Include="..\Microservices\InventoryService.Application\InventoryService.Application.csproj" />
     </ItemGroup>
 
 </Project>

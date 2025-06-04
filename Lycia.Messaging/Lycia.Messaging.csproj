@@ -10,4 +10,5 @@
 <!--    <PropertyGroup Condition="'$(BuildingTests)' == 'true'">-->
 <!--        <DefineConstants>$(DefineConstants);UNIT_TESTING</DefineConstants>-->
 <!--    </PropertyGroup>-->
+
 </Project>

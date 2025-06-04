@@ -1,18 +1,24 @@
+using System;
+using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
-using OrderService.Application.Contracts.Infrastructure;
+using OrderService.Application.Contracts.Infrastructure; // For IMessageBroker
 using RabbitMQ.Client;
-using RabbitMQ.Client.Exceptions; // For specific RabbitMQ exceptions
+using RabbitMQ.Client.Exceptions;
+using Lycia.Saga.Abstractions; // For IEventBus
+using Lycia.Messaging; // For IMessage, ICommand, IEvent
 
 namespace OrderService.Infrastructure.Messaging
 {
-    public class RabbitMqMessageBroker : IMessageBroker, IDisposable
+    public class RabbitMqMessageBroker : IMessageBroker, IEventBus, IDisposable
     {
         private readonly RabbitMqOptions _options;
         private IConnection _connection;
-        private IChannel _channel;
-        private readonly object _lock = new object(); // For thread-safe connection/channel creation
+        private IModel _channel;
+        private readonly object _lock = new object();
 
         public RabbitMqMessageBroker(IOptions<RabbitMqOptions> options)
         {
@@ -35,123 +41,187 @@ namespace OrderService.Infrastructure.Messaging
                             UserName = _options.Username,
                             Password = _options.Password,
                             VirtualHost = _options.VirtualHost
-                            // DispatchConsumersAsync = true; // This is a property, not part of constructor or object initializer in this context.
-                            // It's also primarily for consumer dispatch, not essential for publisher setup.
                         };
 
                         try
                         {
-                            _connection = factory.CreateConnectionAsync().GetAwaiter().GetResult();
-                            _channel = _connection.CreateChannelAsync().GetAwaiter().GetResult();
-
-                            // Declare the exchange (idempotent)
-                            _channel.ExchangeDeclareAsync(exchange: _options.ExchangeName, type: ExchangeType.Topic, durable: true);
-                            
+                            _connection = factory.CreateConnection();
+                            _channel = _connection.CreateModel();
+                            _channel.ExchangeDeclare(exchange: _options.ExchangeName, type: ExchangeType.Topic, durable: true);
                             Console.WriteLine($"RabbitMQ connected to {_options.Hostname} and channel/exchange '{_options.ExchangeName}' established.");
                         }
                         catch (BrokerUnreachableException ex)
                         {
-                            Console.WriteLine($"RabbitMQ connection failed: {ex.Message}. Check RabbitMQ server is running and accessible.");
-                            // Handle this appropriately - retry logic, circuit breaker, or rethrow
-                            throw; // Rethrow for now, higher level should handle startup issues
+                            Console.WriteLine($"RabbitMQ connection failed: {ex.Message}. Check RabbitMQ server.");
+                            throw;
                         }
                     }
                 }
             }
-            if (_channel == null || _channel.IsClosed) // Ensure channel is also open
+            if (_channel == null || _channel.IsClosed)
             {
                  lock(_lock)
                  {
                     if(_channel == null || _channel.IsClosed)
                     {
-                        _channel = _connection?.CreateChannelAsync().GetAwaiter().GetResult();
-                        if(_channel != null) {
-                             _channel.ExchangeDeclareAsync(exchange: _options.ExchangeName, type: ExchangeType.Topic, durable: true);
+                        if (_connection == null || !_connection.IsOpen)
+                        {
+                             Console.WriteLine($"RabbitMQ connection is not open. Attempting to reconnect to recreate channel.");
+                             _connection?.Dispose();
+                             _connection = null;
+                             Connect();
+                             if(_channel == null || _channel.IsClosed) {
+                                 throw new InvalidOperationException("RabbitMQ channel could not be created after reconnect attempt.");
+                             }
                         } else {
-                             Console.WriteLine($"RabbitMQ channel could not be created. Connection might be null.");
-                             throw new InvalidOperationException("RabbitMQ channel could not be created.");
+                            _channel = _connection.CreateModel();
+                            _channel.ExchangeDeclare(exchange: _options.ExchangeName, type: ExchangeType.Topic, durable: true);
+                             Console.WriteLine($"RabbitMQ channel recreated for exchange '{_options.ExchangeName}'.");
                         }
                     }
                  }
             }
         }
 
-        public Task PublishAsync<T>(T message, CancellationToken cancellationToken = default) where T : class
+        public Task PublishAsync<T>(T messagePayload, CancellationToken cancellationToken = default) where T : class
         {
-            if (message == null)
-            {
-                throw new ArgumentNullException(nameof(message));
-            }
+            if (messagePayload == null) throw new ArgumentNullException(nameof(messagePayload));
 
-            // Ensure connection/channel is alive, attempt to reconnect if not.
             Connect();
-            if (_channel == null || !_channel.IsOpen)
-            {
-                // Log critical error, cannot publish
-                Console.WriteLine("RabbitMQ channel is not open. Cannot publish message.");
-                throw new InvalidOperationException("RabbitMQ channel is not available.");
-            }
+            if (_channel == null || !_channel.IsOpen) throw new InvalidOperationException("RabbitMQ channel not available for IMessageBroker.PublishAsync.");
 
             try
             {
-                var messageType = typeof(T).Name; // Basic routing key by type name
-                // In a real app, you might have more sophisticated routing key generation
-                // or get it from message attributes/configuration.
-                var routingKey = $"orders.{messageType.ToLowerInvariant()}"; 
+                var messageType = typeof(T).Name;
+                var routingKey = $"generic.{messageType.ToLowerInvariant()}";
 
-                var jsonMessage = JsonSerializer.Serialize(message);
+                var jsonMessage = JsonSerializer.Serialize(messagePayload);
                 var body = Encoding.UTF8.GetBytes(jsonMessage);
 
-                var properties = new BasicProperties
-                {
-                    Persistent = true,
-                    ContentType = "application/json",
-                    Type = messageType,
-                    MessageId = Guid.NewGuid().ToString(),
-                    Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds())
-                };
+                var properties = _channel.CreateBasicProperties();
+                properties.Persistent = true;
+                properties.ContentType = "application/json";
+                properties.Type = messageType;
+                properties.MessageId = Guid.NewGuid().ToString();
+                // CorrelationId is not part of generic messagePayload for IMessageBroker
+                properties.Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds()); // Corrected
 
-                // Update the BasicPublishAsync call to match the correct overload signature
-                _channel.BasicPublishAsync(
+                _channel.BasicPublish(
                     exchange: _options.ExchangeName,
                     routingKey: routingKey,
-                    mandatory: false, // Add the 'mandatory' parameter as required by the method signature
+                    mandatory: false,
                     basicProperties: properties,
-                    body: body).GetAwaiter().GetResult();
+                    body: body);
                 
-                Console.WriteLine($"Published {messageType} to {_options.ExchangeName} with routing key {routingKey}");
-                return Task.CompletedTask;
+                Console.WriteLine($"SUCCESS (IMessageBroker): Published {messageType} to exchange '{_options.ExchangeName}' with routing key '{routingKey}'");
             }
             catch (Exception ex)
             {
-                // Log error
-                Console.WriteLine($"Error publishing message: {ex.Message}");
-                // Handle publish error - retry, dead-letter, etc.
-                throw; // Rethrow for now
+                Console.WriteLine($"FAIL (IMessageBroker): Error publishing message type {typeof(T).Name}: {ex.Message}");
+                throw;
             }
+            return Task.CompletedTask;
+        }
+
+        Task IEventBus.Publish<TEvent>(TEvent @event, Guid? sagaId)
+        {
+            if (@event == null) throw new ArgumentNullException(nameof(@event));
+            if (!(@event is IMessage lyciaMessage))
+                throw new ArgumentException("Event must be an IMessage type for Lycia IEventBus.", nameof(@event));
+
+            Connect();
+            if (_channel == null || !_channel.IsOpen) throw new InvalidOperationException("RabbitMQ channel not available for IEventBus.Publish.");
+
+            try
+            {
+                var messageType = @event.GetType().Name;
+                var routingKey = messageType;
+
+                var jsonMessage = JsonSerializer.Serialize(@event, @event.GetType());
+                var body = Encoding.UTF8.GetBytes(jsonMessage);
+
+                var properties = _channel.CreateBasicProperties();
+                properties.Persistent = true;
+                properties.ContentType = "application/json";
+                properties.Type = messageType;
+                properties.MessageId = lyciaMessage.MessageId.ToString();
+                properties.Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds()); // Corrected
+
+                Guid? finalSagaId = sagaId ?? lyciaMessage.SagaId;
+                if (finalSagaId.HasValue)
+                {
+                    properties.Headers ??= new Dictionary<string, object>();
+                    properties.Headers["x-saga-id"] = finalSagaId.Value.ToString();
+                }
+
+                 _channel.BasicPublish(
+                    exchange: _options.ExchangeName,
+                    routingKey: routingKey,
+                    mandatory: false,
+                    basicProperties: properties,
+                    body: body);
+
+                Console.WriteLine($"SUCCESS (IEventBus.Publish): Published {messageType} to exchange '{_options.ExchangeName}' with routing key '{routingKey}' (SagaId: {finalSagaId?.ToString() ?? "N/A"})");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"FAIL (IEventBus.Publish): Error publishing event type {@event.GetType().Name}: {ex.Message}");
+                throw;
+            }
+            return Task.CompletedTask;
+        }
+
+        Task IEventBus.Send<TCommand>(TCommand command, Guid? sagaId)
+        {
+            if (command == null) throw new ArgumentNullException(nameof(command));
+            if (!(command is IMessage lyciaMessage))
+                throw new ArgumentException("Command must be an IMessage type for Lycia IEventBus.", nameof(command));
+
+            Connect();
+            if (_channel == null || !_channel.IsOpen) throw new InvalidOperationException("RabbitMQ channel not available for IEventBus.Send.");
+
+            try
+            {
+                var messageType = command.GetType().Name;
+                var routingKey = messageType;
+
+                var jsonMessage = JsonSerializer.Serialize(command, command.GetType());
+                var body = Encoding.UTF8.GetBytes(jsonMessage);
+
+                var properties = _channel.CreateBasicProperties();
+                properties.Persistent = true;
+                properties.ContentType = "application/json";
+                properties.Type = messageType;
+                properties.MessageId = lyciaMessage.MessageId.ToString();
+                properties.Timestamp = new AmqpTimestamp(DateTimeOffset.UtcNow.ToUnixTimeSeconds()); // Corrected
+
+                Guid? finalSagaId = sagaId ?? lyciaMessage.SagaId;
+                if (finalSagaId.HasValue)
+                {
+                     properties.Headers ??= new Dictionary<string, object>();
+                    properties.Headers["x-saga-id"] = finalSagaId.Value.ToString();
+                }
+
+                _channel.BasicPublish(
+                    exchange: _options.ExchangeName,
+                    routingKey: routingKey,
+                    mandatory: false,
+                    basicProperties: properties,
+                    body: body);
+                Console.WriteLine($"SUCCESS (IEventBus.Send): Sent {messageType} to exchange '{_options.ExchangeName}' with routing key '{routingKey}' (SagaId: {finalSagaId?.ToString() ?? "N/A"})");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"FAIL (IEventBus.Send): Error sending command type {command.GetType().Name}: {ex.Message}");
+                throw;
+            }
+            return Task.CompletedTask;
         }
 
         public void Dispose()
         {
-            try
-            {
-                // Disposing the channel will also close it if it's open.
-                _channel?.Dispose();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error disposing RabbitMQ channel: {ex.Message}"); // Updated log message
-            }
-
-            try
-            {
-                // Disposing the connection will also close it if it's open.
-                _connection?.Dispose();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error disposing RabbitMQ connection: {ex.Message}"); // Updated log message
-            }
+            _channel?.Dispose();
+            _connection?.Dispose();
         }
     }
 }

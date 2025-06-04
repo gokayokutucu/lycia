@@ -2,9 +2,11 @@ using System.Text.Json.Serialization;
 using Lycia.Messaging.Enums;
 using Lycia.Messaging.Utility;
 
+// using MediatR; // Removed as INotification is no longer implemented here
+
 namespace Lycia.Messaging;
 
-public abstract class EventBase : IEvent
+public abstract class EventBase : IEvent // Removed INotification
 {
     public Guid MessageId { get; init; } = Guid.NewGuid();
     public DateTime Timestamp { get; init; } = DateTime.UtcNow;
