@@ -18,9 +18,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\Lycia.Infrastructure\Lycia.Infrastructure.csproj" />
     <ProjectReference Include="..\Lycia.ServiceDefaults\Lycia.ServiceDefaults.csproj" />
     <ProjectReference Include="..\OrderService.Application\OrderService.Application.csproj" />
     <ProjectReference Include="..\OrderService.Infrastructure\OrderService.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\Sample.Shared\Sample.Shared.csproj" />
   </ItemGroup>
 
 </Project>
