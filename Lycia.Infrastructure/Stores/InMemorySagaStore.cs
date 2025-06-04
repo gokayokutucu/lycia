@@ -136,10 +136,10 @@ public class InMemorySagaStore(IEventBus eventBus, ISagaIdGenerator sagaIdGenera
         {
             StepStatus.None => next == StepStatus.Started,
             StepStatus.Started => next is StepStatus.Completed or StepStatus.Failed,
-            StepStatus.Completed => next == StepStatus.Failed, // Retry or compensation can follow completion
-            StepStatus.Failed => next == StepStatus.Compensated,
-            StepStatus.Compensated => next == StepStatus.CompensationFailed,
-            StepStatus.CompensationFailed => false, // Final state
+            StepStatus.Completed => next is StepStatus.Compensated or StepStatus.CompensationFailed,
+            StepStatus.Failed => next is StepStatus.Compensated or StepStatus.CompensationFailed,
+            StepStatus.Compensated => false, // final
+            StepStatus.CompensationFailed => false, // final
             _ => false
         };
     }
