@@ -22,6 +22,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\InventoryService.Domain\InventoryService.Domain.csproj" />
+    <ProjectReference Include="..\..\Sample.Shared\Sample.Shared.csproj" />
+    <ProjectReference Include="..\..\Lycia.Saga\Lycia.Saga.csproj" />
   </ItemGroup>
 
 </Project>

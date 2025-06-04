@@ -19,6 +19,9 @@
     <ProjectReference Include="..\InventoryService.Application\InventoryService.Application.csproj" />
     <ProjectReference Include="..\InventoryService.Domain\InventoryService.Domain.csproj" />
     <ProjectReference Include="..\Lycia.ServiceDefaults\Lycia.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\..\Lycia.Infrastructure\Lycia.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\Sample.Shared\Sample.Shared.csproj" />
+    <ProjectReference Include="..\OrderService.Infrastructure\OrderService.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>
