@@ -2,11 +2,9 @@ using Lycia.Infrastructure.Abstractions;
 using Lycia.Infrastructure.Dispatching;
 using Lycia.Infrastructure.Eventing;
 using Lycia.Infrastructure.Stores;
-using Lycia.Messaging;
 using Lycia.Messaging.Enums;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Extensions;
-using Lycia.Saga.Handlers;
 using Microsoft.Extensions.DependencyInjection;
 using Sample.Shared.Messages.Commands;
 using Sample.Shared.Messages.Events;
@@ -16,6 +14,48 @@ namespace Lycia.Tests;
 
 public class SagaDispatcherTests
 {
+    [Fact]
+    public async Task CompensationChain_Should_Stop_On_CompensationFailed()
+    {
+        // Arrange
+        var fixedSagaId = Guid.NewGuid();
+        var services = new ServiceCollection();
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        services.AddScoped<ISagaStore, InMemorySagaStore>();
+        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
+        services.AddScoped<IEventBus>(sp =>
+            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
+
+        // Register all relevant SagaHandlers
+        services.AddScoped<ISagaStartHandler<CreateOrderCommand>, CreateOrderSagaHandler>();
+        services.AddScoped<ISagaCompensationHandler<OrderShippingFailedEvent>, CreateOrderSagaHandler>();
+        services.AddScoped<ISagaHandler<OrderCreatedEvent>, ShipOrderForCompensationSagaHandler>();
+        services.AddScoped<ISagaCompensationHandler<OrderCreatedEvent>, ShipOrderForCompensationSagaHandler>();
+        
+        var provider = services.BuildServiceProvider();
+        var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
+        var store = provider.GetRequiredService<ISagaStore>();
+
+        var command = new CreateOrderCommand
+        {
+            OrderId = Guid.NewGuid(),
+            UserId = Guid.NewGuid(),
+            TotalPrice = -10, // Negative price to trigger compensation failed
+        };
+
+        // Act
+        await dispatcher.DispatchAsync(command);
+
+        // Assert - check the status of the steps in the chain
+        var steps = await store.GetSagaStepsAsync(fixedSagaId);
+        Assert.Contains(steps.Keys, x => x.Contains(nameof(CreateOrderCommand)));
+        Assert.Contains(steps.Keys, x => x.Contains(nameof(OrderCreatedEvent)));
+        
+        Assert.DoesNotContain(steps.Values, meta => meta is { Status: StepStatus.Compensated, MessageTypeName: "OrderCreatedEvent" });
+        // The CreateOrderSagaHandler and ShipOrderForCompensationSagaHandler compensation step should be compensated
+        Assert.Contains(steps.Values, meta => meta.Status == StepStatus.CompensationFailed);
+    }
+    
     [Fact]
     public async Task DispatchAsync_Should_Invoke_CreateOrderSagaHandler()
     {
@@ -216,7 +256,7 @@ public class SagaDispatcherTests
         foreach (var expected in expectedStepTypes)
             Assert.Contains(steps.Keys, x => x.Contains(expected));
 
-        Assert.All(steps, kv => Assert.True(kv.Value.Status == StepStatus.Completed));
+        Assert.All(steps, kv => Assert.Equal(StepStatus.Completed, kv.Value.Status));
     }
     
     [Fact]

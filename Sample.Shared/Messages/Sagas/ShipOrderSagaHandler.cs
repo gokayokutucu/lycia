@@ -1,4 +1,3 @@
-using Lycia.Messaging;
 using Lycia.Saga.Handlers;
 using Sample.Shared.Messages.Events;
 
