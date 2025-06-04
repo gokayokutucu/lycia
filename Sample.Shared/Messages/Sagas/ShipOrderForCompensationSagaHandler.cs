@@ -46,6 +46,11 @@ public class ShipOrderForCompensationSagaHandler :
         try
         {
             CompensateCalled = true;
+            if(message.TotalPrice <= 0)
+            {
+                throw new InvalidOperationException("Total price must be greater than zero for compensation.");
+            }
+            
             // Compensation logic
             await Context.Publish(new OrderShippingFailedEvent
             {
@@ -60,7 +65,7 @@ public class ShipOrderForCompensationSagaHandler :
 
             await Context.MarkAsCompensationFailed<OrderCreatedEvent>();
             // Optionally: rethrow or store for manual retry
-            throw; // Or suppress and log for retry system
+            //throw; // Or suppress and log for retry system
         }
     }
 }
