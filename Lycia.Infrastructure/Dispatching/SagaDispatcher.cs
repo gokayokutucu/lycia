@@ -7,6 +7,7 @@ using Lycia.Saga.Extensions;
 using Lycia.Saga.Handlers;
 using Lycia.Saga.Helpers;
 using Microsoft.Extensions.DependencyInjection;
+using Sample.Shared.Messages.Sagas;
 
 namespace Lycia.Infrastructure.Dispatching;
 
@@ -32,7 +33,7 @@ public class SagaDispatcher(
             await InvokeHandlerAsync(startHandlers, message);
             //return;
         }
-        
+
         var stepHandlerType = typeof(ISagaHandler<>).MakeGenericType(messageType);
         var stepHandlers = serviceProvider.GetServices(stepHandlerType).ToList();
         if (stepHandlers.Count != 0)
@@ -46,35 +47,38 @@ public class SagaDispatcher(
         if (compensationHandlers.Count != 0)
         {
             var sagaId = GetSagaId(message);
-            
+
             foreach (var handler in compensationHandlers)
             {
-                var handlerType = handler?.GetType();
+                var handlerType = handler!.GetType();
 
                 // Coordinated Compensation
                 if (handlerType.IsSubclassOfRawGenericBase(typeof(CoordinatedSagaHandler<,,>)) ||
                     handlerType.IsSubclassOfRawGenericBase(typeof(StartCoordinatedSagaHandler<,,>)))
                 {
-                    var genericArgs = handlerType?.BaseType?.GetGenericArguments();
+                    var genericArgs = handlerType.BaseType?.GetGenericArguments();
                     var msgType = genericArgs?[0];
                     var sagaDataType = genericArgs?[2];
 
                     var contextType = typeof(SagaContext<,>).MakeGenericType(msgType!, sagaDataType!);
-                    var loadedSagaData = await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", sagaDataType!, sagaId);
-                    var contextInstance = Activator.CreateInstance(contextType, sagaId, loadedSagaData, eventBus, sagaStore, sagaIdGenerator);
-                    var initializeMethod = handlerType?.GetMethod("Initialize");
+                    var loadedSagaData =
+                        await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", sagaDataType!, sagaId);
+                    var contextInstance = Activator.CreateInstance(contextType, sagaId, handlerType, loadedSagaData, eventBus,
+                        sagaStore, sagaIdGenerator);
+                    var initializeMethod = handlerType.GetMethod("Initialize");
                     initializeMethod?.Invoke(handler, [contextInstance]);
                 }
                 // Reactive Compensation
                 else if (handlerType.IsSubclassOfRawGenericBase(typeof(ReactiveSagaHandler<>)) ||
                          handlerType.IsSubclassOfRawGenericBase(typeof(StartReactiveSagaHandler<>)))
                 {
-                    var genericArgs = handlerType?.BaseType?.GetGenericArguments();
+                    var genericArgs = handlerType.BaseType?.GetGenericArguments();
                     var msgType = genericArgs?[0];
 
                     var contextType = typeof(SagaContext<>).MakeGenericType(msgType!);
-                    var contextInstance = Activator.CreateInstance(contextType, sagaId, eventBus, sagaStore, sagaIdGenerator);
-                    var initializeMethod = handlerType?.GetMethod("Initialize");
+                    var contextInstance =
+                        Activator.CreateInstance(contextType, sagaId, handlerType, eventBus, sagaStore, sagaIdGenerator);
+                    var initializeMethod = handlerType.GetMethod("Initialize");
                     initializeMethod?.Invoke(handler, [contextInstance]);
                 }
 
@@ -83,19 +87,18 @@ public class SagaDispatcher(
                 var method = compensationInterface.GetMethod("CompensateAsync");
                 if (method != null)
                 {
-
                     try
                     {
 #if UNIT_TESTING
-                        await LogStep();
+                        await LogStep(handlerType);
 #endif
                         await (Task)method.Invoke(handler, [message])!;
 #if UNIT_TESTING
-                        await LogStep();
+                        await LogStep(handlerType);
 #endif
-                        
+
                         // Check step status 
-                        var status = await sagaStore.GetStepStatusAsync(sagaId, message.GetType());
+                        var status = await sagaStore.GetStepStatusAsync(sagaId, message.GetType(), handlerType);
                         if (status == StepStatus.CompensationFailed)
                         {
                             // Break the compensation chain if compensation failed
@@ -113,12 +116,12 @@ public class SagaDispatcher(
             }
         }
 
-#if UNIT_TESTING
-        if (compensationHandlers.Count == 0 && startHandlers.Count == 0)
-            await LogStep();
-#endif
+// #if UNIT_TESTING
+//         if (compensationHandlers.Count == 0 && startHandlers.Count == 0)
+//             await LogStep(typeof(NoHandler));
+// #endif
 
-        async Task LogStep()
+        async Task LogStep(Type handlerType)
         {
             if (message.__TestStepStatus.HasValue && message.__TestStepType is not null)
             {
@@ -133,7 +136,8 @@ public class SagaDispatcher(
                     sagaId = sagaIdGenerator.Generate();
                 }
 
-                await sagaStore.LogStepAsync(sagaId, message.__TestStepType, message.__TestStepStatus.Value, message);
+                await sagaStore.LogStepAsync(sagaId, message.__TestStepType, message.__TestStepStatus.Value,
+                    handlerType, message);
             }
         }
     }
@@ -192,7 +196,7 @@ public class SagaDispatcher(
             Guid sagaId;
 
             // Only ISagaStartHandler gets a new SagaId if needed
-            var handlerType = handler?.GetType();
+            var handlerType = handler!.GetType();
             var isStartHandler = handlerType.IsSubclassOfRawGeneric(typeof(ISagaStartHandler<>));
 
             if (sagaIdProp != null && sagaIdProp.GetValue(message) is Guid value && value != Guid.Empty)
@@ -216,19 +220,20 @@ public class SagaDispatcher(
             if (handlerType.IsSubclassOfRawGenericBase(typeof(CoordinatedSagaHandler<,,>)) ||
                 handlerType.IsSubclassOfRawGenericBase(typeof(StartCoordinatedSagaHandler<,,>)))
             {
-                var genericArgs = handlerType?.BaseType?.GetGenericArguments();
+                var genericArgs = handlerType.BaseType?.GetGenericArguments();
                 var msgType = genericArgs?[0];
                 var sagaDataType = genericArgs?[2];
-                
+
                 // Create SagaContext with loaded SagaData: SagaContext<msgType, sagaDataType>
                 var contextType = typeof(SagaContext<,>).MakeGenericType(msgType!, sagaDataType!);
-                var loadedSagaData = await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", sagaDataType!, sagaId);
-                var contextInstance = Activator.CreateInstance(contextType, sagaId, loadedSagaData, eventBus, sagaStore,
+                var loadedSagaData =
+                    await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", sagaDataType!, sagaId);
+                var contextInstance = Activator.CreateInstance(contextType, sagaId, handlerType, loadedSagaData, eventBus, sagaStore,
                     sagaIdGenerator);
-                var initializeMethod = handlerType?.GetMethod("Initialize");
+                var initializeMethod = handlerType.GetMethod("Initialize");
                 initializeMethod?.Invoke(handler, [contextInstance]);
 
-                await HandleSagaAsync(handler);
+                await HandleSagaAsync(handler, handlerType);
                 continue;
             }
 
@@ -236,25 +241,23 @@ public class SagaDispatcher(
             if (handlerType.IsSubclassOfRawGenericBase(typeof(ReactiveSagaHandler<>)) ||
                 handlerType.IsSubclassOfRawGenericBase(typeof(StartReactiveSagaHandler<>)))
             {
-                var genericArgs = handlerType?.BaseType?.GetGenericArguments();
+                var genericArgs = handlerType.BaseType?.GetGenericArguments();
                 var msgType = genericArgs?[0];
 
                 var contextType = typeof(SagaContext<>).MakeGenericType(msgType!);
                 var contextInstance =
-                    Activator.CreateInstance(contextType, sagaId, eventBus, sagaStore, sagaIdGenerator);
-                var initializeMethod = handlerType?.GetMethod("Initialize");
+                    Activator.CreateInstance(contextType, sagaId, handlerType, eventBus, sagaStore, sagaIdGenerator);
+                var initializeMethod = handlerType.GetMethod("Initialize");
                 initializeMethod?.Invoke(handler, [contextInstance]);
 
-                await HandleSagaAsync(handler);
+                await HandleSagaAsync(handler, handlerType);
                 continue;
             }
         }
 
-        async Task HandleSagaAsync(object? handler)
+        async Task HandleSagaAsync(object? handler, Type handlerType)
         {
             if (handler == null) return;
-
-            var handlerType = handler.GetType();
 
             // if the handler is a StartCoordinatedSagaHandler or StartReactiveSagaHandler, call HandleStartAsync
             if (handlerType.IsSubclassOfRawGenericBase(typeof(StartReactiveSagaHandler<>))
@@ -264,27 +267,12 @@ public class SagaDispatcher(
                 try
                 {
                     dynamic dynamicHandler = handler;
-                    
+
                     var sagaId = GetSagaId(message);
-#if UNIT_TESTING
-                    // Log step before handler execution
-                    if (message is { __TestStepStatus: not null, __TestStepType: not null })
-                    {
-                        await sagaStore.LogStepAsync(sagaId, message.__TestStepType, message.__TestStepStatus.Value, message);
-                    }
-#endif
-                    
+
                     await dynamicHandler.HandleStartAsync((dynamic)message);
-                    
-#if UNIT_TESTING
-                    // Log step before handler execution
-                    if (message is { __TestStepStatus: not null, __TestStepType: not null })
-                    {
-                        await sagaStore.LogStepAsync(sagaId, message.__TestStepType, message.__TestStepStatus.Value, message);
-                    }
-#endif
-                    
-                    await ValidateSagaStepCompletionAsync(message, sagaId);
+
+                    await ValidateSagaStepCompletionAsync(message, handlerType, sagaId);
                 }
                 catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException ex)
                 {
@@ -298,28 +286,12 @@ public class SagaDispatcher(
                 try
                 {
                     dynamic dynamicHandler = handler;
-                    
+
                     var sagaId = GetSagaId(message);
                     
-#if UNIT_TESTING
-                    // Log step before handler execution
-                    if (message is { __TestStepStatus: not null, __TestStepType: not null })
-                    {
-                        await sagaStore.LogStepAsync(sagaId, message.__TestStepType, message.__TestStepStatus.Value, message);
-                    }
-#endif
-                    
                     await dynamicHandler.HandleAsync((dynamic)message);
-                    
-#if UNIT_TESTING
-                    // Log step before handler execution
-                    if (message is { __TestStepStatus: not null, __TestStepType: not null })
-                    {
-                        await sagaStore.LogStepAsync(sagaId, message.__TestStepType, message.__TestStepStatus.Value, message);
-                    }
-#endif
-                    
-                    await ValidateSagaStepCompletionAsync(message, sagaId);
+
+                    await ValidateSagaStepCompletionAsync(message, handlerType, sagaId);
                 }
                 catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException ex)
                 {
@@ -346,10 +318,10 @@ public class SagaDispatcher(
         return sagaId;
     }
 
-    private async Task ValidateSagaStepCompletionAsync(IMessage message, Guid sagaId)
+    private async Task ValidateSagaStepCompletionAsync(IMessage message, Type handlerType, Guid sagaId)
     {
         var stepTypeToCheck = message.GetType();
-        var alreadyMarked = await sagaStore.IsStepCompletedAsync(sagaId, stepTypeToCheck);
+        var alreadyMarked = await sagaStore.IsStepCompletedAsync(sagaId, stepTypeToCheck, handlerType);
         if (!alreadyMarked)
         {
             Console.WriteLine($"Step for {stepTypeToCheck.Name} was not marked as completed, failed, or compensated.");

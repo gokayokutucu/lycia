@@ -7,27 +7,32 @@ public interface ISagaStore
 {
     /// <summary>
     /// Logs a saga step's execution status along with optional payload data.
+    /// The step is uniquely identified by its type and the handler type.
     /// </summary>
-    Task LogStepAsync(Guid sagaId, Type stepType, StepStatus status, object? payload = null);
+    Task LogStepAsync(Guid sagaId, Type stepType, StepStatus status, Type handlerType, object? payload = null);
 
     /// <summary>
     /// Checks whether a specific step in a saga has already been completed.
+    /// The step is uniquely identified by its type and the handler type.
     /// Useful for enforcing idempotency in distributed workflows.
     /// </summary>
-    Task<bool> IsStepCompletedAsync(Guid sagaId, Type stepType);
-    
+    Task<bool> IsStepCompletedAsync(Guid sagaId, Type stepType, Type handlerType);
+
     /// <summary>
     /// Gets the status of a specific step in the saga.
+    /// The step is uniquely identified by its type and the handler type.
     /// </summary>
     /// <param name="sagaId"></param>
     /// <param name="stepType"></param>
+    /// <param name="handlerType"></param>
     /// <returns></returns>
-    Task<StepStatus> GetStepStatusAsync(Guid sagaId, Type stepType);
+    Task<StepStatus> GetStepStatusAsync(Guid sagaId, Type stepType, Type handlerType);
+    
 
     /// <summary>
-    /// Retrieves all logged steps and their statuses for the given saga.
+    /// Retrieves all logged step-handler pairs and their statuses for the given saga.
     /// </summary>
-    Task<IReadOnlyDictionary<string, SagaStepMetadata>> GetSagaStepsAsync(Guid sagaId);
+    Task<IReadOnlyDictionary<(string stepType, string handlerType), SagaStepMetadata>> GetSagaHandlerStepsAsync(Guid sagaId);
 
     /// <summary>
     /// Loads the persisted saga data for a given saga instance.
@@ -41,7 +46,7 @@ public interface ISagaStore
     /// <summary>
     /// Loads the full saga context (including metadata and tracking state) for the given saga identifier.
     /// </summary>
-    Task<ISagaContext<TMessage, TSagaData>> LoadContextAsync<TMessage, TSagaData>(Guid sagaId) 
+    Task<ISagaContext<TMessage, TSagaData>> LoadContextAsync<TMessage, TSagaData>(Guid sagaId, Type handlerType) 
         where TSagaData : SagaData, new() 
         where TMessage : IMessage;
 }
