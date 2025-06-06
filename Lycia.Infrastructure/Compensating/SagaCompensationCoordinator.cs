@@ -14,28 +14,28 @@ public class SagaCompensationCoordinator(
     IEventBus eventBus,
     IServiceProvider serviceProvider)
 {
-    public async Task TriggerCompensationAsync(Guid sagaId, string failedStep)
+    public async Task TriggerCompensationAsync(Guid sagaId, (string sagaType, string handlerType) failedStep)
     {
-        var steps = await sagaStore.GetSagaStepsAsync(sagaId); // Use injected
+        var steps = await sagaStore.GetSagaHandlerStepsAsync(sagaId); // Use injected
         var orderedSteps = steps
             .OrderByDescending(x => x.Value.RecordedAt)
             .ToList(); //Take a snapshot
 
         foreach (var step in orderedSteps)
         {
-            string stepName = step.Key;
+            (string sagaType, string handlerType) stepKey = step.Key;
             var stepMetadata = step.Value;
             
             // Skip the failed step itself — compensation should apply only to previously completed steps
-            if (stepName == failedStep)
+            if (stepKey == failedStep)
             {
-                Console.WriteLine($"[Compensation] Skipping failed step: {stepName}");
+                Console.WriteLine($"[Compensation] Skipping failed step: {stepKey}");
                 continue;
             }
 
             if (stepMetadata.Status != StepStatus.Completed)
             {
-                Console.WriteLine($"[Compensation] Skipping incomplete step: {stepName} with status {stepMetadata.Status}");
+                Console.WriteLine($"[Compensation] Skipping incomplete step: {stepKey} with status {stepMetadata.Status}");
                 continue;
             }
 
@@ -52,7 +52,7 @@ public class SagaCompensationCoordinator(
                 var payload = JsonSerializer.Deserialize(stepMetadata.MessagePayload, messageType);
                 if (payload == null) 
                 {
-                    Console.WriteLine($"[Compensation] Error: Failed to deserialize payload for step {stepName}, message type {messageType.Name}.");
+                    Console.WriteLine($"[Compensation] Error: Failed to deserialize payload for step {stepKey}, message type {messageType.Name}.");
                     continue;
                 }
 
@@ -60,7 +60,8 @@ public class SagaCompensationCoordinator(
                 {
                     // Context Initialization for ISagaCompensationHandler
                     var contextGenericType = typeof(SagaContext<>).MakeGenericType(messageType);
-                    var contextConstructor = contextGenericType.GetConstructor(new[] { typeof(Guid), typeof(IEventBus), typeof(ISagaStore), typeof(ISagaIdGenerator) });
+                    var contextConstructor = contextGenericType.GetConstructor([typeof(Guid), typeof(IEventBus), typeof(ISagaStore), typeof(ISagaIdGenerator)
+                    ]);
                     
                     if (contextConstructor != null)
                     {
@@ -87,10 +88,10 @@ public class SagaCompensationCoordinator(
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"❌ Compensation handler failed for {stepName}: {ex.Message}");
+                    Console.WriteLine($"❌ Compensation handler failed for {stepKey}: {ex.Message}");
 
                     // Mark the step as having failed during compensation
-                    await sagaStore.LogStepAsync(sagaId, messageType, StepStatus.CompensationFailed, payload); // Use injected
+                    await sagaStore.LogStepAsync(sagaId, messageType, StepStatus.CompensationFailed,  handler.GetType(), payload); // Use injected
                 }
             }
         }

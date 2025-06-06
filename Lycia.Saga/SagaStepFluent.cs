@@ -16,6 +16,7 @@ public class ReactiveSagaStepFluent<TStep, TInitialMessage>(ISagaContext<TInitia
 #if UNIT_TESTING
             _event.__TestStepStatus = StepStatus.Completed;
             _event.__TestStepType = typeof(TInitialMessage);
+            await context.SagaStore.LogStepAsync(_event.SagaId!.Value, _event.__TestStepType, StepStatus.Completed, context.HandlerType);
             await operation();
 #else
         await operation();
@@ -28,6 +29,7 @@ public class ReactiveSagaStepFluent<TStep, TInitialMessage>(ISagaContext<TInitia
 #if UNIT_TESTING
             _event.__TestStepStatus = StepStatus.Failed;
             _event.__TestStepType = typeof(TInitialMessage);
+            await context.SagaStore.LogStepAsync(_event.SagaId!.Value, _event.__TestStepType, StepStatus.Failed, context.HandlerType);
             await operation();
 #else
         await operation();
@@ -40,6 +42,7 @@ public class ReactiveSagaStepFluent<TStep, TInitialMessage>(ISagaContext<TInitia
 #if UNIT_TESTING
             _event.__TestStepStatus = StepStatus.Compensated;
             _event.__TestStepType = typeof(TInitialMessage);
+            await context.SagaStore.LogStepAsync(_event.SagaId!.Value, _event.__TestStepType, StepStatus.Compensated, context.HandlerType);
             await operation();
 #else
         await operation();
@@ -52,6 +55,7 @@ public class ReactiveSagaStepFluent<TStep, TInitialMessage>(ISagaContext<TInitia
 #if UNIT_TESTING
             _event.__TestStepStatus = StepStatus.CompensationFailed;
             _event.__TestStepType = typeof(TInitialMessage);
+            await context.SagaStore.LogStepAsync(_event.SagaId!.Value, _event.__TestStepType, StepStatus.CompensationFailed, context.HandlerType);
             await operation();
 #else
         await operation();
@@ -71,6 +75,7 @@ public class CoordinatedSagaStepFluent<TStep, TSagaData>(ISagaContext<TStep, TSa
 #if UNIT_TESTING
             _event.__TestStepStatus = StepStatus.Completed;
             _event.__TestStepType = _event.GetType();
+            await context.SagaStore.LogStepAsync(_event.SagaId!.Value, _event.__TestStepType, StepStatus.Completed, context.HandlerType);
             await operation();
 #else
         await operation();
@@ -83,6 +88,7 @@ public class CoordinatedSagaStepFluent<TStep, TSagaData>(ISagaContext<TStep, TSa
 #if UNIT_TESTING
             _event.__TestStepStatus = StepStatus.Failed;
             _event.__TestStepType = _event.GetType();
+            await context.SagaStore.LogStepAsync(_event.SagaId!.Value, _event.__TestStepType, StepStatus.Failed, context.HandlerType);
             await operation();
 #else
         await operation();
@@ -95,6 +101,7 @@ public class CoordinatedSagaStepFluent<TStep, TSagaData>(ISagaContext<TStep, TSa
 #if UNIT_TESTING
             _event.__TestStepStatus = StepStatus.Compensated;
             _event.__TestStepType = _event.GetType();
+            await context.SagaStore.LogStepAsync(_event.SagaId!.Value, _event.__TestStepType, StepStatus.Compensated, context.HandlerType);
             await operation();
 #else
         await operation();
@@ -107,6 +114,7 @@ public class CoordinatedSagaStepFluent<TStep, TSagaData>(ISagaContext<TStep, TSa
 #if UNIT_TESTING
             _event.__TestStepStatus = StepStatus.CompensationFailed;
             _event.__TestStepType = _event.GetType();
+            await context.SagaStore.LogStepAsync(_event.SagaId!.Value, _event.__TestStepType, StepStatus.CompensationFailed, context.HandlerType);
             await operation();
 #else
         await operation();
