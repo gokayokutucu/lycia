@@ -7,12 +7,15 @@ namespace Lycia.Saga;
 
 public class SagaContext<TMessage>(
     Guid sagaId,
+    Type handlerType,
     IEventBus eventBus,
     ISagaStore sagaStore,
     ISagaIdGenerator sagaIdGenerator) : ISagaContext<TMessage>
     where TMessage : IMessage
 {
+    public ISagaStore SagaStore { get; } = sagaStore;
     public Guid SagaId { get; } = sagaId == Guid.Empty ? sagaIdGenerator.Generate() : sagaId;
+    public Type HandlerType { get; } = handlerType;
 
     public Task Send<T>(T command) where T : ICommand =>
         eventBus.Send(command, SagaId);
@@ -41,33 +44,35 @@ public class SagaContext<TMessage>(
     }
 
     public Task MarkAsComplete<TStep>() where TStep : IMessage =>
-        sagaStore.LogStepAsync(SagaId, typeof(TStep), StepStatus.Completed);
+        SagaStore.LogStepAsync(SagaId, typeof(TStep), StepStatus.Completed, HandlerType);
 
     public Task MarkAsFailed<TStep>() where TStep : IMessage =>
-        sagaStore.LogStepAsync(SagaId, typeof(TStep), StepStatus.Failed);
+        SagaStore.LogStepAsync(SagaId, typeof(TStep), StepStatus.Failed, HandlerType);
 
     public Task MarkAsCompensated<TStep>() where TStep : IMessage =>
-        sagaStore.LogStepAsync(SagaId, typeof(TStep), StepStatus.Compensated);
+        SagaStore.LogStepAsync(SagaId, typeof(TStep), StepStatus.Compensated, HandlerType);
 
     public Task MarkAsCompensationFailed<TStep>() where TStep : IMessage =>
-        sagaStore.LogStepAsync(SagaId, typeof(TStep), StepStatus.CompensationFailed);
+        SagaStore.LogStepAsync(SagaId, typeof(TStep), StepStatus.CompensationFailed, HandlerType);
 
     public Task<bool> IsAlreadyCompleted<T>() where T : IMessage =>
-        sagaStore.IsStepCompletedAsync(SagaId, typeof(T));
+        SagaStore.IsStepCompletedAsync(SagaId, typeof(T), HandlerType);
 }
 
 public class SagaContext<TMessage, TSagaData>(
     Guid sagaId,
+    Type handlerType,
     TSagaData data,
     IEventBus eventBus,
     ISagaStore sagaStore,
     ISagaIdGenerator sagaIdGenerator)
-    : SagaContext<TMessage>(sagaId, eventBus, sagaStore, sagaIdGenerator), ISagaContext<TMessage, TSagaData>
+    : SagaContext<TMessage>(sagaId, handlerType, eventBus, sagaStore, sagaIdGenerator), ISagaContext<TMessage, TSagaData>
     where TSagaData : SagaData
     where TMessage : IMessage
 {
     private readonly IEventBus _eventBus = eventBus;
     private readonly ISagaStore _sagaStore = sagaStore;
+    
     private readonly ISagaIdGenerator _sagaIdGenerator = sagaIdGenerator;
     public TSagaData Data { get; } = data;
 
@@ -77,7 +82,7 @@ public class SagaContext<TMessage, TSagaData>(
         @event.SetSagaId(SagaId);
         // Use the adapter, passing the service instances from this SagaContext<TMessage,TSagaData> instance
         var adapterContext =
-            new StepSpecificSagaContextAdapter<TStep, TSagaData>(SagaId, Data, _eventBus, _sagaStore, _sagaIdGenerator);
+            new StepSpecificSagaContextAdapter<TStep, TSagaData>(SagaId, HandlerType, Data, _eventBus, _sagaStore, _sagaIdGenerator);
         return new CoordinatedSagaStepFluent<TStep, TSagaData>(adapterContext, Operation, @event);
 
         Task Operation() => Publish(@event); // Explicitly call base to ensure it's the intended IEventBus.Publish
@@ -88,7 +93,7 @@ public class SagaContext<TMessage, TSagaData>(
     {
         command.SetSagaId(SagaId);
         var adapterContext =
-            new StepSpecificSagaContextAdapter<TStep, TSagaData>(SagaId, Data, _eventBus, _sagaStore, _sagaIdGenerator);
+            new StepSpecificSagaContextAdapter<TStep, TSagaData>(SagaId, HandlerType, Data, _eventBus, _sagaStore, _sagaIdGenerator);
         return new CoordinatedSagaStepFluent<TStep, TSagaData>(adapterContext, Operation, command);
 
         Task Operation() => Send(command); // Explicitly call base
@@ -98,6 +103,7 @@ public class SagaContext<TMessage, TSagaData>(
 // Internal adapter class as specified
 internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
     Guid sagaId,
+    Type handlerType,
     TSagaDataAdapter data,
     IEventBus eventBus,
     ISagaStore sagaStore,
@@ -109,6 +115,8 @@ internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
     // Not used by ISagaContext methods but part of constructor signature
 
     public Guid SagaId => sagaId;
+    public ISagaStore SagaStore => sagaStore;
+    public Type HandlerType { get; } = handlerType;
     public TSagaDataAdapter Data => data;
 
     public Task Send<T>(T command) where T : ICommand => eventBus.Send(command, sagaId);
@@ -121,19 +129,19 @@ internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
     }
 
     public Task MarkAsComplete<TMarkStep>() where TMarkStep : IMessage =>
-        sagaStore.LogStepAsync(sagaId, typeof(TMarkStep), StepStatus.Completed);
+        sagaStore.LogStepAsync(sagaId, typeof(TMarkStep), StepStatus.Completed, HandlerType);
 
     public Task MarkAsFailed<TMarkStep>() where TMarkStep : IMessage =>
-        sagaStore.LogStepAsync(sagaId, typeof(TMarkStep), StepStatus.Failed);
+        sagaStore.LogStepAsync(sagaId, typeof(TMarkStep), StepStatus.Failed, HandlerType);
 
     public Task MarkAsCompensated<TMarkStep>() where TMarkStep : IMessage =>
-        sagaStore.LogStepAsync(sagaId, typeof(TMarkStep), StepStatus.Compensated);
+        sagaStore.LogStepAsync(sagaId, typeof(TMarkStep), StepStatus.Compensated, HandlerType);
 
     public Task MarkAsCompensationFailed<TMarkStep>() where TMarkStep : IMessage =>
-        sagaStore.LogStepAsync(sagaId, typeof(TMarkStep), StepStatus.CompensationFailed);
+        sagaStore.LogStepAsync(sagaId, typeof(TMarkStep), StepStatus.CompensationFailed, HandlerType);
 
     public Task<bool> IsAlreadyCompleted<TMarkStep>() where TMarkStep : IMessage =>
-        sagaStore.IsStepCompletedAsync(sagaId, typeof(TMarkStep));
+        sagaStore.IsStepCompletedAsync(sagaId, typeof(TMarkStep), HandlerType);
 
     // Explicit interface implementation for ISagaContext<TStepAdapter>'s tracking methods
     ReactiveSagaStepFluent<TReactiveStep, TStepAdapter> ISagaContext<TStepAdapter>.PublishWithTracking<TReactiveStep>(
@@ -161,7 +169,7 @@ internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
         @event.SetSagaId(SagaId);
         // Create a new adapter for the next step, maintaining the original service instances and data type TSagaDataAdapter
         var nextStepContext =
-            new StepSpecificSagaContextAdapter<TNewStep, TSagaDataAdapter>(sagaId, data, eventBus, sagaStore,
+            new StepSpecificSagaContextAdapter<TNewStep, TSagaDataAdapter>(sagaId, HandlerType, data, eventBus, sagaStore,
                 sagaIdGenerator);
         return new CoordinatedSagaStepFluent<TNewStep, TSagaDataAdapter>(nextStepContext, Operation, @event);
 
@@ -173,7 +181,7 @@ internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
     {
         command.SetSagaId(SagaId);
         var nextStepContext =
-            new StepSpecificSagaContextAdapter<TNewStep, TSagaDataAdapter>(sagaId, data, eventBus, sagaStore,
+            new StepSpecificSagaContextAdapter<TNewStep, TSagaDataAdapter>(sagaId, HandlerType, data, eventBus, sagaStore,
                 sagaIdGenerator);
         return new CoordinatedSagaStepFluent<TNewStep, TSagaDataAdapter>(nextStepContext, Operation, command);
 

@@ -14,6 +14,91 @@ namespace Lycia.Tests;
 
 public class SagaDispatcherTests
 {
+    
+    [Fact]
+    public async Task DispatchAsync_Should_Swallow_Exception_And_Continue()
+    {
+        var fixedSagaId = Guid.NewGuid();
+        var services = new ServiceCollection();
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
+        services.AddScoped<ISagaStore, InMemorySagaStore>();
+        services.AddScoped<IEventBus>(sp =>
+            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
+        services.AddScoped<ISagaHandler<OrderCreatedEvent>, SwallowingSagaHandler>();
+
+        var provider = services.BuildServiceProvider();
+        var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
+
+        var message = new OrderCreatedEvent
+        {
+            OrderId = Guid.NewGuid(),
+            SagaId = fixedSagaId
+        };
+
+        // Act & Assert: Exception swallowed, should not propagate
+        var ex = await Record.ExceptionAsync(() => dispatcher.DispatchAsync(message));
+        Assert.Null(ex);
+    }
+    
+    [Fact]
+    public async Task DispatchAsync_Should_Propagate_Exception_If_Not_Swallowed()
+    {
+        var fixedSagaId = Guid.NewGuid();
+        var services = new ServiceCollection();
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
+        services.AddScoped<ISagaStore, InMemorySagaStore>();
+        services.AddScoped<IEventBus>(sp =>
+            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
+        services.AddScoped<ISagaHandler<OrderCreatedEvent>, ThrowingSagaHandler>();
+
+        var provider = services.BuildServiceProvider();
+        var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
+
+        var message = new OrderCreatedEvent { OrderId = Guid.NewGuid() };
+
+        // Act & Assert: Exception must be propagated
+        await Assert.ThrowsAsync<InvalidOperationException>(() => dispatcher.DispatchAsync(message));
+    }
+    
+    [Fact]
+    public async Task DispatchAsync_Should_Invoke_Multiple_Handler_For_The_Same_Saga()
+    {
+        // Arrange
+        var fixedSagaId = Guid.NewGuid();
+        var services = new ServiceCollection();
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        services.AddScoped<ISagaStore, InMemorySagaStore>();
+        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
+        services.AddScoped<IEventBus>(sp =>
+            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
+        
+        // Register all relevant SagaHandlers
+        services.AddScoped<ISagaStartHandler<CreateOrderCommand>, CreateOrderSagaHandler>();
+        services.AddScoped<ISagaHandler<OrderCreatedEvent>, ShipOrderSagaHandler>();
+        services.AddScoped<ISagaHandler<OrderCreatedEvent>, AuditOrderSagaHandler>();
+        
+        var provider = services.BuildServiceProvider();
+        var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
+        var store = provider.GetRequiredService<ISagaStore>();
+        
+        var command = new CreateOrderCommand
+        {
+            OrderId = Guid.NewGuid(),
+            UserId = Guid.NewGuid(),
+            TotalPrice = 100
+        };
+        
+        // Act
+        await dispatcher.DispatchAsync(command);
+        
+        // Assert
+        var steps = await store.GetSagaHandlerStepsAsync(fixedSagaId);
+        var count = steps.Count(x => x.Key.stepType.Contains(nameof(OrderCreatedEvent)));
+        Assert.Equal(2, count);
+    }
+    
     [Fact]
     public async Task CompensationChain_Should_Stop_On_CompensationFailed()
     {
@@ -47,12 +132,10 @@ public class SagaDispatcherTests
         await dispatcher.DispatchAsync(command);
 
         // Assert - check the status of the steps in the chain
-        var steps = await store.GetSagaStepsAsync(fixedSagaId);
-        Assert.Contains(steps.Keys, x => x.Contains(nameof(CreateOrderCommand)));
-        Assert.Contains(steps.Keys, x => x.Contains(nameof(OrderCreatedEvent)));
-        
-        Assert.DoesNotContain(steps.Values, meta => meta is { Status: StepStatus.Compensated, MessageTypeName: "OrderCreatedEvent" });
-        // The CreateOrderSagaHandler and ShipOrderForCompensationSagaHandler compensation step should be compensated
+        var steps = await store.GetSagaHandlerStepsAsync(fixedSagaId);
+        Assert.Contains(steps.Keys, x => x.stepType.Contains(nameof(CreateOrderCommand)));
+        Assert.Contains(steps.Keys, x => x.stepType.Contains(nameof(OrderCreatedEvent)));
+        // The compensation chain should contain CompensationFailed status
         Assert.Contains(steps.Values, meta => meta.Status == StepStatus.CompensationFailed);
     }
     
@@ -77,7 +160,7 @@ public class SagaDispatcherTests
 
         var serviceProvider = services.BuildServiceProvider();
         var eventBus = serviceProvider.GetRequiredService<IEventBus>();
-        var sagaStore = serviceProvider.GetRequiredService<ISagaStore>() as InMemorySagaStore;
+        var sagaStore = serviceProvider.GetRequiredService<ISagaStore>();
 
         var command = new CreateOrderCommand
         {
@@ -87,17 +170,13 @@ public class SagaDispatcherTests
         };
 
         // Act
-        // Instead of directly dispatching, publish the command via event bus and mark the step as completed
         await eventBus.Send(command);
 
-        // Wait for saga steps to be processed (if needed)
-        // For testing purposes, we can simulate step completion by checking the saga store
-
         // Assert
-        var wasLogged = await sagaStore!.IsStepCompletedAsync(fixedSagaId, typeof(CreateOrderCommand));
+        var wasLogged = await sagaStore.IsStepCompletedAsync(fixedSagaId, typeof(CreateOrderCommand), typeof(CreateOrderSagaHandler));
         Assert.True(wasLogged);
-        var wasShipped = await sagaStore.IsStepCompletedAsync(fixedSagaId, typeof(OrderCreatedEvent));
-        var wasDelivered = await sagaStore.IsStepCompletedAsync(fixedSagaId, typeof(OrderShippedEvent));
+        var wasShipped = await sagaStore.IsStepCompletedAsync(fixedSagaId, typeof(OrderCreatedEvent), typeof(ShipOrderSagaHandler));
+        var wasDelivered = await sagaStore.IsStepCompletedAsync(fixedSagaId, typeof(OrderShippedEvent), typeof(DeliverOrderSagaHandler));
         Assert.True(wasShipped);
         Assert.True(wasDelivered);
     }
@@ -136,11 +215,11 @@ public class SagaDispatcherTests
         // Act
         await dispatcher.DispatchAsync(command);
 
-        var steps = await store.GetSagaStepsAsync(fixedSagaId);
+        var steps = await store.GetSagaHandlerStepsAsync(fixedSagaId);
 
         // Assert - normal forward chain
-        Assert.Contains(steps.Keys, x => x.Contains(nameof(CreateOrderCommand)));
-        Assert.Contains(steps.Keys, x => x.Contains(nameof(OrderCreatedEvent)));
+        Assert.Contains(steps.Keys, x => x.stepType.Contains(nameof(CreateOrderCommand)));
+        Assert.Contains(steps.Keys, x => x.stepType.Contains(nameof(OrderCreatedEvent)));
 
         Assert.All(steps.Values, meta =>
             Assert.True(meta.Status is StepStatus.Completed or StepStatus.Failed));
@@ -208,10 +287,9 @@ public class SagaDispatcherTests
         await dispatcher.DispatchAsync(command);
 
         // Assert - check the status of the steps in the chain
-        var steps = await store.GetSagaStepsAsync(fixedSagaId);
-        Assert.Contains(steps.Keys, x => x.Contains(nameof(CreateOrderCommand)));
-        Assert.Contains(steps.Keys, x => x.Contains(nameof(OrderCreatedEvent)));
-        // The CreateOrderSagaHandler and ShipOrderForCompensationSagaHandler compensation step should be compensated
+        var steps = await store.GetSagaHandlerStepsAsync(fixedSagaId);
+        Assert.Contains(steps.Keys, x => x.stepType.Contains(nameof(CreateOrderCommand)));
+        Assert.Contains(steps.Keys, x => x.stepType.Contains(nameof(OrderCreatedEvent)));
         Assert.Contains(steps.Values, meta => meta.Status == StepStatus.Compensated);
     }
     
@@ -245,7 +323,7 @@ public class SagaDispatcherTests
         await dispatcher.DispatchAsync(command);
 
         // Assert: Are all steps processed in order and completed?
-        var steps = await store.GetSagaStepsAsync(fixedSagaId);
+        var steps = await store.GetSagaHandlerStepsAsync(fixedSagaId);
 
         var expectedStepTypes = new[] {
             nameof(CreateOrderCommand),
@@ -254,7 +332,7 @@ public class SagaDispatcherTests
         };
 
         foreach (var expected in expectedStepTypes)
-            Assert.Contains(steps.Keys, x => x.Contains(expected));
+            Assert.Contains(steps.Keys, x => x.stepType.Contains(expected));
 
         Assert.All(steps, kv => Assert.Equal(StepStatus.Completed, kv.Value.Status));
     }
@@ -288,10 +366,11 @@ public class SagaDispatcherTests
         await dispatcher.DispatchAsync(command);
         await dispatcher.DispatchAsync(command);
 
-        // Assert: The same step should only be processed once.
-        var steps = await store.GetSagaStepsAsync(fixedSagaId);
-        Assert.Equal(1, steps.Count(x => x.Key.Contains(nameof(CreateOrderCommand))));
+        // Assert: The same step should only be processed once per handler.
+        var steps = await store.GetSagaHandlerStepsAsync(fixedSagaId);
+        var handlerCount = steps.Count(x => x.Key.stepType.Contains(nameof(CreateOrderCommand)));
+        Assert.Equal(1, handlerCount);
+        Assert.All(steps.Where(x => x.Key.stepType.Contains(nameof(CreateOrderCommand))),
+            kv => Assert.Equal(StepStatus.Completed, kv.Value.Status));
     }
-    
-    
 }

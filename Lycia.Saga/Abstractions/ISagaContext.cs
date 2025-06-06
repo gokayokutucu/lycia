@@ -6,6 +6,8 @@ public interface ISagaContext<TInitialMessage>
     where TInitialMessage : IMessage
 {
     Guid SagaId { get; }
+    Type HandlerType { get; }
+    ISagaStore SagaStore { get; }
 
     Task Send<T>(T command) where T : ICommand;
     Task Publish<T>(T @event) where T : IEvent;
