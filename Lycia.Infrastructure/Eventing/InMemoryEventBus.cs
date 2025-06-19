@@ -23,4 +23,9 @@ public class InMemoryEventBus(Lazy<ISagaDispatcher> sagaDispatcherLazy) : IEvent
     {
         return sagaDispatcherLazy.Value.DispatchAsync(@event);
     }
+
+    public IAsyncEnumerable<(byte[] Body, Type MessageType)> ConsumeAsync(CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
 }

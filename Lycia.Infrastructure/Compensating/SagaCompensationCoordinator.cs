@@ -1,5 +1,4 @@
-using System.Text.Json;
-using Lycia.Messaging;
+using Newtonsoft.Json;
 using Lycia.Messaging.Enums;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Extensions;
@@ -49,7 +48,7 @@ public class SagaCompensationCoordinator(
             {
                 if (handler == null) continue;
 
-                var payload = JsonSerializer.Deserialize(stepMetadata.MessagePayload, messageType);
+                var payload = JsonConvert.DeserializeObject(stepMetadata.MessagePayload, messageType);
                 if (payload == null) 
                 {
                     Console.WriteLine($"[Compensation] Error: Failed to deserialize payload for step {stepKey}, message type {messageType.Name}.");
@@ -60,15 +59,15 @@ public class SagaCompensationCoordinator(
                 {
                     // Context Initialization for ISagaCompensationHandler
                     var contextGenericType = typeof(SagaContext<>).MakeGenericType(messageType);
-                    var contextConstructor = contextGenericType.GetConstructor([typeof(Guid), typeof(IEventBus), typeof(ISagaStore), typeof(ISagaIdGenerator)
-                    ]);
+                    var contextConstructor = contextGenericType.GetConstructor(new[] { typeof(Guid), typeof(IEventBus), typeof(ISagaStore), typeof(ISagaIdGenerator)
+                    });
                     
                     if (contextConstructor != null)
                     {
-                        var context = contextConstructor.Invoke([sagaId, eventBus, sagaStore, sagaIdGenerator]);
-                        var initializeMethodInfo = handler.GetType().GetMethod("Initialize", [typeof(ISagaContext<>).MakeGenericType(messageType)
-                        ]);
-                        initializeMethodInfo?.Invoke(handler, [context]);
+                        var context = contextConstructor.Invoke(new object[] { sagaId, eventBus, sagaStore, sagaIdGenerator });
+                        var initializeMethodInfo = handler.GetType().GetMethod("Initialize", new[] { typeof(ISagaContext<>).MakeGenericType(messageType)
+                        });
+                        initializeMethodInfo?.Invoke(handler, new[] { context });
                         Console.WriteLine($"[Compensation] Initialized ISagaContext for handler {handler.GetType().Name} with SagaId {sagaId}");
                     }
                     else
@@ -84,7 +83,7 @@ public class SagaCompensationCoordinator(
                         continue;
                     }
                     
-                    await (Task)compensateMethod.Invoke(handler, [payload])!;
+                    await (Task)compensateMethod.Invoke(handler, new[] { payload })!;
                 }
                 catch (Exception ex)
                 {

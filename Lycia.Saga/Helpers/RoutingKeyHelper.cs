@@ -1,7 +1,7 @@
 using System.Reflection;
 using Lycia.Messaging.Attributes;
 
-namespace Lycia.Infrastructure.Helpers;
+namespace Lycia.Saga.Helpers;
 
 public static class RoutingKeyHelper
 {
