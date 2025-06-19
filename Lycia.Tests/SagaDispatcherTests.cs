@@ -1,3 +1,4 @@
+using Lycia.Extensions;
 using Lycia.Infrastructure.Abstractions;
 using Lycia.Infrastructure.Dispatching;
 using Lycia.Infrastructure.Eventing;
@@ -113,10 +114,12 @@ public class SagaDispatcherTests
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
         // Register all relevant SagaHandlers
-        services.AddScoped<ISagaStartHandler<CreateOrderCommand>, CreateOrderSagaHandler>();
-        services.AddScoped<ISagaCompensationHandler<OrderShippingFailedEvent>, CreateOrderSagaHandler>();
-        services.AddScoped<ISagaHandler<OrderCreatedEvent>, ShipOrderForCompensationSagaHandler>();
-        services.AddScoped<ISagaCompensationHandler<OrderCreatedEvent>, ShipOrderForCompensationSagaHandler>();
+        // services.AddScoped<ISagaStartHandler<CreateOrderCommand>, CreateOrderSagaHandler>();
+        // services.AddScoped<ISagaCompensationHandler<OrderShippingFailedEvent>, CreateOrderSagaHandler>();
+        // services.AddScoped<ISagaHandler<OrderCreatedEvent>, ShipOrderForCompensationSagaHandler>();
+        // services.AddScoped<ISagaCompensationHandler<OrderCreatedEvent>, ShipOrderForCompensationSagaHandler>();
+        services.AddLycia()
+            .AddSagas(typeof(CreateOrderSagaHandler), typeof(ShipOrderForCompensationSagaHandler), typeof(ShipOrderForCompensationSagaHandler));
         
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();

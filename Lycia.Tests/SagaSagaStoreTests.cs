@@ -144,6 +144,10 @@ public class SagaSagaStoreTests
     {
         public Task Send<TCommand>(TCommand command, Guid? sagaId = null) where TCommand : ICommand => Task.CompletedTask;
         public Task Publish<TEvent>(TEvent @event, Guid? sagaId = null) where TEvent : IEvent => Task.CompletedTask;
+        public IAsyncEnumerable<(byte[] Body, Type MessageType)> ConsumeAsync(CancellationToken cancellationToken)
+        {
+            return default;
+        }
     }
 
     // Dummy types for test isolation
