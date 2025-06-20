@@ -1,12 +1,15 @@
 using System.Reflection;
 using Lycia.Extensions.Eventing;
 using Lycia.Extensions.Stores;
+using Lycia.Infrastructure.Abstractions;
+using Lycia.Infrastructure.Dispatching;
 using Lycia.Infrastructure.Listener;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Common;
 using Lycia.Saga.Extensions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 
@@ -21,6 +24,11 @@ public static class LyciaRegistrationExtension
         
         var eventBusProvider = configuration["Lycia:EventBus:Provider"] ?? "RabbitMQ";
         var eventStoreProvider = configuration["Lycia:EventStore:Provider"] ?? "Redis";
+
+        // Production default registration for ISagaIdGenerator
+        services.TryAddScoped<ISagaIdGenerator, DefaultSagaIdGenerator>();
+        // Production default registration for ISagaDispatcher
+        services.TryAddScoped<ISagaDispatcher, SagaDispatcher>();
 
         // Add Redis connection (if Provider is Redis)
         if (eventStoreProvider == "Redis")
