@@ -1,6 +1,7 @@
 using System.Text;
 using Lycia.Infrastructure.Abstractions;
 using Lycia.Saga.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
@@ -8,8 +9,8 @@ using Newtonsoft.Json;
 namespace Lycia.Infrastructure.Listener;
 
 public class RabbitMqListener(
+    IServiceProvider serviceProvider,
     IEventBus eventBus,
-    ISagaDispatcher sagaDispatcher,
     ILogger<RabbitMqListener> logger)
     : BackgroundService
 {
@@ -17,6 +18,10 @@ public class RabbitMqListener(
     {
         logger.LogInformation("RabbitMqListener started");
 
+        using var scope = serviceProvider.CreateScope();
+
+        var sagaDispatcher = scope.ServiceProvider.GetRequiredService<ISagaDispatcher>();
+        
         await foreach (var (body, messageType) in eventBus.ConsumeAsync(stoppingToken))
         {
             if (stoppingToken.IsCancellationRequested)
@@ -39,13 +44,16 @@ public class RabbitMqListener(
 
                 if (dispatchMethod == null)
                 {
-                    logger.LogWarning("No suitable DispatchAsync found for message type {MessageType}", messageType.Name);
+                    logger.LogWarning("No suitable DispatchAsync found for message type {MessageType}",
+                        messageType.Name);
                     continue;
                 }
 
                 if (dispatchMethod.Invoke(sagaDispatcher, [deserialized]) is not Task dispatchTask)
                 {
-                    logger.LogError("DispatchAsync invocation for message type {MessageType} did not return a Task instance", messageType.Name);
+                    logger.LogError(
+                        "DispatchAsync invocation for message type {MessageType} did not return a Task instance",
+                        messageType.Name);
                     continue;
                 }
 
