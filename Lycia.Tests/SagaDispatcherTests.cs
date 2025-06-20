@@ -368,7 +368,11 @@ public class SagaDispatcherTests
 
         // Act
         await dispatcher.DispatchAsync(command);
-        await dispatcher.DispatchAsync(command);
+        
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await dispatcher.DispatchAsync(command);
+        });
 
         // Assert: The same step should only be processed once per handler.
         var steps = await store.GetSagaHandlerStepsAsync(fixedSagaId);

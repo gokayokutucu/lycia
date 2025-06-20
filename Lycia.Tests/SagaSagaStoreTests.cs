@@ -6,8 +6,6 @@ using Lycia.Saga.Extensions;
 
 namespace Lycia.Tests;
 
-
-
 public class SagaSagaStoreTests
 {
     [Fact]
@@ -24,7 +22,7 @@ public class SagaSagaStoreTests
         await store.LogStepAsync(sagaId, stepType, StepStatus.Failed, handlerType);
         await store.LogStepAsync(sagaId, stepType, StepStatus.Compensated, handlerType);
     }
-    
+
     [Fact]
     public async Task LogStepAsync_Should_Throw_When_CompensationFailed_To_Compensated_Transition()
     {
@@ -42,7 +40,7 @@ public class SagaSagaStoreTests
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             store.LogStepAsync(sagaId, stepType, StepStatus.Compensated, handlerType));
     }
-    
+
     [Fact]
     public async Task LogStepAsync_Should_Throw_When_Failed_To_Completed_Transition()
     {
@@ -60,7 +58,7 @@ public class SagaSagaStoreTests
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             store.LogStepAsync(sagaId, stepType, StepStatus.Completed, handlerType));
     }
-    
+
     [Fact]
     public async Task LogStepAsync_Should_Throw_When_Started_To_CompensationFailed_Transition()
     {
@@ -78,7 +76,7 @@ public class SagaSagaStoreTests
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             store.LogStepAsync(sagaId, stepType, StepStatus.CompensationFailed, handlerType));
     }
-    
+
     [Fact]
     public async Task LogStepAsync_Should_Throw_When_Compensated_To_Completed_Transition()
     {
@@ -96,7 +94,7 @@ public class SagaSagaStoreTests
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             store.LogStepAsync(sagaId, stepType, StepStatus.Completed, handlerType));
     }
-    
+
     [Fact]
     public async Task LogStepAsync_Should_Throw_When_Repeating_Completed_Transition()
     {
@@ -114,13 +112,13 @@ public class SagaSagaStoreTests
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             store.LogStepAsync(sagaId, stepType, StepStatus.Completed, handlerType));
     }
-    
+
     [Fact]
     public async Task LogStepAsync_Should_Prevent_Duplicate_Transitions_When_Concurrent()
     {
         // Arrange
         var sagaId = Guid.NewGuid();
-        var eventBus = new DummyEventBus(); 
+        var eventBus = new DummyEventBus();
         var sagaIdGenerator = new TestSagaIdGenerator();
         var store = new InMemorySagaStore(eventBus, sagaIdGenerator);
         var stepType = typeof(DummyEvent);
@@ -129,21 +127,44 @@ public class SagaSagaStoreTests
         // Act
         await store.LogStepAsync(sagaId, stepType, StepStatus.Started, handlerType);
 
-        var t1 = store.LogStepAsync(sagaId, stepType, StepStatus.Completed, handlerType);
-        var t2 = store.LogStepAsync(sagaId, stepType, StepStatus.Completed, handlerType);
+        InvalidOperationException? expected = null;
+        Task? t1 = null, t2 = null;
 
-        await Task.WhenAll(t1, t2);
+        try
+        {
+            t1 = store.LogStepAsync(sagaId, stepType, StepStatus.Completed, handlerType);
+        }
+        catch (InvalidOperationException ex)
+        {
+            expected = ex;
+        }
 
-        // Assert
+        try
+        {
+            t2 = store.LogStepAsync(sagaId, stepType, StepStatus.Completed, handlerType);
+        }
+        catch (InvalidOperationException ex)
+        {
+            expected = ex;
+        }
+
+        Assert.NotNull(expected);
+
+        if (t1 != null) await t1;
+        if (t2 != null) await t2;
+
         var steps = await store.GetSagaHandlerStepsAsync(sagaId);
         var completedCount = steps.Values.Count(meta => meta.Status == StepStatus.Completed);
         Assert.Equal(1, completedCount);
     }
-    
+
     private class DummyEventBus : IEventBus
     {
-        public Task Send<TCommand>(TCommand command, Guid? sagaId = null) where TCommand : ICommand => Task.CompletedTask;
+        public Task Send<TCommand>(TCommand command, Guid? sagaId = null) where TCommand : ICommand =>
+            Task.CompletedTask;
+
         public Task Publish<TEvent>(TEvent @event, Guid? sagaId = null) where TEvent : IEvent => Task.CompletedTask;
+
         public IAsyncEnumerable<(byte[] Body, Type MessageType)> ConsumeAsync(CancellationToken cancellationToken)
         {
             return default;
@@ -151,7 +172,8 @@ public class SagaSagaStoreTests
     }
 
     // Dummy types for test isolation
-    private class DummyEvent : IMessage {
+    private class DummyEvent : IMessage
+    {
         public Guid MessageId { get; }
         public DateTime Timestamp { get; }
         public string ApplicationId { get; }
@@ -159,5 +181,8 @@ public class SagaSagaStoreTests
         public StepStatus? __TestStepStatus { get; set; }
         public Type? __TestStepType { get; set; }
     }
-    private class DummySagaHandler { }
+
+    private class DummySagaHandler
+    {
+    }
 }
