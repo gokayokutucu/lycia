@@ -22,4 +22,9 @@ public abstract class CoordinatedSagaHandler<TMessage, TResponse, TSagaData> :
     }
 
     public abstract Task HandleAsync(TMessage message);
+    
+    public virtual Task CompensateAsync(TMessage message)
+    {
+        return Task.CompletedTask;
+    }
 }

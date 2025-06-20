@@ -20,7 +20,10 @@ public abstract class StartReactiveSagaHandler<TMessage> :
     }
 
     public abstract Task HandleStartAsync(TMessage message);
-    
+    public virtual Task CompensateStartAsync(TMessage message)    
+    {
+        return Task.CompletedTask;
+    }
     protected Task MarkAsComplete() => Context.MarkAsComplete<TMessage>();
     protected Task MarkAsFailed() => Context.MarkAsFailed<TMessage>();
     protected Task MarkAsCompensationFailed() => Context.MarkAsCompensationFailed<TMessage>();
