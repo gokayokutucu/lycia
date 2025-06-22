@@ -153,7 +153,7 @@ public class SagaDispatcher(
     {
         var messageType = message.GetType();
 
-        if (typeof(IResponse<>).IsAssignableFrom(messageType) &&
+        if (IsResponse(messageType) &&
             (IsEvent(messageType) || IsCommand(messageType)))
         {
             return;
@@ -329,6 +329,9 @@ public class SagaDispatcher(
             // throw new InvalidOperationException($"Step {stepTypeToCheck.Name} was not marked as completed/failed/compensated.");
         }
     }
+
+    private static bool IsResponse(Type type) =>
+        type.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IResponse<>));
 
     private static bool IsSuccessResponse(Type type) =>
         type.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ISuccessResponse<>));
