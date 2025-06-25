@@ -156,7 +156,7 @@ public class InMemorySagaStore(
         return Task.CompletedTask;
     }
 
-    public Task<ISagaContext<TStep, TSagaData>> LoadContextAsync<TStep, TSagaData>(Guid sagaId, Type handlerType)
+    public Task<ISagaContext<TStep, TSagaData>> LoadContextAsync<TStep, TSagaData>(Guid sagaId, TStep message, Type handlerType)
         where TSagaData : SagaData, new()
         where TStep : IMessage
     {
@@ -168,6 +168,7 @@ public class InMemorySagaStore(
 
         ISagaContext<TStep, TSagaData> context = new SagaContext<TStep, TSagaData>(
             sagaId: sagaId,
+            message: message,
             handlerType: handlerType,
             data: (TSagaData)data,
             eventBus: eventBus, // Use injected field
