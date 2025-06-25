@@ -122,7 +122,7 @@ public class RedisSagaStore(
         await redisDb.StringSetAsync(SagaDataKey(sagaId), JsonConvert.SerializeObject(data));
     }
 
-    public async Task<ISagaContext<TStep, TSagaData>> LoadContextAsync<TStep, TSagaData>(Guid sagaId, Type handlerType)
+    public async Task<ISagaContext<TStep, TSagaData>> LoadContextAsync<TStep, TSagaData>(Guid sagaId, TStep message, Type handlerType)
         where TSagaData : SagaData, new()
         where TStep : IMessage
     {
@@ -140,6 +140,7 @@ public class RedisSagaStore(
 
         ISagaContext<TStep, TSagaData> context = new SagaContext<TStep, TSagaData>(
             sagaId: sagaId,
+            message: message,
             handlerType: handlerType,
             data: data,
             eventBus: eventBus,
