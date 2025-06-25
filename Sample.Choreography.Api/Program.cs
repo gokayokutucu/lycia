@@ -1,4 +1,3 @@
-using Lycia.Infrastructure.Abstractions;
 using Lycia.Infrastructure.Dispatching;
 using Lycia.Infrastructure.Eventing;
 using Lycia.Infrastructure.Stores;

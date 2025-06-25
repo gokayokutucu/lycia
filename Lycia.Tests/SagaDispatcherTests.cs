@@ -1,5 +1,5 @@
 using Lycia.Extensions;
-using Lycia.Infrastructure.Abstractions;
+using Lycia.Infrastructure.Compensating;
 using Lycia.Infrastructure.Dispatching;
 using Lycia.Infrastructure.Eventing;
 using Lycia.Infrastructure.Stores;
@@ -16,6 +16,36 @@ namespace Lycia.Tests;
 
 public class SagaDispatcherTests
 {
+    [Fact]
+    public async Task DispatchAsync_Should_Invoke_CompensateStartAsync_When_Overridden()
+    {
+        // Arrange
+        var fixedSagaId = Guid.NewGuid();
+        var services = new ServiceCollection();
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        services.AddScoped<ISagaStore, InMemorySagaStore>();
+        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
+        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
+        services.AddScoped<IEventBus>(sp =>
+            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
+        services.AddScoped<ISagaStartHandler<CreateOrderCommand>, TestStartReactiveCompensateHandler>();
+
+        var provider = services.BuildServiceProvider();
+        var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
+
+        var command = new CreateOrderCommand
+        {
+            OrderId = Guid.NewGuid(),
+            UserId = Guid.NewGuid(),
+            TotalPrice = -42 // trigger compensation
+        };
+
+        // Act
+        await dispatcher.DispatchAsync(command);
+
+        // Assert: Was the flag set in overridden CompensateStartAsync?
+        Assert.True(TestStartReactiveCompensateHandler.CompensateCalled);
+    }
     
     [Fact]
     public async Task DispatchAsync_Should_Swallow_Exception_And_Continue()
@@ -24,6 +54,7 @@ public class SagaDispatcherTests
         var services = new ServiceCollection();
         services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
         services.AddScoped<ISagaDispatcher, SagaDispatcher>();
+        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.AddScoped<ISagaStore, InMemorySagaStore>();
         services.AddScoped<IEventBus>(sp =>
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
@@ -50,6 +81,7 @@ public class SagaDispatcherTests
         var services = new ServiceCollection();
         services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
         services.AddScoped<ISagaDispatcher, SagaDispatcher>();
+        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.AddScoped<ISagaStore, InMemorySagaStore>();
         services.AddScoped<IEventBus>(sp =>
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
@@ -71,6 +103,7 @@ public class SagaDispatcherTests
         var fixedSagaId = Guid.NewGuid();
         var services = new ServiceCollection();
         services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.AddScoped<ISagaStore, InMemorySagaStore>();
         services.AddScoped<ISagaDispatcher, SagaDispatcher>();
         services.AddScoped<IEventBus>(sp =>
@@ -108,6 +141,7 @@ public class SagaDispatcherTests
         var fixedSagaId = Guid.NewGuid();
         var services = new ServiceCollection();
         services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.AddScoped<ISagaStore, InMemorySagaStore>();
         services.AddScoped<ISagaDispatcher, SagaDispatcher>();
         services.AddScoped<IEventBus>(sp =>
@@ -151,7 +185,7 @@ public class SagaDispatcherTests
         
         var fixedSagaId = Guid.Parse("00000000-0000-0000-0000-000000000001");
         services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        
+        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.AddScoped<ISagaDispatcher, SagaDispatcher>();
         services.AddScoped<ISagaStore, InMemorySagaStore>();
         services.AddScoped<IEventBus>(sp =>
@@ -193,6 +227,7 @@ public class SagaDispatcherTests
 
         var services = new ServiceCollection();
         services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.AddScoped<ISagaStore, InMemorySagaStore>();
         services.AddScoped<ISagaDispatcher, SagaDispatcher>();
         services.AddScoped<IEventBus>(sp =>
@@ -234,6 +269,7 @@ public class SagaDispatcherTests
     {
         var services = new ServiceCollection();
         services.AddScoped<ISagaIdGenerator, TestSagaIdGenerator>();
+        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.AddScoped<ISagaDispatcher, SagaDispatcher>();
         services.AddScoped<ISagaStore, InMemorySagaStore>();
         services.AddScoped<IEventBus>(sp =>
@@ -260,6 +296,7 @@ public class SagaDispatcherTests
         var fixedSagaId = Guid.NewGuid();
         var services = new ServiceCollection();
         services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.AddScoped<ISagaStore, InMemorySagaStore>();
         services.AddScoped<ISagaDispatcher, SagaDispatcher>();
         services.AddScoped<IEventBus>(sp =>
@@ -267,9 +304,7 @@ public class SagaDispatcherTests
 
         // The ShipOrderForCompensationSagaHandler will intentionally fail at this step.
         services.AddScoped<ISagaStartHandler<CreateOrderCommand>, CreateOrderSagaHandler>();
-        services.AddScoped<ISagaCompensationHandler<OrderShippingFailedEvent>, CreateOrderSagaHandler>();
         services.AddScoped<ISagaHandler<OrderCreatedEvent>, ShipOrderForCompensationSagaHandler>();
-        services.AddScoped<ISagaCompensationHandler<OrderCreatedEvent>, ShipOrderForCompensationSagaHandler>();
         
         // services.AddSagaHandlers(
         //     typeof(CreateOrderSagaHandler),
@@ -303,6 +338,7 @@ public class SagaDispatcherTests
         var services = new ServiceCollection();
         var fixedSagaId = Guid.NewGuid();
         services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.AddScoped<ISagaStore, InMemorySagaStore>();
         services.AddScoped<ISagaDispatcher, SagaDispatcher>();
         services.AddScoped<IEventBus>(sp =>
@@ -347,6 +383,7 @@ public class SagaDispatcherTests
         var services = new ServiceCollection();
         var fixedSagaId = Guid.NewGuid();
         services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.AddScoped<ISagaStore, InMemorySagaStore>();
         services.AddScoped<ISagaDispatcher, SagaDispatcher>();
         services.AddScoped<IEventBus>(sp =>
@@ -378,6 +415,7 @@ public class SagaDispatcherTests
         var steps = await store.GetSagaHandlerStepsAsync(fixedSagaId);
         var handlerCount = steps.Count(x => x.Key.stepType.Contains(nameof(CreateOrderCommand)));
         Assert.Equal(1, handlerCount);
+        
         Assert.All(steps.Where(x => x.Key.stepType.Contains(nameof(CreateOrderCommand))),
             kv => Assert.Equal(StepStatus.Completed, kv.Value.Status));
     }

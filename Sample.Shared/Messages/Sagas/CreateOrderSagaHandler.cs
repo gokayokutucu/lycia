@@ -10,8 +10,7 @@ namespace Sample.Shared.Messages.Sagas;
 /// Handles the start of the order process in a reactive saga flow and emits an OrderCreatedEvent.
 /// </summary>
 public class CreateOrderSagaHandler :
-    StartReactiveSagaHandler<CreateOrderCommand>,
-    ISagaCompensationHandler<OrderShippingFailedEvent>
+    StartReactiveSagaHandler<CreateOrderCommand>
 {
     /// <summary>
     /// For test purposes, we can check if the compensation was called.
@@ -39,7 +38,7 @@ public class CreateOrderSagaHandler :
         // await Context.MarkAsComplete<CreateOrderCommand>();
     }
 
-    public async Task CompensateAsync(OrderShippingFailedEvent @event)
+    public override async Task CompensateStartAsync(CreateOrderCommand message)
     {
         try
         {

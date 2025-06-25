@@ -19,6 +19,13 @@ public abstract class ReactiveSagaHandler<TMessage> :
         Context = context;
     }
 
+    
+    public async Task HandleAsyncInternal(TMessage message)
+    {
+        Context.RegisterStepMessage(message); // Mapping the message to the saga context
+        await HandleAsync(message);           // Actual business logic
+    }
+
     public abstract Task HandleAsync(TMessage message);
 
     public virtual Task CompensateAsync(TMessage message)

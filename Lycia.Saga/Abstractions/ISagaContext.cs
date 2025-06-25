@@ -26,6 +26,7 @@ public interface ISagaContext<TInitialMessage>
     Task MarkAsCompensationFailed<TStep>() where TStep : IMessage;
 
     Task<bool> IsAlreadyCompleted<T>() where T : IMessage;
+    void RegisterStepMessage<TMessage>(TMessage message) where TMessage : IMessage;
 }
 
 public interface ISagaContext<TInitialMessage, TSagaData> : ISagaContext<TInitialMessage>

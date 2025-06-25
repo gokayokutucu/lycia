@@ -15,6 +15,18 @@ public abstract class ResponseSagaHandler<TResponse, TSagaData> :
     {
         Context = context;
     }
+    
+    public async Task HandleSuccessResponseInternalAsync(TResponse response)
+    {
+        Context.RegisterStepMessage(response);
+        await HandleSuccessResponseAsync(response);
+    }
+
+    public async Task HandleFailResponseInternalAsync(TResponse response, FailResponse fail)
+    {
+        Context.RegisterStepMessage(response);
+        await HandleFailResponseAsync(response, fail);
+    }
 
     public abstract Task HandleSuccessResponseAsync(TResponse response);
     public abstract Task HandleFailResponseAsync(TResponse response, FailResponse fail);

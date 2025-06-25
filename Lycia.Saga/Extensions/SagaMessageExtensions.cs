@@ -10,4 +10,12 @@ public static class SagaMessageExtensions
         if (prop != null && prop.CanWrite)
             prop.SetValue(message, sagaId);
     }
+    
+    // public static void SetParentMessageId(this IMessage message, Type initialMessageType)
+    // {
+    //     var prop = message.GetType().GetProperty("ParentMessageId");
+    //     dynamic? initialMessage = Activator.CreateInstance(initialMessageType);
+    //     if (prop != null && prop.CanWrite)
+    //         prop.SetValue(message, initialMessage?.MessageId);
+    // }
 }

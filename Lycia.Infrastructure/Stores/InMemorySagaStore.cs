@@ -13,14 +13,17 @@ namespace Lycia.Infrastructure.Stores;
 /// In-memory implementation of ISagaStore for testing or local development.
 /// Not suitable for production environments.
 /// </summary>
-public class InMemorySagaStore(IEventBus eventBus, ISagaIdGenerator sagaIdGenerator) : ISagaStore
+public class InMemorySagaStore(
+    IEventBus eventBus,
+    ISagaIdGenerator sagaIdGenerator,
+    ISagaCompensationCoordinator compensationCoordinator) : ISagaStore
 {
     // Stores saga data per sagaId
     private readonly ConcurrentDictionary<Guid, SagaData> _sagaData = new();
 
     // Stores step logs per sagaId with composite key "stepTypeName_handlerTypeFullName"
     private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<string, SagaStepMetadata>> _stepLogs = new();
-    
+
     /// <summary>
     /// Constructs the dictionary key used for storing step metadata when handlerType is unknown or not applicable.
     /// Uses only the step type name.
@@ -35,7 +38,8 @@ public class InMemorySagaStore(IEventBus eventBus, ISagaIdGenerator sagaIdGenera
             var stepDict = _stepLogs.GetOrAdd(sagaId, _ => new ConcurrentDictionary<string, SagaStepMetadata>());
             var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType);
 
-            var messageTypeName = stepType.AssemblyQualifiedName ?? stepType.ToSagaStepName();
+            var messageTypeName = stepType.AssemblyQualifiedName ?? throw new InvalidOperationException(
+                $"Step type {stepType.FullName} does not have an AssemblyQualifiedName");
 
             // State transition validation
             if (stepDict.TryGetValue(stepKey, out var existingMeta))
@@ -106,7 +110,8 @@ public class InMemorySagaStore(IEventBus eventBus, ISagaIdGenerator sagaIdGenera
     /// Retrieves all saga handler steps for the given sagaId.
     /// Returns a dictionary keyed by (stepType, handlerType) tuple.
     /// </summary>
-    public Task<IReadOnlyDictionary<(string stepType, string handlerType), SagaStepMetadata>> GetSagaHandlerStepsAsync(Guid sagaId)
+    public Task<IReadOnlyDictionary<(string stepType, string handlerType), SagaStepMetadata>>
+        GetSagaHandlerStepsAsync(Guid sagaId)
     {
         if (_stepLogs.TryGetValue(sagaId, out var steps))
         {
@@ -131,7 +136,8 @@ public class InMemorySagaStore(IEventBus eventBus, ISagaIdGenerator sagaIdGenera
                 }
             }
 
-            return Task.FromResult<IReadOnlyDictionary<(string stepType, string handlerType), SagaStepMetadata>>(result);
+            return Task
+                .FromResult<IReadOnlyDictionary<(string stepType, string handlerType), SagaStepMetadata>>(result);
         }
 
         return Task.FromResult<IReadOnlyDictionary<(string stepType, string handlerType), SagaStepMetadata>>(
@@ -166,7 +172,8 @@ public class InMemorySagaStore(IEventBus eventBus, ISagaIdGenerator sagaIdGenera
             data: (TSagaData)data,
             eventBus: eventBus, // Use injected field
             sagaStore: this,
-            sagaIdGenerator: sagaIdGenerator // Use injected field
+            sagaIdGenerator: sagaIdGenerator, // Use injected field
+            compensationCoordinator: compensationCoordinator
         );
 
         return Task.FromResult(context);
