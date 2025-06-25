@@ -1,6 +1,6 @@
 using Lycia.Messaging;
 
-namespace Lycia.Infrastructure.Abstractions;
+namespace Lycia.Saga.Abstractions;
 
 public interface ISagaDispatcher
 {

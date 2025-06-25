@@ -21,7 +21,13 @@ public abstract class CoordinatedSagaHandler<TMessage, TResponse, TSagaData> :
         Context = context;
     }
 
-    public abstract Task HandleAsync(TMessage message);
+    public async Task HandleAsyncInternal(TMessage message)
+    {
+        Context.RegisterStepMessage(message); // Mapping the message to the saga context
+        await HandleAsync(message);           // Actual business logic
+    }
+
+    protected abstract Task HandleAsync(TMessage message);
     
     public virtual Task CompensateAsync(TMessage message)
     {
