@@ -1,7 +1,6 @@
 using System.Reflection;
 using Lycia.Extensions.Eventing;
 using Lycia.Extensions.Stores;
-using Lycia.Infrastructure.Abstractions;
 using Lycia.Infrastructure.Dispatching;
 using Lycia.Infrastructure.Listener;
 using Lycia.Saga.Abstractions;
@@ -65,7 +64,8 @@ public static class LyciaRegistrationExtension
                 var redisDb = provider.GetRequiredService<IDatabase>();
                 var eventBus = provider.GetRequiredService<IEventBus>();
                 var sagaIdGen = provider.GetRequiredService<ISagaIdGenerator>();
-                return new RedisSagaStore(redisDb, eventBus, sagaIdGen);
+                var sagaCompensationCoordinator = provider.GetRequiredService<ISagaCompensationCoordinator>();
+                return new RedisSagaStore(redisDb, eventBus, sagaIdGen, sagaCompensationCoordinator);
             });
         }
 

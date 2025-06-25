@@ -15,7 +15,8 @@ namespace Lycia.Extensions.Stores;
 public class RedisSagaStore(
     IDatabase redisDb,
     IEventBus eventBus,
-    ISagaIdGenerator sagaIdGenerator
+    ISagaIdGenerator sagaIdGenerator,
+    ISagaCompensationCoordinator sagaCompensationCoordinator
 ) : ISagaStore
 {
     private static string SagaDataKey(Guid sagaId) => $"saga:data:{sagaId}";
@@ -143,7 +144,8 @@ public class RedisSagaStore(
             data: data,
             eventBus: eventBus,
             sagaStore: this,
-            sagaIdGenerator: sagaIdGenerator
+            sagaIdGenerator: sagaIdGenerator,
+            compensationCoordinator:sagaCompensationCoordinator
         );
         return context;
     }

@@ -5,15 +5,14 @@ using Sample.Shared.Messages.Events;
 namespace Sample.Shared.Messages.Sagas;
 
 public class ShipOrderForCompensationSagaHandler :
-    ReactiveSagaHandler<OrderCreatedEvent>,
-    ISagaCompensationHandler<OrderCreatedEvent>
+    ReactiveSagaHandler<OrderCreatedEvent>
 {
     /// <summary>
     /// For test purposes, we can check if the compensation was called.
     /// </summary>
     public bool CompensateCalled { get; set; }
 
-    public override async Task HandleAsync(OrderCreatedEvent command)
+    public override async Task HandleAsync(OrderCreatedEvent @event)
     {
         try
         {
@@ -24,13 +23,15 @@ public class ShipOrderForCompensationSagaHandler :
             {
                 await Context.PublishWithTracking(new OrderShippedEvent
                     {
-                        OrderId = command.OrderId,
+                        OrderId = @event.OrderId,
                         ShipmentTrackId = Guid.NewGuid(),
                         ShippedAt = DateTime.UtcNow
                     })
                     .ThenMarkAsComplete();
                 return;
             }
+            
+            @event.TotalPrice = stockAvailable ? @event.TotalPrice : 0;
 
             await Context.MarkAsFailed<OrderCreatedEvent>();
         }
@@ -41,7 +42,7 @@ public class ShipOrderForCompensationSagaHandler :
         }
     }
 
-    public async Task CompensateAsync(OrderCreatedEvent message)
+    public override async Task CompensateAsync(OrderCreatedEvent message)
     {
         try
         {
@@ -51,11 +52,6 @@ public class ShipOrderForCompensationSagaHandler :
                 throw new InvalidOperationException("Total price must be greater than zero for compensation.");
             }
             
-            // Compensation logic
-            await Context.Publish(new OrderShippingFailedEvent
-            {
-                OrderId = message.OrderId
-            });
             await Context.MarkAsCompensated<OrderCreatedEvent>();
         }
         catch (Exception ex)
