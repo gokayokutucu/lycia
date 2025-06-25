@@ -8,6 +8,7 @@ namespace Lycia.Saga;
 
 public class SagaContext<TMessage>(
     Guid sagaId,
+    TMessage message,
     Type handlerType,
     IEventBus eventBus,
     ISagaStore sagaStore,
@@ -17,6 +18,7 @@ public class SagaContext<TMessage>(
 {
     protected readonly ConcurrentDictionary<Type, IMessage> _stepMessages = new();
     public ISagaStore SagaStore { get; } = sagaStore;
+    public TMessage Message { get; } = message;
     public Guid SagaId { get; } = sagaId == Guid.Empty ? sagaIdGenerator.Generate() : sagaId;
     public Type HandlerType { get; } = handlerType;
 
@@ -25,8 +27,7 @@ public class SagaContext<TMessage>(
         _stepMessages[typeof(T)] = command;
         return eventBus.Send(command, SagaId);
     }
-
-
+    
     public Task Publish<T>(T @event) where T : IEvent
     {
         _stepMessages[typeof(T)] = @event;
@@ -36,7 +37,7 @@ public class SagaContext<TMessage>(
     public ReactiveSagaStepFluent<TStep, TMessage> PublishWithTracking<TStep>(TStep @event) where TStep : IEvent
     {
         @event.SetSagaId(SagaId);
-       // @event.SetParentMessageId(typeof(TMessage));
+        @event.SetParentMessageId(Message.MessageId);
         _stepMessages[typeof(TStep)] = @event;
         return new ReactiveSagaStepFluent<TStep, TMessage>(this, Operation, @event);
         Task Operation() => Publish(@event);
@@ -45,7 +46,7 @@ public class SagaContext<TMessage>(
     public ReactiveSagaStepFluent<TStep, TMessage> SendWithTracking<TStep>(TStep command) where TStep : ICommand
     {
         command.SetSagaId(SagaId);
-      //  command.SetParentMessageId(typeof(TMessage));
+        command.SetParentMessageId(Message.MessageId);
         _stepMessages[typeof(TStep)] = command;
         return new ReactiveSagaStepFluent<TStep, TMessage>(this, Operation, command);
         Task Operation() => Send(command);
@@ -102,13 +103,14 @@ public class SagaContext<TMessage>(
 
 public class SagaContext<TMessage, TSagaData>(
     Guid sagaId,
+    TMessage message,
     Type handlerType,
     TSagaData data,
     IEventBus eventBus,
     ISagaStore sagaStore,
     ISagaIdGenerator sagaIdGenerator,
     ISagaCompensationCoordinator compensationCoordinator)
-    : SagaContext<TMessage>(sagaId, handlerType, eventBus, sagaStore, sagaIdGenerator, compensationCoordinator),
+    : SagaContext<TMessage>(sagaId, message, handlerType, eventBus, sagaStore, sagaIdGenerator, compensationCoordinator),
         ISagaContext<TMessage, TSagaData>
     where TSagaData : SagaData
     where TMessage : IMessage
@@ -122,10 +124,11 @@ public class SagaContext<TMessage, TSagaData>(
         where TStep : IEvent
     {
         @event.SetSagaId(SagaId);
+        @event.SetParentMessageId(Message.MessageId);
         _stepMessages[typeof(TStep)] = @event;
         // Use the adapter, passing the service instances from this SagaContext<TMessage,TSagaData> instance
         var adapterContext =
-            new StepSpecificSagaContextAdapter<TStep, TSagaData>(SagaId, HandlerType, Data, _eventBus, _sagaStore, _stepMessages);
+            new StepSpecificSagaContextAdapter<TStep, TSagaData>(SagaId, @event, HandlerType, Data, _eventBus, _sagaStore, _stepMessages);
         return new CoordinatedSagaStepFluent<TStep, TSagaData>(adapterContext, Operation, @event);
 
         Task Operation() => Publish(@event); // Explicitly call base to ensure it's the intended IEventBus.Publish
@@ -135,9 +138,10 @@ public class SagaContext<TMessage, TSagaData>(
         where TStep : ICommand
     {
         command.SetSagaId(SagaId);
+        command.SetParentMessageId(Message.MessageId);
         _stepMessages[typeof(TStep)] = command;
         var adapterContext =
-            new StepSpecificSagaContextAdapter<TStep, TSagaData>(SagaId, HandlerType, Data, _eventBus, _sagaStore, _stepMessages);
+            new StepSpecificSagaContextAdapter<TStep, TSagaData>(SagaId, command, HandlerType, Data, _eventBus, _sagaStore, _stepMessages);
         return new CoordinatedSagaStepFluent<TStep, TSagaData>(adapterContext, Operation, command);
 
         Task Operation() => Send(command); // Explicitly call base
@@ -147,6 +151,7 @@ public class SagaContext<TMessage, TSagaData>(
 // Internal adapter class as specified
 internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
     Guid sagaId,
+    TStepAdapter adapter,
     Type handlerType,
     TSagaDataAdapter data,
     IEventBus eventBus,
@@ -159,6 +164,7 @@ internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
     // Not used by ISagaContext methods but part of constructor signature
 
     public Guid SagaId => sagaId;
+    public TStepAdapter Adapter { get; } = adapter; //Message adapter
     public ISagaStore SagaStore => sagaStore;
     public Type HandlerType { get; } = handlerType;
     public TSagaDataAdapter Data => data;
@@ -226,6 +232,7 @@ internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
         TReactiveStep @event)
     {
         @event.SetSagaId(SagaId);
+        @event.SetParentMessageId(Adapter.MessageId); // Assuming Adapter has a MessageId property
         stepMessages[typeof(TReactiveStep)] = @event;
         return new ReactiveSagaStepFluent<TReactiveStep, TStepAdapter>(this, Operation, @event);
 
@@ -236,6 +243,7 @@ internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
         TReactiveStep command)
     {
         command.SetSagaId(SagaId);
+        command.SetParentMessageId(Adapter.MessageId); // Assuming Adapter has a MessageId property
         stepMessages[typeof(TReactiveStep)] = command;
         return new ReactiveSagaStepFluent<TReactiveStep, TStepAdapter>(this, Operation, command);
 
@@ -247,10 +255,11 @@ internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
         where TNewStep : IEvent
     {
         @event.SetSagaId(SagaId);
+        @event.SetParentMessageId(Adapter.MessageId); // Assuming Adapter has a MessageId property
         stepMessages[typeof(TNewStep)] = @event;
         // Create a new adapter for the next step, maintaining the original service instances and data type TSagaDataAdapter
         var nextStepContext =
-            new StepSpecificSagaContextAdapter<TNewStep, TSagaDataAdapter>(sagaId, HandlerType, data, eventBus,
+            new StepSpecificSagaContextAdapter<TNewStep, TSagaDataAdapter>(sagaId, @event, HandlerType, data, eventBus,
                 sagaStore, stepMessages);
         return new CoordinatedSagaStepFluent<TNewStep, TSagaDataAdapter>(nextStepContext, Operation, @event);
 
@@ -261,9 +270,10 @@ internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
         where TNewStep : ICommand
     {
         command.SetSagaId(SagaId);
+        command.SetParentMessageId(Adapter.MessageId); // Assuming Adapter has a MessageId property
         stepMessages[typeof(TNewStep)] = command;
         var nextStepContext =
-            new StepSpecificSagaContextAdapter<TNewStep, TSagaDataAdapter>(sagaId, HandlerType, data, eventBus,
+            new StepSpecificSagaContextAdapter<TNewStep, TSagaDataAdapter>(sagaId, command, HandlerType, data, eventBus,
                 sagaStore, stepMessages);
         return new CoordinatedSagaStepFluent<TNewStep, TSagaDataAdapter>(nextStepContext, Operation, command);
 

@@ -143,7 +143,7 @@ public class SagaDispatcher(
         {
             var handlerType = handler!.GetType();
 
-            await InitializeHandlerContextAsync(handler, handlerType, sagaId); //, messageType);
+            await InitializeHandlerContextAsync(handler, message, handlerType, sagaId); //, messageType);
 
             var continueChain = await InvokeCompensationAsync(handler, message, handlerType, sagaId, messageType);
             if (continueChain) continue;
@@ -156,7 +156,7 @@ public class SagaDispatcher(
     /// Initializes the context for a compensation handler, injecting the appropriate SagaContext instance.
     /// </summary>
     private async Task
-        InitializeHandlerContextAsync(object handler, Type handlerType, Guid sagaId) //, Type messageType)
+        InitializeHandlerContextAsync(object handler, object message, Type handlerType, Guid sagaId) //, Type messageType)
     {
         // Coordinated Compensation
         if (handlerType.IsSubclassOfRawGenericBase(typeof(CoordinatedSagaHandler<,,>)) ||
@@ -171,6 +171,7 @@ public class SagaDispatcher(
                 await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", sagaDataType!, sagaId);
             var contextInstance = Activator.CreateInstance(contextType, 
                 sagaId, 
+                message,
                 handlerType, 
                 loadedSagaData, 
                 eventBus,
@@ -191,6 +192,7 @@ public class SagaDispatcher(
             var contextInstance =
                 Activator.CreateInstance(contextType, 
                     sagaId, 
+                    message,
                     handlerType, 
                     eventBus, 
                     sagaStore, 
@@ -364,7 +366,8 @@ public class SagaDispatcher(
                 var loadedSagaData =
                     await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", sagaDataType!, sagaId);
                 var contextInstance = Activator.CreateInstance(contextType, 
-                    sagaId, 
+                    sagaId,
+                    message,
                     handlerType, 
                     loadedSagaData,
                     eventBus, 
@@ -389,6 +392,7 @@ public class SagaDispatcher(
                 var contextInstance =
                     Activator.CreateInstance(contextType, 
                         sagaId, 
+                        message,
                         handlerType, 
                         eventBus, 
                         sagaStore, 

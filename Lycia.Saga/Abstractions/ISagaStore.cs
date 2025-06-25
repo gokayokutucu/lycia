@@ -46,7 +46,7 @@ public interface ISagaStore
     /// <summary>
     /// Loads the full saga context (including metadata and tracking state) for the given saga identifier.
     /// </summary>
-    Task<ISagaContext<TMessage, TSagaData>> LoadContextAsync<TMessage, TSagaData>(Guid sagaId, Type handlerType) 
+    Task<ISagaContext<TMessage, TSagaData>> LoadContextAsync<TMessage, TSagaData>(Guid sagaId, TMessage message, Type handlerType) 
         where TSagaData : SagaData, new() 
         where TMessage : IMessage;
 }
