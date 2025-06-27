@@ -31,7 +31,7 @@ public class ShipOrderForCompensationSagaHandler :
                 return;
             }
             
-            @event.TotalPrice = stockAvailable ? @event.TotalPrice : 0;
+            //@event.TotalPrice = stockAvailable ? @event.TotalPrice : 0;
 
             await Context.MarkAsFailed<OrderCreatedEvent>();
         }
