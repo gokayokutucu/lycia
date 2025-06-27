@@ -1,6 +1,6 @@
-using System.Text.Json.Serialization;
 using Lycia.Messaging.Enums;
 using Lycia.Messaging.Utility;
+using Newtonsoft.Json;
 
 namespace Lycia.Messaging;
 
