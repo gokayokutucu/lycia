@@ -1,6 +1,7 @@
-using System.Text.Json.Serialization;
 using Lycia.Messaging.Enums;
+using Lycia.Messaging.Extensions;
 using Lycia.Messaging.Utility;
+using Newtonsoft.Json;
 
 namespace Lycia.Messaging;
 
@@ -12,18 +13,18 @@ public abstract class ResponseBase<TPrevious> :
 {
     protected ResponseBase(Guid? parentMessageId = null, Guid? correlationId = null)
     {
-        MessageId = Guid.CreateVersion7();
+        MessageId = GuidExtensions.CreateVersion7();
         ParentMessageId = parentMessageId ?? Guid.Empty;
         CorrelationId = correlationId ?? MessageId;
         Timestamp = DateTime.UtcNow;
         ApplicationId  = EventMetadata.ApplicationId;
     }
     
-    public Guid MessageId { get; init; }
-    public Guid ParentMessageId { get; init; }
-    public DateTime Timestamp { get; init; } 
-    public string ApplicationId { get; init; }
-    public Guid CorrelationId { get; init; }
+    public Guid MessageId { get; private set;  }
+    public Guid ParentMessageId { get; private set;  }
+    public DateTime Timestamp { get; private set;  } 
+    public string ApplicationId { get; private set;  }
+    public Guid CorrelationId { get; set;  }
     public Guid? SagaId { get; set; }
 #if UNIT_TESTING
     [JsonIgnore]

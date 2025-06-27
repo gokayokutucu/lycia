@@ -215,7 +215,7 @@ public class SagaSagaStoreTests
 
         public Guid MessageId { get; }
         public Guid ParentMessageId { get; }
-        public Guid CorrelationId { get; init; }
+        public Guid CorrelationId { get; set; }
         public DateTime Timestamp { get; }
         public string ApplicationId { get; }
         public Guid? SagaId { get; set; }
