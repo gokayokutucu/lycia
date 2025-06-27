@@ -6,6 +6,10 @@
         <Nullable>enable</Nullable>
         <DefineConstants>$(DefineConstants);UNIT_TESTING</DefineConstants>
     </PropertyGroup>
+
+    <ItemGroup>
+      <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    </ItemGroup>
     
 <!--    <PropertyGroup Condition="'$(BuildingTests)' == 'true'">-->
 <!--        <DefineConstants>$(DefineConstants);UNIT_TESTING</DefineConstants>-->

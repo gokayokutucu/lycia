@@ -42,7 +42,7 @@ public class SagaDispatcher(
             await InvokeHandlerAsync(stepHandlers, message);
         }
 
-       
+
         var compensationHandlerType = typeof(ISagaCompensationHandler<>).MakeGenericType(messageType);
         var compensationHandlers = serviceProvider.GetServices(compensationHandlerType).ToList();
         if (compensationHandlers.Count != 0)
@@ -54,27 +54,27 @@ public class SagaDispatcher(
 // #if UNIT_TESTING
 //         if (compensationHandlers.Count == 0 && startHandlers.Count == 0)
 //             await LogStep(typeof(NoHandler));
+// async Task LogStep(Type handlerType)
+// {
+//     if (message.__TestStepStatus.HasValue && message.__TestStepType is not null)
+//     {
+//         Guid sagaId;
+//         var sagaIdProperty = message.GetType().GetProperty("SagaId");
+//         if (sagaIdProperty != null && sagaIdProperty.GetValue(message) is Guid sagaIdValue && sagaIdValue != Guid.Empty)
+//         {
+//             sagaId = sagaIdValue;
+//         }
+//         else
+//         {
+//             sagaId = sagaIdGenerator.Generate();
+//         }
+//         
+//
+//         await sagaStore.LogStepAsync(sagaId, message.MessageId,  message.ParentMessageId, message.__TestStepType, message.__TestStepStatus.Value,
+//             handlerType, message);
+//     }
+// }
 // #endif
-
-        async Task LogStep(Type handlerType)
-        {
-            if (message.__TestStepStatus.HasValue && message.__TestStepType is not null)
-            {
-                Guid sagaId;
-                var sagaIdProperty = message.GetType().GetProperty("SagaId");
-                if (sagaIdProperty != null && sagaIdProperty.GetValue(message) is Guid value && value != Guid.Empty)
-                {
-                    sagaId = value;
-                }
-                else
-                {
-                    sagaId = sagaIdGenerator.Generate();
-                }
-
-                await sagaStore.LogStepAsync(sagaId, message.__TestStepType, message.__TestStepStatus.Value,
-                    handlerType, message);
-            }
-        }
     }
 
     /// <summary>
@@ -102,6 +102,7 @@ public class SagaDispatcher(
             var closedType = handlerInterface.MakeGenericType(messageType);
             allHandlers.AddRange(serviceProvider.GetServices(closedType));
         }
+
         var compensationHandlers = allHandlers
             .Where(handler =>
             {
@@ -115,12 +116,14 @@ public class SagaDispatcher(
                 {
                     return true;
                 }
+
                 // Check if implements ISagaCompensationHandler<>
                 var compensationInterface = typeof(ISagaCompensationHandler<>).MakeGenericType(messageType);
                 if (compensationInterface.IsAssignableFrom(ht))
                 {
                     return true;
                 }
+
                 return false;
             })
             .DistinctBy(x => x!.GetType())
@@ -139,16 +142,18 @@ public class SagaDispatcher(
     {
         var messageType = message.GetType();
 
-        foreach (var handler in handlers)
+        var handler = handlers.FirstOrDefault();
+        if (handler != null)
         {
-            var handlerType = handler!.GetType();
+            var handlerType = handler.GetType();
 
-            await InitializeHandlerContextAsync(handler, message, handlerType, sagaId); //, messageType);
+            await InitializeHandlerContextAsync(handler, message, handlerType, sagaId);
 
-            var continueChain = await InvokeCompensationAsync(handler, message, handlerType, sagaId, messageType);
-            if (continueChain) continue;
-            Console.WriteLine("⚡ Compensation chain stopped.");
-            break;
+            var continueChain =
+                await InvokeCompensationAsync(handler, message, handlerType, sagaId, message.MessageId, messageType);
+
+            if (!continueChain)
+                Console.WriteLine("⚡ Compensation chain stopped.");
         }
     }
 
@@ -156,7 +161,8 @@ public class SagaDispatcher(
     /// Initializes the context for a compensation handler, injecting the appropriate SagaContext instance.
     /// </summary>
     private async Task
-        InitializeHandlerContextAsync(object handler, object message, Type handlerType, Guid sagaId) //, Type messageType)
+        InitializeHandlerContextAsync(object handler, object message, Type handlerType,
+            Guid sagaId) //, Type messageType)
     {
         // Coordinated Compensation
         if (handlerType.IsSubclassOfRawGenericBase(typeof(CoordinatedSagaHandler<,,>)) ||
@@ -169,14 +175,14 @@ public class SagaDispatcher(
             var contextType = typeof(SagaContext<,>).MakeGenericType(msgType!, sagaDataType!);
             var loadedSagaData =
                 await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", sagaDataType!, sagaId);
-            var contextInstance = Activator.CreateInstance(contextType, 
-                sagaId, 
+            var contextInstance = Activator.CreateInstance(contextType,
+                sagaId,
                 message,
-                handlerType, 
-                loadedSagaData, 
+                handlerType,
+                loadedSagaData,
                 eventBus,
-                sagaStore, 
-                sagaIdGenerator, 
+                sagaStore,
+                sagaIdGenerator,
                 sagaCompensationCoordinator);
             var initializeMethod = handlerType.GetMethod("Initialize");
             initializeMethod?.Invoke(handler, [contextInstance]);
@@ -190,12 +196,12 @@ public class SagaDispatcher(
 
             var contextType = typeof(SagaContext<>).MakeGenericType(msgType!);
             var contextInstance =
-                Activator.CreateInstance(contextType, 
-                    sagaId, 
+                Activator.CreateInstance(contextType,
+                    sagaId,
                     message,
-                    handlerType, 
-                    eventBus, 
-                    sagaStore, 
+                    handlerType,
+                    eventBus,
+                    sagaStore,
                     sagaIdGenerator,
                     sagaCompensationCoordinator);
             var initializeMethod = handlerType.GetMethod("Initialize");
@@ -207,7 +213,8 @@ public class SagaDispatcher(
     /// Invokes the CompensateAsync method on a compensation handler and checks the saga step status.
     /// Returns false if the compensation chain should break (due to failure or exception), true otherwise.
     /// </summary>
-    private async Task<bool> InvokeCompensationAsync(object handler, object message, Type handlerType, Guid sagaId,
+    private async Task<bool> InvokeCompensationAsync(object handler, object message, Type handlerType, Guid messageId,
+        Guid sagaId,
         Type messageType)
     {
         MethodInfo? method;
@@ -242,7 +249,7 @@ public class SagaDispatcher(
             await LogStep(handlerType);
 #endif
 
-            var status = await sagaStore.GetStepStatusAsync(sagaId, messageType, handlerType);
+            var status = await sagaStore.GetStepStatusAsync(sagaId, messageId, messageType, handlerType);
             if (status == StepStatus.CompensationFailed)
             {
                 // Break the compensation chain if compensation failed
@@ -273,7 +280,12 @@ public class SagaDispatcher(
                     sagaIdLocal = sagaIdGenerator.Generate();
                 }
 
-                await sagaStore.LogStepAsync(sagaIdLocal, messageType, StepStatus.Compensated,
+                var parentMessageId = (message as IMessage)?.ParentMessageId;
+                if (parentMessageId == Guid.Empty)
+                    parentMessageId = null;
+
+                await sagaStore.LogStepAsync(sagaIdLocal, messageId, parentMessageId, messageType,
+                    StepStatus.Compensated,
                     logHandlerType, message);
             }
         }
@@ -365,12 +377,12 @@ public class SagaDispatcher(
                 var contextType = typeof(SagaContext<,>).MakeGenericType(msgType!, sagaDataType!);
                 var loadedSagaData =
                     await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", sagaDataType!, sagaId);
-                var contextInstance = Activator.CreateInstance(contextType, 
+                var contextInstance = Activator.CreateInstance(contextType,
                     sagaId,
                     message,
-                    handlerType, 
+                    handlerType,
                     loadedSagaData,
-                    eventBus, 
+                    eventBus,
                     sagaStore,
                     sagaIdGenerator,
                     sagaCompensationCoordinator);
@@ -390,12 +402,12 @@ public class SagaDispatcher(
 
                 var contextType = typeof(SagaContext<>).MakeGenericType(msgType!);
                 var contextInstance =
-                    Activator.CreateInstance(contextType, 
-                        sagaId, 
+                    Activator.CreateInstance(contextType,
+                        sagaId,
                         message,
-                        handlerType, 
-                        eventBus, 
-                        sagaStore, 
+                        handlerType,
+                        eventBus,
+                        sagaStore,
                         sagaIdGenerator,
                         sagaCompensationCoordinator);
                 var initializeMethod = handlerType.GetMethod("Initialize");
@@ -472,7 +484,8 @@ public class SagaDispatcher(
     private async Task ValidateSagaStepCompletionAsync(IMessage message, Type handlerType, Guid sagaId)
     {
         var stepTypeToCheck = message.GetType();
-        var alreadyMarked = await sagaStore.IsStepCompletedAsync(sagaId, stepTypeToCheck, handlerType, message.MessageId);
+        var alreadyMarked =
+            await sagaStore.IsStepCompletedAsync(sagaId, message.MessageId, stepTypeToCheck, handlerType);
         if (!alreadyMarked)
         {
             Console.WriteLine($"Step for {stepTypeToCheck.Name} was not marked as completed, failed, or compensated.");
