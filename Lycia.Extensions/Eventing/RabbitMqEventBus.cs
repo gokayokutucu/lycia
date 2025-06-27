@@ -161,8 +161,11 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
 
         var messageQueue = new ConcurrentQueue<(byte[] Body, Type MessageType)>();
 
-        foreach (var (queueName, messageType) in queueTypeMap)
+        foreach (var kvp in queueTypeMap)
         {
+            var queueName = kvp.Key;
+            var messageType = kvp.Value;
+
             var consumer = new AsyncEventingBasicConsumer(_channel);
 
             consumer.ReceivedAsync += async (model, ea) =>
