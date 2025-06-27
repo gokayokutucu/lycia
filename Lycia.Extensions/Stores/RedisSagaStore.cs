@@ -1,4 +1,5 @@
-﻿using Newtonsoft.Json;
+﻿using Lycia.Infrastructure.Helpers;
+using Newtonsoft.Json;
 using Lycia.Messaging;
 using Lycia.Messaging.Enums;
 using Lycia.Saga;
@@ -22,7 +23,7 @@ public class RedisSagaStore(
     private static string SagaDataKey(Guid sagaId) => $"saga:data:{sagaId}";
     private static string StepLogKey(Guid sagaId) => $"saga:steps:{sagaId}";
 
-    public async Task LogStepAsync(Guid sagaId, Type stepType, StepStatus status, Type handlerType, object? payload = null)
+    public async Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status, Type handlerType, object? payload = null)
     {
         var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType);
         var routingKey = RoutingKeyHelper.GetRoutingKey(stepType);
@@ -36,7 +37,7 @@ public class RedisSagaStore(
         {
             var existingMeta = JsonConvert.DeserializeObject<SagaStepMetadata>(existingMetaJson!);
             var previousStatus = existingMeta?.Status ?? StepStatus.None;
-            if (!SagaStepTransitionHelper.IsValidStepTransition(previousStatus, status))
+            if (!SagaStepHelper.IsValidStepTransition(previousStatus, status))
             {
                 var msg = $"Illegal StepStatus transition: {previousStatus} -> {status} for {stepKey}";
                 Console.WriteLine(msg);
@@ -47,15 +48,17 @@ public class RedisSagaStore(
         var metadata = new SagaStepMetadata
         {
             Status = status,
+            MessageId = messageId,
+            ParentMessageId = parentMessageId,
             MessageTypeName = messageTypeName,
             ApplicationId = applicationId, // TODO: Get from configuration or context if available
-            MessagePayload = JsonConvert.SerializeObject(payload)
+            MessagePayload = JsonHelper.SerializeSafe(payload)
         };
 
-        await redisDb.HashSetAsync(redisStepLogKey, stepKey, JsonConvert.SerializeObject(metadata));
+        await redisDb.HashSetAsync(redisStepLogKey, stepKey, JsonHelper.SerializeSafe(metadata));
     }
 
-    public async Task<bool> IsStepCompletedAsync(Guid sagaId, Type stepType, Type handlerType, Guid messageMessageId)
+    public async Task<bool> IsStepCompletedAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType)
     {
         var redisStepLogKey = StepLogKey(sagaId);
         var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType);
@@ -68,7 +71,7 @@ public class RedisSagaStore(
         return metadata?.Status == StepStatus.Completed;
     }
 
-    public async Task<StepStatus> GetStepStatusAsync(Guid sagaId, Type stepType, Type handlerType)
+    public async Task<StepStatus> GetStepStatusAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType)
     {
         var redisStepLogKey = StepLogKey(sagaId);
         var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType);
@@ -119,7 +122,7 @@ public class RedisSagaStore(
 
     public async Task SaveSagaDataAsync(Guid sagaId, SagaData data)
     {
-        await redisDb.StringSetAsync(SagaDataKey(sagaId), JsonConvert.SerializeObject(data));
+        await redisDb.StringSetAsync(SagaDataKey(sagaId), JsonHelper.SerializeSafe(data));
     }
 
     public async Task<ISagaContext<TStep, TSagaData>> LoadContextAsync<TStep, TSagaData>(Guid sagaId, TStep message, Type handlerType)
@@ -140,7 +143,7 @@ public class RedisSagaStore(
 
         ISagaContext<TStep, TSagaData> context = new SagaContext<TStep, TSagaData>(
             sagaId: sagaId,
-            message: message,
+            currentContextMessage: message,
             handlerType: handlerType,
             data: data,
             eventBus: eventBus,
