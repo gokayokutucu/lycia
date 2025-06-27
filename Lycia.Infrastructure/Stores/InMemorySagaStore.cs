@@ -75,7 +75,7 @@ public class InMemorySagaStore(
     /// Checks if the step with specified stepType and handlerType is completed.
     /// Uses the composite key for lookup.
     /// </summary>
-    public Task<bool> IsStepCompletedAsync(Guid sagaId, Type stepType, Type handlerType)
+    public Task<bool> IsStepCompletedAsync(Guid sagaId, Type stepType, Type handlerType, Guid messageMessageId)
     {
         if (_stepLogs.TryGetValue(sagaId, out var steps))
         {

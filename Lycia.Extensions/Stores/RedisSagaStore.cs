@@ -55,7 +55,7 @@ public class RedisSagaStore(
         await redisDb.HashSetAsync(redisStepLogKey, stepKey, JsonConvert.SerializeObject(metadata));
     }
 
-    public async Task<bool> IsStepCompletedAsync(Guid sagaId, Type stepType, Type handlerType)
+    public async Task<bool> IsStepCompletedAsync(Guid sagaId, Type stepType, Type handlerType, Guid messageMessageId)
     {
         var redisStepLogKey = StepLogKey(sagaId);
         var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType);

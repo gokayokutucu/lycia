@@ -16,7 +16,7 @@ public class SagaContext<TMessage>(
     ISagaCompensationCoordinator compensationCoordinator) : ISagaContext<TMessage>
     where TMessage : IMessage
 {
-    protected readonly ConcurrentDictionary<Type, IMessage> _stepMessages = new();
+    protected readonly ConcurrentDictionary<(Type StepType, Guid MessageId), IMessage> _stepMessages = new();
     public ISagaStore SagaStore { get; } = sagaStore;
     public TMessage Message { get; } = message;
     public Guid SagaId { get; } = sagaId == Guid.Empty ? sagaIdGenerator.Generate() : sagaId;
@@ -24,13 +24,13 @@ public class SagaContext<TMessage>(
 
     public Task Send<T>(T command) where T : ICommand
     {
-        _stepMessages[typeof(T)] = command;
+        _stepMessages[(typeof(T), command.MessageId)] = command;
         return eventBus.Send(command, SagaId);
     }
     
     public Task Publish<T>(T @event) where T : IEvent
     {
-        _stepMessages[typeof(T)] = @event;
+        _stepMessages[(typeof(T), @event.MessageId)] = @event;
         return eventBus.Publish(@event, SagaId);
     }
 
@@ -38,7 +38,7 @@ public class SagaContext<TMessage>(
     {
         @event.SetSagaId(SagaId);
         @event.SetParentMessageId(Message.MessageId);
-        _stepMessages[typeof(TStep)] = @event;
+        _stepMessages[(typeof(TStep), @event.MessageId)] = @event;
         return new ReactiveSagaStepFluent<TStep, TMessage>(this, Operation, @event);
         Task Operation() => Publish(@event);
     }
@@ -47,7 +47,7 @@ public class SagaContext<TMessage>(
     {
         command.SetSagaId(SagaId);
         command.SetParentMessageId(Message.MessageId);
-        _stepMessages[typeof(TStep)] = command;
+        _stepMessages[(typeof(TStep), command.MessageId)] =command;
         return new ReactiveSagaStepFluent<TStep, TMessage>(this, Operation, command);
         Task Operation() => Send(command);
     }
@@ -56,39 +56,39 @@ public class SagaContext<TMessage>(
     {
         @event.SetSagaId(SagaId);
         // After setting the SagaId, store the event in the step messages
-        _stepMessages[typeof(T)] = @event;
+        _stepMessages[(typeof(T), @event.MessageId)] = @event;
         return eventBus.Publish(@event, SagaId);
     }
 
     public Task MarkAsComplete<TStep>() where TStep : IMessage
     {
-        _stepMessages.TryGetValue(typeof(TStep), out var msg);
+        _stepMessages.TryGetValue((typeof(TStep), message.MessageId), out var msg);
         return SagaStore.LogStepAsync(SagaId, typeof(TStep), StepStatus.Completed, HandlerType, msg);
     }
 
 
     public async Task MarkAsFailed<TStep>() where TStep : IMessage
     {
-        _stepMessages.TryGetValue(typeof(TStep), out var msg);
+        _stepMessages.TryGetValue((typeof(TStep), message.MessageId), out var msg);
         await SagaStore.LogStepAsync(SagaId, typeof(TStep), StepStatus.Failed, HandlerType, msg);
         await compensationCoordinator.CompensateAsync(SagaId, typeof(TStep));
     }
 
     public async Task MarkAsCompensated<TStep>() where TStep : IMessage
     {
-        _stepMessages.TryGetValue(typeof(TStep), out var msg);
+        _stepMessages.TryGetValue((typeof(TStep), message.MessageId), out var msg);
         await SagaStore.LogStepAsync(SagaId, typeof(TStep), StepStatus.Compensated, HandlerType, msg);
         await compensationCoordinator.CompensateParentAsync(SagaId, typeof(TStep));
     }
 
     public Task MarkAsCompensationFailed<TStep>() where TStep : IMessage
     {
-        _stepMessages.TryGetValue(typeof(TStep), out var msg);
+        _stepMessages.TryGetValue((typeof(TStep), message.MessageId), out var msg);
         return SagaStore.LogStepAsync(SagaId, typeof(TStep), StepStatus.CompensationFailed, HandlerType, msg);
     }
 
     public Task<bool> IsAlreadyCompleted<T>() where T : IMessage =>
-        SagaStore.IsStepCompletedAsync(SagaId, typeof(T), HandlerType);
+        SagaStore.IsStepCompletedAsync(SagaId, typeof(T), HandlerType, message.MessageId);
 
     /// <summary>
     /// Registers a step message by storing it in the internal step messages dictionary keyed by its type.
@@ -97,7 +97,7 @@ public class SagaContext<TMessage>(
     /// <param name="message">The step message instance to register.</param>
     public void RegisterStepMessage<TMessage1>(TMessage1 message) where TMessage1 : IMessage
     {
-        _stepMessages[typeof(TMessage1)] = message;
+        _stepMessages[(typeof(TMessage1), message.MessageId)] = message;
     }
 }
 
@@ -125,7 +125,7 @@ public class SagaContext<TMessage, TSagaData>(
     {
         @event.SetSagaId(SagaId);
         @event.SetParentMessageId(Message.MessageId);
-        _stepMessages[typeof(TStep)] = @event;
+        _stepMessages[(typeof(TStep), @event.MessageId)] = @event;
         // Use the adapter, passing the service instances from this SagaContext<TMessage,TSagaData> instance
         var adapterContext =
             new StepSpecificSagaContextAdapter<TStep, TSagaData>(SagaId, @event, HandlerType, Data, _eventBus, _sagaStore, _stepMessages);
@@ -139,7 +139,7 @@ public class SagaContext<TMessage, TSagaData>(
     {
         command.SetSagaId(SagaId);
         command.SetParentMessageId(Message.MessageId);
-        _stepMessages[typeof(TStep)] = command;
+        _stepMessages[(typeof(TStep), command.MessageId)] = command;
         var adapterContext =
             new StepSpecificSagaContextAdapter<TStep, TSagaData>(SagaId, command, HandlerType, Data, _eventBus, _sagaStore, _stepMessages);
         return new CoordinatedSagaStepFluent<TStep, TSagaData>(adapterContext, Operation, command);
@@ -156,7 +156,7 @@ internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
     TSagaDataAdapter data,
     IEventBus eventBus,
     ISagaStore sagaStore,
-    ConcurrentDictionary<Type, IMessage> stepMessages)
+    ConcurrentDictionary<(Type StepType, Guid MessageId), IMessage> stepMessages)
     : ISagaContext<TStepAdapter, TSagaDataAdapter>
     where TStepAdapter : IMessage
     where TSagaDataAdapter : SagaData
@@ -171,13 +171,13 @@ internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
 
     public Task Send<T>(T command) where T : ICommand
     {
-        stepMessages[typeof(T)] = command;
+        stepMessages[(typeof(T), command.MessageId)] = command;
         return eventBus.Send(command, sagaId);
     }
 
     public Task Publish<T>(T @event) where T : IEvent
     {
-        stepMessages[typeof(T)] = @event;
+        stepMessages[(typeof(T), @event.MessageId)] = @event;
         return eventBus.Publish(@event, sagaId);
     }
 
@@ -186,36 +186,36 @@ internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
     {
         @event.SetSagaId(SagaId);
         // After setting the SagaId, store the event in the step messages
-        stepMessages[typeof(T)] = @event;
+        stepMessages[(typeof(T), @event.MessageId)] = @event;
         return eventBus.Publish(@event, SagaId);
     }
 
     public Task MarkAsComplete<TMarkStep>() where TMarkStep : IMessage
     {
-        stepMessages.TryGetValue(typeof(TMarkStep), out var msg);
-        return sagaStore.LogStepAsync(sagaId, typeof(TMarkStep), StepStatus.Completed, HandlerType, msg);
+        stepMessages.TryGetValue((typeof(TMarkStep), Adapter.MessageId), out var msg);
+        return sagaStore.LogStepAsync(SagaId, typeof(TMarkStep), StepStatus.Completed, HandlerType, msg);
     }
 
     public Task MarkAsFailed<TMarkStep>() where TMarkStep : IMessage
     {
-        stepMessages.TryGetValue(typeof(TMarkStep), out var msg);
-        return sagaStore.LogStepAsync(sagaId, typeof(TMarkStep), StepStatus.Failed, HandlerType, msg);
+        stepMessages.TryGetValue((typeof(TMarkStep), Adapter.MessageId), out var msg);
+        return sagaStore.LogStepAsync(SagaId, typeof(TMarkStep), StepStatus.Failed, HandlerType, msg);
     }
 
     public Task MarkAsCompensated<TMarkStep>() where TMarkStep : IMessage
     {
-        stepMessages.TryGetValue(typeof(TMarkStep), out var msg);
-        return sagaStore.LogStepAsync(sagaId, typeof(TMarkStep), StepStatus.Compensated, HandlerType, msg);
+        stepMessages.TryGetValue((typeof(TMarkStep), Adapter.MessageId), out var msg);
+        return sagaStore.LogStepAsync(SagaId, typeof(TMarkStep), StepStatus.Compensated, HandlerType, msg);
     }
 
     public Task MarkAsCompensationFailed<TMarkStep>() where TMarkStep : IMessage
     {
-        stepMessages.TryGetValue(typeof(TMarkStep), out var msg);
-        return sagaStore.LogStepAsync(sagaId, typeof(TMarkStep), StepStatus.CompensationFailed, HandlerType, msg);
+        stepMessages.TryGetValue((typeof(TMarkStep), Adapter.MessageId), out var msg);
+        return sagaStore.LogStepAsync(SagaId, typeof(TMarkStep), StepStatus.CompensationFailed, HandlerType, msg);
     }
 
     public Task<bool> IsAlreadyCompleted<TMarkStep>() where TMarkStep : IMessage =>
-        sagaStore.IsStepCompletedAsync(sagaId, typeof(TMarkStep), HandlerType);
+        sagaStore.IsStepCompletedAsync(SagaId, typeof(TMarkStep), HandlerType, Adapter.MessageId);
 
     /// <summary>
     /// Registers a step message by storing it in the step messages dictionary keyed by its type.
@@ -224,7 +224,7 @@ internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
     /// <param name="message">The step message instance to register.</param>
     public void RegisterStepMessage<TMessage>(TMessage message) where TMessage : IMessage
     {
-        stepMessages[typeof(TMessage)] = message;
+        stepMessages[(typeof(TMessage), message.MessageId)] = message;
     }
 
     // Explicit interface implementation for ISagaContext<TStepAdapter>'s tracking methods
@@ -233,7 +233,7 @@ internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
     {
         @event.SetSagaId(SagaId);
         @event.SetParentMessageId(Adapter.MessageId); // Assuming Adapter has a MessageId property
-        stepMessages[typeof(TReactiveStep)] = @event;
+        stepMessages[(typeof(TReactiveStep), @event.MessageId)] = @event;
         return new ReactiveSagaStepFluent<TReactiveStep, TStepAdapter>(this, Operation, @event);
 
         Task Operation() => Publish(@event); // Calls this adapter's Publish
@@ -244,7 +244,7 @@ internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
     {
         command.SetSagaId(SagaId);
         command.SetParentMessageId(Adapter.MessageId); // Assuming Adapter has a MessageId property
-        stepMessages[typeof(TReactiveStep)] = command;
+        stepMessages[(typeof(TReactiveStep), command.MessageId)] = command;
         return new ReactiveSagaStepFluent<TReactiveStep, TStepAdapter>(this, Operation, command);
 
         Task Operation() => Send(command); // Calls this adapter's Send
@@ -256,11 +256,11 @@ internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
     {
         @event.SetSagaId(SagaId);
         @event.SetParentMessageId(Adapter.MessageId); // Assuming Adapter has a MessageId property
-        stepMessages[typeof(TNewStep)] = @event;
+        stepMessages[(typeof(TNewStep), @event.MessageId)] = @event;
         // Create a new adapter for the next step, maintaining the original service instances and data type TSagaDataAdapter
         var nextStepContext =
-            new StepSpecificSagaContextAdapter<TNewStep, TSagaDataAdapter>(sagaId, @event, HandlerType, data, eventBus,
-                sagaStore, stepMessages);
+            new StepSpecificSagaContextAdapter<TNewStep, TSagaDataAdapter>(sagaId, @event, HandlerType, Data, eventBus,
+                SagaStore, stepMessages);
         return new CoordinatedSagaStepFluent<TNewStep, TSagaDataAdapter>(nextStepContext, Operation, @event);
 
         Task Operation() => Publish(@event); // Calls this adapter's Publish
@@ -271,10 +271,10 @@ internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
     {
         command.SetSagaId(SagaId);
         command.SetParentMessageId(Adapter.MessageId); // Assuming Adapter has a MessageId property
-        stepMessages[typeof(TNewStep)] = command;
+        stepMessages[(typeof(TNewStep), command.MessageId)] = command;
         var nextStepContext =
-            new StepSpecificSagaContextAdapter<TNewStep, TSagaDataAdapter>(sagaId, command, HandlerType, data, eventBus,
-                sagaStore, stepMessages);
+            new StepSpecificSagaContextAdapter<TNewStep, TSagaDataAdapter>(sagaId, command, HandlerType, Data, eventBus,
+                SagaStore, stepMessages);
         return new CoordinatedSagaStepFluent<TNewStep, TSagaDataAdapter>(nextStepContext, Operation, command);
 
         Task Operation() => Send(command); // Calls this adapter's Send

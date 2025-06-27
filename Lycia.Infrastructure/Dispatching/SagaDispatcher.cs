@@ -472,7 +472,7 @@ public class SagaDispatcher(
     private async Task ValidateSagaStepCompletionAsync(IMessage message, Type handlerType, Guid sagaId)
     {
         var stepTypeToCheck = message.GetType();
-        var alreadyMarked = await sagaStore.IsStepCompletedAsync(sagaId, stepTypeToCheck, handlerType);
+        var alreadyMarked = await sagaStore.IsStepCompletedAsync(sagaId, stepTypeToCheck, handlerType, message.MessageId);
         if (!alreadyMarked)
         {
             Console.WriteLine($"Step for {stepTypeToCheck.Name} was not marked as completed, failed, or compensated.");

@@ -16,7 +16,7 @@ public interface ISagaStore
     /// The step is uniquely identified by its type and the handler type.
     /// Useful for enforcing idempotency in distributed workflows.
     /// </summary>
-    Task<bool> IsStepCompletedAsync(Guid sagaId, Type stepType, Type handlerType);
+    Task<bool> IsStepCompletedAsync(Guid sagaId, Type stepType, Type handlerType, Guid messageId);
 
     /// <summary>
     /// Gets the status of a specific step in the saga.
