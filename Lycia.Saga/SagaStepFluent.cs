@@ -5,19 +5,24 @@ using Lycia.Saga.Abstractions;
 namespace Lycia.Saga;
 
 // TInitialMessage is the type of message that the ISagaContext is primarily associated with.
-public class ReactiveSagaStepFluent<TStep, TInitialMessage>(ISagaContext<TInitialMessage> context, Func<Task> operation, TStep @event)
+public class ReactiveSagaStepFluent<TStep, TInitialMessage>(
+    ISagaContext<TInitialMessage> context,
+    Func<Task> operation,
+    TInitialMessage message)
     where TStep : IMessage
     where TInitialMessage : IMessage
 {
-    private TStep _event = @event;
+    private TInitialMessage _message = message;
 
     public async Task ThenMarkAsComplete()
     {
 #if UNIT_TESTING
-            _event.__TestStepStatus = StepStatus.Completed;
-            _event.__TestStepType = typeof(TInitialMessage);
-            await context.SagaStore.LogStepAsync(_event.SagaId!.Value, _event.__TestStepType, StepStatus.Completed, context.HandlerType, _event);
-            await operation();
+        _message.__TestStepStatus = StepStatus.Completed;
+        _message.__TestStepType = typeof(TInitialMessage);
+        await context.SagaStore.LogStepAsync(_message.SagaId!.Value, _message.MessageId, _message.ParentMessageId,
+            _message.__TestStepType,
+            StepStatus.Completed, context.HandlerType, _message);
+        await operation();
 #else
         await operation();
         await context.MarkAsComplete<TInitialMessage>();
@@ -27,10 +32,12 @@ public class ReactiveSagaStepFluent<TStep, TInitialMessage>(ISagaContext<TInitia
     public async Task ThenMarkAsFailed(FailResponse fail)
     {
 #if UNIT_TESTING
-            _event.__TestStepStatus = StepStatus.Failed;
-            _event.__TestStepType = typeof(TInitialMessage);
-            await context.SagaStore.LogStepAsync(_event.SagaId!.Value, _event.__TestStepType, StepStatus.Failed, context.HandlerType, _event);
-            await operation();
+        _message.__TestStepStatus = StepStatus.Failed;
+        _message.__TestStepType = typeof(TInitialMessage);
+        await context.SagaStore.LogStepAsync(_message.SagaId!.Value, _message.MessageId, _message.ParentMessageId,
+            _message.__TestStepType,
+            StepStatus.Failed, context.HandlerType, _message);
+        await operation();
 #else
         await operation();
         await context.MarkAsFailed<TInitialMessage>();
@@ -40,10 +47,12 @@ public class ReactiveSagaStepFluent<TStep, TInitialMessage>(ISagaContext<TInitia
     public async Task ThenMarkAsCompensated()
     {
 #if UNIT_TESTING
-            _event.__TestStepStatus = StepStatus.Compensated;
-            _event.__TestStepType = typeof(TInitialMessage);
-            await context.SagaStore.LogStepAsync(_event.SagaId!.Value, _event.__TestStepType, StepStatus.Compensated, context.HandlerType, _event);
-            await operation();
+        _message.__TestStepStatus = StepStatus.Compensated;
+        _message.__TestStepType = typeof(TInitialMessage);
+        await context.SagaStore.LogStepAsync(_message.SagaId!.Value, _message.MessageId, _message.ParentMessageId,
+            _message.__TestStepType,
+            StepStatus.Compensated, context.HandlerType, _message);
+        await operation();
 #else
         await operation();
         await context.MarkAsCompensated<TInitialMessage>();
@@ -53,10 +62,12 @@ public class ReactiveSagaStepFluent<TStep, TInitialMessage>(ISagaContext<TInitia
     public async Task ThenMarkAsCompensationFailed()
     {
 #if UNIT_TESTING
-            _event.__TestStepStatus = StepStatus.CompensationFailed;
-            _event.__TestStepType = typeof(TInitialMessage);
-            await context.SagaStore.LogStepAsync(_event.SagaId!.Value, _event.__TestStepType, StepStatus.CompensationFailed, context.HandlerType, _event);
-            await operation();
+        _message.__TestStepStatus = StepStatus.CompensationFailed;
+        _message.__TestStepType = typeof(TInitialMessage);
+        await context.SagaStore.LogStepAsync(_message.SagaId!.Value, _message.MessageId, _message.ParentMessageId,
+            _message.__TestStepType,
+            StepStatus.CompensationFailed, context.HandlerType, _message);
+        await operation();
 #else
         await operation();
         await context.MarkAsCompensationFailed<TInitialMessage>();
@@ -64,19 +75,24 @@ public class ReactiveSagaStepFluent<TStep, TInitialMessage>(ISagaContext<TInitia
     }
 }
 
-public class CoordinatedSagaStepFluent<TStep, TSagaData>(ISagaContext<TStep, TSagaData> context, Func<Task> operation, TStep @event)
+public class CoordinatedSagaStepFluent<TStep, TSagaData>(
+    ISagaContext<TStep, TSagaData> context,
+    Func<Task> operation,
+    TStep @event)
     where TStep : IMessage
     where TSagaData : SagaData
 {
-    private TStep _event = @event;
+    private TStep _message = @event;
 
     public async Task ThenMarkAsComplete()
     {
 #if UNIT_TESTING
-            _event.__TestStepStatus = StepStatus.Completed;
-            _event.__TestStepType = _event.GetType();
-            await context.SagaStore.LogStepAsync(_event.SagaId!.Value, _event.__TestStepType, StepStatus.Completed, context.HandlerType, _event);
-            await operation();
+        _message.__TestStepStatus = StepStatus.Completed;
+        _message.__TestStepType = _message.GetType();
+        await context.SagaStore.LogStepAsync(_message.SagaId!.Value, _message.MessageId, _message.ParentMessageId,
+            _message.__TestStepType,
+            StepStatus.Completed, context.HandlerType, _message);
+        await operation();
 #else
         await operation();
         await context.MarkAsComplete<TStep>();
@@ -86,10 +102,12 @@ public class CoordinatedSagaStepFluent<TStep, TSagaData>(ISagaContext<TStep, TSa
     public async Task ThenMarkAsFailed(FailResponse fail)
     {
 #if UNIT_TESTING
-            _event.__TestStepStatus = StepStatus.Failed;
-            _event.__TestStepType = _event.GetType();
-            await context.SagaStore.LogStepAsync(_event.SagaId!.Value, _event.__TestStepType, StepStatus.Failed, context.HandlerType, _event);
-            await operation();
+        _message.__TestStepStatus = StepStatus.Failed;
+        _message.__TestStepType = _message.GetType();
+        await context.SagaStore.LogStepAsync(_message.SagaId!.Value, _message.MessageId, _message.ParentMessageId,
+            _message.__TestStepType,
+            StepStatus.Failed, context.HandlerType, _message);
+        await operation();
 #else
         await operation();
         await context.MarkAsFailed<TStep>();
@@ -99,10 +117,12 @@ public class CoordinatedSagaStepFluent<TStep, TSagaData>(ISagaContext<TStep, TSa
     public async Task ThenMarkAsCompensated()
     {
 #if UNIT_TESTING
-            _event.__TestStepStatus = StepStatus.Compensated;
-            _event.__TestStepType = _event.GetType();
-            await context.SagaStore.LogStepAsync(_event.SagaId!.Value, _event.__TestStepType, StepStatus.Compensated, context.HandlerType, _event);
-            await operation();
+        _message.__TestStepStatus = StepStatus.Compensated;
+        _message.__TestStepType = _message.GetType();
+        await context.SagaStore.LogStepAsync(_message.SagaId!.Value, _message.MessageId, _message.ParentMessageId,
+            _message.__TestStepType,
+            StepStatus.Compensated, context.HandlerType, _message);
+        await operation();
 #else
         await operation();
         await context.MarkAsCompensated<TStep>();
@@ -112,10 +132,12 @@ public class CoordinatedSagaStepFluent<TStep, TSagaData>(ISagaContext<TStep, TSa
     public async Task ThenMarkAsCompensationFailed()
     {
 #if UNIT_TESTING
-            _event.__TestStepStatus = StepStatus.CompensationFailed;
-            _event.__TestStepType = _event.GetType();
-            await context.SagaStore.LogStepAsync(_event.SagaId!.Value, _event.__TestStepType, StepStatus.CompensationFailed, context.HandlerType, _event);
-            await operation();
+        _message.__TestStepStatus = StepStatus.CompensationFailed;
+        _message.__TestStepType = _message.GetType();
+        await context.SagaStore.LogStepAsync(_message.SagaId!.Value, _message.MessageId, _message.ParentMessageId,
+            _message.__TestStepType,
+            StepStatus.CompensationFailed, context.HandlerType, _message);
+        await operation();
 #else
         await operation();
         await context.MarkAsCompensationFailed<TStep>();

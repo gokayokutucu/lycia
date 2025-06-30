@@ -14,6 +14,7 @@ public class SagaSagaStoreTests
     public async Task LogStepAsync_Should_Not_Throw_For_Valid_Transitions()
     {
         var sagaId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
         var eventBus = new DummyEventBus();
         var sagaIdGenerator = new TestSagaIdGenerator();
 
@@ -24,9 +25,9 @@ public class SagaSagaStoreTests
         var stepType = typeof(DummyEvent);
         var handlerType = typeof(DummySagaHandler);
 
-        await store.LogStepAsync(sagaId, stepType, StepStatus.Started, handlerType);
-        await store.LogStepAsync(sagaId, stepType, StepStatus.Failed, handlerType);
-        await store.LogStepAsync(sagaId, stepType, StepStatus.Compensated, handlerType);
+        await store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Started, handlerType);
+        await store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Failed, handlerType);
+        await store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Compensated, handlerType);
     }
 
     [Fact]
@@ -34,6 +35,7 @@ public class SagaSagaStoreTests
     {
         // Arrange
         var sagaId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
         var eventBus = new DummyEventBus();
         var sagaIdGenerator = new TestSagaIdGenerator();
 
@@ -44,11 +46,11 @@ public class SagaSagaStoreTests
         var stepType = typeof(DummyEvent);
         var handlerType = typeof(DummySagaHandler);
 
-        await store.LogStepAsync(sagaId, stepType, StepStatus.CompensationFailed, handlerType);
+        await store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.CompensationFailed, handlerType);
 
         // Act & Assert
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            store.LogStepAsync(sagaId, stepType, StepStatus.Compensated, handlerType));
+            store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Compensated, handlerType));
     }
 
     [Fact]
@@ -56,6 +58,7 @@ public class SagaSagaStoreTests
     {
         // Arrange
         var sagaId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
         var eventBus = new DummyEventBus();
         var sagaIdGenerator = new TestSagaIdGenerator();
 
@@ -66,11 +69,11 @@ public class SagaSagaStoreTests
         var stepType = typeof(DummyEvent);
         var handlerType = typeof(DummySagaHandler);
 
-        await store.LogStepAsync(sagaId, stepType, StepStatus.Failed, handlerType);
+        await store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Failed, handlerType);
 
         // Act & Assert
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            store.LogStepAsync(sagaId, stepType, StepStatus.Completed, handlerType));
+            store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Completed, handlerType));
     }
 
     [Fact]
@@ -78,6 +81,7 @@ public class SagaSagaStoreTests
     {
         // Arrange
         var sagaId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
         var eventBus = new DummyEventBus();
         var sagaIdGenerator = new TestSagaIdGenerator();
 
@@ -88,11 +92,11 @@ public class SagaSagaStoreTests
         var stepType = typeof(DummyEvent);
         var handlerType = typeof(DummySagaHandler);
 
-        await store.LogStepAsync(sagaId, stepType, StepStatus.Started, handlerType);
+        await store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Started, handlerType);
 
         // Act & Assert
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            store.LogStepAsync(sagaId, stepType, StepStatus.CompensationFailed, handlerType));
+            store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.CompensationFailed, handlerType));
     }
 
     [Fact]
@@ -100,6 +104,7 @@ public class SagaSagaStoreTests
     {
         // Arrange
         var sagaId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
         var eventBus = new DummyEventBus();
         var sagaIdGenerator = new TestSagaIdGenerator();
 
@@ -110,11 +115,11 @@ public class SagaSagaStoreTests
         var stepType = typeof(DummyEvent);
         var handlerType = typeof(DummySagaHandler);
 
-        await store.LogStepAsync(sagaId, stepType, StepStatus.Compensated, handlerType);
+        await store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Compensated, handlerType);
 
         // Act & Assert
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            store.LogStepAsync(sagaId, stepType, StepStatus.Completed, handlerType));
+            store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Completed, handlerType));
     }
 
     [Fact]
@@ -122,6 +127,7 @@ public class SagaSagaStoreTests
     {
         // Arrange
         var sagaId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
         var eventBus = new DummyEventBus();
         var sagaIdGenerator = new TestSagaIdGenerator();
 
@@ -132,11 +138,11 @@ public class SagaSagaStoreTests
         var stepType = typeof(DummyEvent);
         var handlerType = typeof(DummySagaHandler);
 
-        await store.LogStepAsync(sagaId, stepType, StepStatus.Completed, handlerType);
+        await store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Completed, handlerType);
 
         // Act & Assert
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            store.LogStepAsync(sagaId, stepType, StepStatus.Completed, handlerType));
+            store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Completed, handlerType));
     }
 
     [Fact]
@@ -144,6 +150,7 @@ public class SagaSagaStoreTests
     {
         // Arrange
         var sagaId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
         var eventBus = new DummyEventBus();
         var sagaIdGenerator = new TestSagaIdGenerator();
 
@@ -155,14 +162,14 @@ public class SagaSagaStoreTests
         var handlerType = typeof(DummySagaHandler);
 
         // Act
-        await store.LogStepAsync(sagaId, stepType, StepStatus.Started, handlerType);
+        await store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Started, handlerType);
 
         InvalidOperationException? expected = null;
         Task? t1 = null, t2 = null;
 
         try
         {
-            t1 = store.LogStepAsync(sagaId, stepType, StepStatus.Completed, handlerType);
+            t1 = store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Completed, handlerType);
         }
         catch (InvalidOperationException ex)
         {
@@ -171,7 +178,7 @@ public class SagaSagaStoreTests
 
         try
         {
-            t2 = store.LogStepAsync(sagaId, stepType, StepStatus.Completed, handlerType);
+            t2 = store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Completed, handlerType);
         }
         catch (InvalidOperationException ex)
         {

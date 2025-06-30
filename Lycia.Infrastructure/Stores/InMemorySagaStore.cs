@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Text.Json;
 using Lycia.Messaging;
 using Lycia.Messaging.Enums;
 using Lycia.Saga;
@@ -31,21 +33,20 @@ public class InMemorySagaStore(
     private static string GetStepKey(Type stepType)
         => stepType.ToSagaStepName();
 
-    public Task LogStepAsync(Guid sagaId, Type stepType, StepStatus status, Type handlerType, object? payload = null)
+    public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status, Type handlerType, object? payload = null)
     {
         try
         {
             var stepDict = _stepLogs.GetOrAdd(sagaId, _ => new ConcurrentDictionary<string, SagaStepMetadata>());
             var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType);
 
-            var messageTypeName = stepType.AssemblyQualifiedName ?? throw new InvalidOperationException(
-                $"Step type {stepType.FullName} does not have an AssemblyQualifiedName");
+            var messageTypeName = GetMessageTypeName(stepType);
 
             // State transition validation
             if (stepDict.TryGetValue(stepKey, out var existingMeta))
             {
                 var previousStatus = existingMeta.Status;
-                if (!SagaStepTransitionHelper.IsValidStepTransition(previousStatus, status))
+                if (!SagaStepHelper.IsValidStepTransition(previousStatus, status))
                 {
                     var msg = $"Illegal StepStatus transition: {previousStatus} -> {status} for {stepKey}";
                     Console.WriteLine(msg);
@@ -56,9 +57,11 @@ public class InMemorySagaStore(
             var metadata = new SagaStepMetadata
             {
                 Status = status,
+                MessageId = messageId,
+                ParentMessageId =  parentMessageId,
                 MessageTypeName = messageTypeName,
                 ApplicationId = "InMemory", // Replace with dynamic value if available
-                MessagePayload = JsonConvert.SerializeObject(payload)
+                MessagePayload = JsonHelper.SerializeSafe(payload, payload?.GetType() ?? typeof(object))
             };
             stepDict[stepKey] = metadata;
         }
@@ -75,7 +78,7 @@ public class InMemorySagaStore(
     /// Checks if the step with specified stepType and handlerType is completed.
     /// Uses the composite key for lookup.
     /// </summary>
-    public Task<bool> IsStepCompletedAsync(Guid sagaId, Type stepType, Type handlerType, Guid messageMessageId)
+    public Task<bool> IsStepCompletedAsync(Guid sagaId,  Guid messageId, Type stepType, Type handlerType)
     {
         if (_stepLogs.TryGetValue(sagaId, out var steps))
         {
@@ -92,7 +95,7 @@ public class InMemorySagaStore(
     /// Gets the status of the step with specified stepType and handlerType.
     /// Uses the composite key for lookup.
     /// </summary>
-    public Task<StepStatus> GetStepStatusAsync(Guid sagaId, Type stepType, Type handlerType)
+    public Task<StepStatus> GetStepStatusAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType)
     {
         if (_stepLogs.TryGetValue(sagaId, out var steps))
         {
@@ -168,7 +171,7 @@ public class InMemorySagaStore(
 
         ISagaContext<TStep, TSagaData> context = new SagaContext<TStep, TSagaData>(
             sagaId: sagaId,
-            message: message,
+            currentContextMessage: message,
             handlerType: handlerType,
             data: (TSagaData)data,
             eventBus: eventBus, // Use injected field
@@ -178,5 +181,11 @@ public class InMemorySagaStore(
         );
 
         return Task.FromResult(context);
+    }
+    
+    private static string GetMessageTypeName(Type stepType)
+    {
+        return stepType.AssemblyQualifiedName ?? throw new InvalidOperationException(
+            $"Step type {stepType.FullName} does not have an AssemblyQualifiedName");
     }
 }
