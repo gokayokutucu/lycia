@@ -5,22 +5,66 @@ using Newtonsoft.Json;
 
 namespace Lycia.Messaging;
 
-public class CommandBase: ICommand
+public class CommandBase : ICommand
 {
     protected CommandBase(Guid? parentMessageId = null, Guid? correlationId = null)
     {
+#if NET9_0_OR_GREATER
+        MessageId = Guid.CreateVersion7(); 
+#else
         MessageId = GuidExtensions.CreateVersion7();
+#endif
         ParentMessageId = parentMessageId ?? Guid.Empty;
         CorrelationId = correlationId ?? MessageId;
         Timestamp = DateTime.UtcNow;
-        ApplicationId  = EventMetadata.ApplicationId;
+        ApplicationId = EventMetadata.ApplicationId;
     }
 
-    public Guid MessageId { get; set;  }
-    public Guid ParentMessageId { get; private set;  }
-    public Guid CorrelationId { get; set;  }
-    public DateTime Timestamp { get; set;  }
-    public string ApplicationId { get; private set;  } 
+    public Guid MessageId
+    {
+        get;
+#if NET6_0_OR_GREATER
+        init;  
+#else
+        set;
+#endif
+    }
+    public Guid ParentMessageId
+    {
+        get;
+#if NET6_0_OR_GREATER
+        init;  
+#else
+        private set;
+#endif
+    }
+    public Guid CorrelationId
+    {
+        get;
+#if NET6_0_OR_GREATER
+        init;  
+#else
+        set;
+#endif
+    }
+    public DateTime Timestamp
+    {
+        get;
+#if NET6_0_OR_GREATER
+        init;  
+#else
+        set;
+#endif
+    }
+    public string ApplicationId
+    {
+        get;
+#if NET6_0_OR_GREATER
+        init;  
+#else
+        private set;
+#endif
+    }
     public Guid? SagaId { get; set; }
 #if UNIT_TESTING
     [JsonIgnore]

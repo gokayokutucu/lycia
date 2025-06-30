@@ -9,18 +9,62 @@ public abstract class EventBase : IEvent
 {
     protected EventBase(Guid? parentMessageId = null, Guid? correlationId = null)
     {
-        MessageId = GuidExtensions.CreateVersion7();
+#if NET9_0_OR_GREATER
+        MessageId = Guid.CreateVersion7();
+#else
+        MessageId = GuidExtensions.CreateVersion7(); 
+#endif
         ParentMessageId = parentMessageId ?? Guid.Empty;
         CorrelationId = correlationId ?? MessageId;
         Timestamp = DateTime.UtcNow;
         ApplicationId  = EventMetadata.ApplicationId;
     }
 
-    public Guid MessageId { get; private set;  }
-    public Guid ParentMessageId { get; private set;  }
-    public Guid CorrelationId { get; set;  }
-    public DateTime Timestamp { get; private set;  }
-    public string ApplicationId { get; private set;  }
+    public Guid MessageId
+    {
+        get;
+#if NET6_0_OR_GREATER
+        init;  
+#else
+        private set;
+#endif
+    }
+    public Guid ParentMessageId
+    {
+        get;
+#if NET6_0_OR_GREATER
+        init;  
+#else
+        private set;
+#endif
+    }
+    public Guid CorrelationId
+    {
+        get;
+#if NET6_0_OR_GREATER
+        init;  
+#else
+        set;
+#endif
+    }
+    public DateTime Timestamp
+    {
+        get;
+#if NET6_0_OR_GREATER
+        init;  
+#else
+        private set;
+#endif
+    }
+    public string ApplicationId
+    {
+        get;
+#if NET6_0_OR_GREATER
+        init;  
+#else
+        private set;
+#endif
+    }
     public Guid? SagaId { get; set; }
 #if UNIT_TESTING
     [JsonIgnore]
@@ -32,5 +76,13 @@ public abstract class EventBase : IEvent
 
 public abstract class FailedEventBase(string reason) : EventBase
 {
-    public string Reason { get; private set;  } = reason;
+    public string Reason
+    {
+        get;
+#if NET6_0_OR_GREATER
+        init;  
+#else
+        private set;
+#endif
+    } = reason;
 }

@@ -9,5 +9,10 @@ public interface ISagaIdGenerator
 
 public class DefaultSagaIdGenerator : ISagaIdGenerator
 {
-    public Guid Generate() => GuidExtensions.CreateVersion7();
+    public Guid Generate() =>
+#if NET9_0_OR_GREATER
+        Guid.CreateVersion7();
+#else
+        GuidExtensions.CreateVersion7(); 
+#endif
 }
