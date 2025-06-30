@@ -7,6 +7,7 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using Newtonsoft.Json;
 using System.Text;
+using Lycia.Infrastructure.Helpers;
 using Lycia.Saga.Helpers;
 
 namespace Lycia.Extensions.Eventing;
@@ -109,7 +110,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                 : null
         };
 
-        var json = JsonConvert.SerializeObject(@event);
+        var json = JsonHelper.SerializeSafe(@event);
         var body = Encoding.UTF8.GetBytes(json);
 
         await _channel.BasicPublishAsync(
@@ -141,7 +142,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                 : null
         };
 
-        var json = JsonConvert.SerializeObject(command);
+        var json = JsonHelper.SerializeSafe(command);
         var body = Encoding.UTF8.GetBytes(json);
 
         await _channel.BasicPublishAsync(
