@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Text.Json;
 using Lycia.Messaging;
 using Lycia.Messaging.Enums;
 using Lycia.Saga;
@@ -61,7 +60,7 @@ public class InMemorySagaStore(
                 ParentMessageId =  parentMessageId,
                 MessageTypeName = messageTypeName,
                 ApplicationId = "InMemory", // Replace with dynamic value if available
-                MessagePayload = JsonHelper.SerializeSafe(payload, payload?.GetType() ?? typeof(object))
+                MessagePayload = JsonConvert.SerializeObject(payload)
             };
             stepDict[stepKey] = metadata;
         }
