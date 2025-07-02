@@ -5,6 +5,7 @@ using Lycia.Saga.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Lycia.Infrastructure.Compensating;
 using Lycia.Messaging.Utility;
+using Lycia.Tests.Messages;
 
 namespace Lycia.Tests;
 
@@ -206,31 +207,5 @@ public class SagaSagaStoreTests
         {
             return default;
         }
-    }
-
-    // Dummy types for test isolation
-    private class DummyEvent : IMessage
-    {
-        protected DummyEvent(Guid? parentMessageId = null, Guid? correlationId = null, string? applicationId = null)
-        {
-            MessageId = Guid.CreateVersion7();
-            ParentMessageId = parentMessageId ?? Guid.Empty;
-            CorrelationId = correlationId ?? MessageId;
-            Timestamp = DateTime.UtcNow;
-            ApplicationId = applicationId ?? EventMetadata.ApplicationId;
-        }
-
-        public Guid MessageId { get; }
-        public Guid ParentMessageId { get; }
-        public Guid CorrelationId { get; init; }
-        public DateTime Timestamp { get; }
-        public string ApplicationId { get; }
-        public Guid? SagaId { get; set; }
-        public StepStatus? __TestStepStatus { get; set; }
-        public Type? __TestStepType { get; set; }
-    }
-
-    private class DummySagaHandler
-    {
     }
 }

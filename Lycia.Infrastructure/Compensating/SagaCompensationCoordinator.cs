@@ -1,4 +1,5 @@
 using Lycia.Messaging;
+using Lycia.Messaging.Enums;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga;
 using Lycia.Saga.Handlers;
@@ -25,7 +26,13 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider) : ISa
 
             var steps = await sagaStore.GetSagaHandlerStepsAsync(sagaId);
 
-            var failedSteps = steps.Where(s => s.Value.MessageTypeName == failedStepType.AssemblyQualifiedName);
+            // Filter steps to find those that match the failed step type and have a status of Failed
+            var failedSteps = steps
+                .Where(s =>
+                    s.Value.MessageTypeName == failedStepType.AssemblyQualifiedName &&
+                    s.Value.Status == StepStatus.Failed)
+                .ToList();
+
             foreach (var step in failedSteps)
             {
                 var stepType = Type.GetType(step.Key.stepType);
@@ -38,44 +45,58 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider) : ISa
                 if (messageObject == null) continue;
 
                 // Try to get the handler via ISagaCompensationHandler<>
-                var handlerType = typeof(ISagaCompensationHandler<>).MakeGenericType(stepType);
+                var onlySagaCompensationHandlerType = typeof(ISagaCompensationHandler<>).MakeGenericType(stepType);
                 // If no handler found, try to find candidate handlers using the new method
-                var handler = serviceProvider.GetService(handlerType) ?? FindCompensationHandlers(stepType).FirstOrDefault();
+                var handlers = serviceProvider.GetServices(onlySagaCompensationHandlerType).Cast<object>()
+                    .Concat(FindCompensationHandlers(stepType)) // ISagaCompensationHandler<> + ISagaStartHandler<> and ISagaHandler<>
+                    .DistinctBy(h => h.GetType())
+                    .ToList();
 
-                if (handler == null) continue;
-
-                var handlerBaseType = handler.GetType().BaseType;
-                if (handlerBaseType == null)
+                foreach (var handler in handlers)
                 {
-                    // Fallback: try to invoke CompensateAsync on handler directly
-                    var compensateMethodFallback = handler.GetType().GetMethod("CompensateAsync", [stepType]);
-                    if (compensateMethodFallback != null)
+                    var handlerBaseType = handler.GetType().BaseType;
+
+                    // Determine the method name and delegate based on handler base type or interface
+                    Delegate? compensationDelegate = null;
+                    var handlerTypeActual = handler.GetType();
+
+                    var handlerGenericDef =
+                        handlerBaseType != null && handlerBaseType.IsGenericType
+                            ? handlerBaseType.GetGenericTypeDefinition()
+                            : null;
+
+                    if (handlerGenericDef == typeof(StartReactiveSagaHandler<>) ||
+                        handlerGenericDef == typeof(StartCoordinatedSagaHandler<,,>) ||
+                        handlerGenericDef == typeof(ReactiveSagaHandler<>) ||
+                        handlerGenericDef == typeof(CoordinatedSagaHandler<,,>))
                     {
-                        await (Task)compensateMethodFallback.Invoke(handler, [messageObject])!;
+                        // Use "CompensateAsyncInternal" for these base types
+                        compensationDelegate = HandlerDelegateHelper.GetHandlerDelegate(handlerTypeActual, "CompensateAsyncInternal", stepType);
+                    }
+                    else
+                    {
+                        // Check if handler implements ISagaCompensationHandler<> for stepType
+                        var implementsCompensationHandler = handlerTypeActual.GetInterfaces().Any(i =>
+                            i.IsGenericType &&
+                            i.GetGenericTypeDefinition() == typeof(ISagaCompensationHandler<>) &&
+                            i.GetGenericArguments()[0] == stepType);
+
+                        if (implementsCompensationHandler)
+                        {
+                            // Use "CompensateAsync" for ISagaCompensationHandler<>
+                            compensationDelegate = HandlerDelegateHelper.GetHandlerDelegate(handlerTypeActual, "CompensateAsync", stepType);
+                        }
                     }
 
-                    continue;
-                }
-
-                var handlerGenericDef =
-                    handlerBaseType.IsGenericType ? handlerBaseType.GetGenericTypeDefinition() : null;
-
-                // Determine whether to invoke CompensateStartAsync or CompensateAsync based on base type
-                if (handlerGenericDef == typeof(StartReactiveSagaHandler<>) ||
-                    handlerGenericDef == typeof(StartCoordinatedSagaHandler<,,>))
-                {
-                    var compensateStartMethod = handler.GetType().GetMethod("CompensateStartAsync", [stepType]);
-                    if (compensateStartMethod != null)
+                    if (compensationDelegate == null)
                     {
-                        await (Task)compensateStartMethod.Invoke(handler, [messageObject])!;
+                        // No suitable delegate found, skip this handler
                         continue;
                     }
-                }
 
-                var compensateMethod = handler.GetType().GetMethod("CompensateAsync", [stepType]);
-                if (compensateMethod != null)
-                {
-                    await (Task)compensateMethod.Invoke(handler, [messageObject])!;
+                    // Invoke the compensation delegate asynchronously
+                    // This calls the appropriate compensation method on the handler
+                    await (Task)compensationDelegate.DynamicInvoke(handler, messageObject)!;
                 }
             }
         }
@@ -100,7 +121,7 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider) : ISa
                 return;
 
             var steps = await sagaStore.GetSagaHandlerStepsAsync(sagaId);
-            
+
             //var parentChain = SagaStepHelper.GetParentChain(steps.Values, message.MessageId);
 
             // Get the parent message ID from the current message
@@ -111,8 +132,8 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider) : ISa
             // Find the parent step in the saga steps(with MessageId)
             var parentStep = steps.FirstOrDefault(meta =>
                 meta.Value.MessageId == parentMessageId);
-            
-            if (parentStep.Equals(default(KeyValuePair<(string, string), SagaStepMetadata>)))
+
+            if (parentStep.Equals(default(KeyValuePair<(string, string, string), SagaStepMetadata>)))
                 return;
 
             var parentStepType = Type.GetType(parentStep.Key.stepType);
@@ -128,9 +149,13 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider) : ISa
                 return;
 
             // Find the compensation handler for the parent step type
-            var handlerType = typeof(ISagaCompensationHandler<>).MakeGenericType(parentStepType);
-            var handler = serviceProvider.GetService(handlerType)
-                          ?? FindCompensationHandlers(parentStepType).FirstOrDefault();
+            var onlySagaCompensationHandlerType = typeof(ISagaCompensationHandler<>).MakeGenericType(parentStepType);
+            var handlers = serviceProvider.GetServices(onlySagaCompensationHandlerType);
+            var handler = handlers.Cast<object>()
+                              .FirstOrDefault(h => h.GetType().FullName == parentStep.Key.handlerType)
+                          ?? FindCompensationHandlers(parentStepType)
+                              .FirstOrDefault(h => h.GetType().FullName == parentStep.Key.handlerType);
+
 
             if (handler == null)
                 return;
@@ -140,24 +165,38 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider) : ISa
                 ? handlerBaseType.GetGenericTypeDefinition()
                 : null;
 
-            // Is it CompensateStartAsync or CompensateAsync?
+            Delegate? compensationDelegate = null;
+            var handlerTypeActual = handler.GetType();
+
             if (handlerGenericDef == typeof(StartReactiveSagaHandler<>) ||
-                handlerGenericDef == typeof(StartCoordinatedSagaHandler<,,>))
+                handlerGenericDef == typeof(StartCoordinatedSagaHandler<,,>) ||
+                handlerGenericDef == typeof(ReactiveSagaHandler<>) ||
+                handlerGenericDef == typeof(CoordinatedSagaHandler<,,>))
             {
-                var compensateStartMethod =
-                    handler.GetType().GetMethod("CompensateStartAsync", [parentStepType]);
-                if (compensateStartMethod != null)
+                // Use "CompensateAsyncInternal" for these base types
+                compensationDelegate = HandlerDelegateHelper.GetHandlerDelegate(handlerTypeActual, "CompensateAsyncInternal", parentStepType);
+            }
+            else
+            {
+                // Check if handler implements ISagaCompensationHandler<> for parentStepType
+                var implementsCompensationHandler = handlerTypeActual.GetInterfaces().Any(i =>
+                    i.IsGenericType &&
+                    i.GetGenericTypeDefinition() == typeof(ISagaCompensationHandler<>) &&
+                    i.GetGenericArguments()[0] == parentStepType);
+
+                if (implementsCompensationHandler)
                 {
-                    await (Task)compensateStartMethod.Invoke(handler, [messageObject])!;
-                    return;
+                    // Use "CompensateAsync" for ISagaCompensationHandler<>
+                    compensationDelegate = HandlerDelegateHelper.GetHandlerDelegate(handlerTypeActual, "CompensateAsync", parentStepType);
                 }
             }
 
-            var compensateMethod = handler.GetType().GetMethod("CompensateAsync", [parentStepType]);
-            if (compensateMethod != null)
-            {
-                await (Task)compensateMethod.Invoke(handler, [messageObject])!;
-            }
+            if (compensationDelegate == null)
+                return;
+
+            // Invoke the compensation delegate asynchronously
+            // This calls the appropriate compensation method on the handler
+            await (Task)compensationDelegate.DynamicInvoke(handler, messageObject)!;
         }
         catch (Exception ex)
         {

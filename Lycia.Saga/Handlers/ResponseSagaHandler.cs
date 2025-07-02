@@ -16,16 +16,30 @@ public abstract class ResponseSagaHandler<TResponse, TSagaData> :
         Context = context;
     }
     
-    public async Task HandleSuccessResponseInternalAsync(TResponse response)
+    protected async Task HandleSuccessResponseInternalAsync(TResponse response)
     {
-        Context.RegisterStepMessage(response);
-        await HandleSuccessResponseAsync(response);
+        Context.RegisterStepMessage(response); // Mapping the message to the saga context
+        try
+        {
+            await HandleSuccessResponseAsync(response);  // Actual business logic
+        }
+        catch (Exception)
+        {
+            await Context.MarkAsFailed<TResponse>();
+        }
     }
 
-    public async Task HandleFailResponseInternalAsync(TResponse response, FailResponse fail)
+    protected async Task HandleFailResponseInternalAsync(TResponse response, FailResponse fail)
     {
-        Context.RegisterStepMessage(response);
-        await HandleFailResponseAsync(response, fail);
+        Context.RegisterStepMessage(response); // Mapping the message to the saga context
+        try
+        {
+            await HandleFailResponseAsync(response, fail);  // Actual business logic
+        }
+        catch (Exception)
+        {
+            await Context.MarkAsFailed<TResponse>();
+        }
     }
 
     public abstract Task HandleSuccessResponseAsync(TResponse response);

@@ -18,12 +18,30 @@ public abstract class ReactiveSagaHandler<TMessage> :
     {
         Context = context;
     }
-
     
-    public async Task HandleAsyncInternal(TMessage message)
+    protected async Task HandleAsyncInternal(TMessage message)
     {
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
-        await HandleAsync(message);           // Actual business logic
+        try
+        {
+            await HandleAsync(message);  // Actual business logic
+        }
+        catch (Exception)
+        {
+            await Context.MarkAsFailed<TMessage>();
+        }
+    }
+
+    protected async Task CompensateAsyncInternal(TMessage message)
+    {
+        try
+        {
+            await CompensateAsync(message);  // Actual business logic
+        }
+        catch (Exception)
+        {
+            await Context.MarkAsCompensationFailed<TMessage>();
+        }
     }
 
     public abstract Task HandleAsync(TMessage message);

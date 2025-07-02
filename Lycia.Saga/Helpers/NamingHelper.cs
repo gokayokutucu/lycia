@@ -8,6 +8,6 @@ public static class NamingHelper
     /// <summary>
     /// Constructs the dictionary key used for storing step metadata, combining step type and handler type.
     /// </summary>
-    public static string GetStepNameWithHandler(Type stepType, Type handlerType) =>
-        $"{stepType.ToSagaStepName()}_{handlerType.FullName}";
+    public static string GetStepNameWithHandler(Type stepType, Type handlerType, Guid messageId) =>
+        $"step:{stepType.ToSagaStepName()}:handler:{handlerType.FullName}:message-id:{messageId}";
 }
