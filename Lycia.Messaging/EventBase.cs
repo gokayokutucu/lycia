@@ -17,7 +17,11 @@ public abstract class EventBase : IEvent
 
     public Guid MessageId { get; init; }
     public Guid ParentMessageId { get; init; }
-    public Guid CorrelationId { get; init; }
+#if NET5_0_OR_GREATER
+    public  Guid CorrelationId { get; init; }
+#else
+    public Guid CorrelationId { get; set; }
+#endif
     public DateTime Timestamp { get; init; }
     public string ApplicationId { get; init; }
     public Guid? SagaId { get; set; }
