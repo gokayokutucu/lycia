@@ -28,5 +28,11 @@
       <ProjectReference Include="..\Lycia.Infrastructure\Lycia.Infrastructure.csproj" />
       <ProjectReference Include="..\Sample.Shared\Sample.Shared.csproj" />
     </ItemGroup>
+    
+    
+
+    <ItemGroup>
+      <Folder Include="Helper\" />
+    </ItemGroup>
 
 </Project>
