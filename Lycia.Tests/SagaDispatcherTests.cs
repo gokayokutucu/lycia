@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Lycia.Extensions;
 using Lycia.Infrastructure.Compensating;
 using Lycia.Infrastructure.Dispatching;
@@ -9,6 +8,7 @@ using Lycia.Messaging.Enums;
 using Lycia.Saga;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Extensions;
+using Lycia.Saga.Handlers;
 using Lycia.Tests.Helper;
 using Lycia.Tests.Sagas;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,6 +20,54 @@ namespace Lycia.Tests;
 
 public class SagaDispatcherTests
 {
+
+    [Fact]
+    public async Task DispatchAsync_Should_Not_Continue_CompensationChain_After_CompensationFailure()
+    {
+        // Arrange
+        var fixedSagaId = Guid.NewGuid();
+        var services = new ServiceCollection();
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
+        services.AddScoped<ISagaStore, InMemorySagaStore>();
+        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
+        services.AddScoped<IEventBus>(sp =>
+            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
+
+        services.AddScoped<ISagaStartHandler<InitialCommand>, InitialCompensationSagaHandler>();
+        services.AddScoped<ISagaHandler<ParentEvent>, ParentCompensationSagaHandler>();
+        services.AddScoped<ISagaHandler<FailingEvent>, FailingCompensationSagaHandler>();
+
+        // Reset compensation flags before test
+        FailingCompensationSagaHandler.CompensateCalled = false;
+        ParentCompensationSagaHandler.CompensateCalled = false;
+        InitialCompensationSagaHandler.CompensateCalled = false;
+
+        var provider = services.BuildServiceProvider();
+        var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
+        var store = provider.GetRequiredService<ISagaStore>();
+
+        var command = new InitialCommand();
+
+        // Act
+        await dispatcher.DispatchAsync(command);
+
+        // Assert: Only the first failing compensation handler should be called.
+        Assert.True(FailingCompensationSagaHandler.CompensateCalled);
+        Assert.False(ParentCompensationSagaHandler.CompensateCalled);
+        Assert.False(InitialCompensationSagaHandler.CompensateCalled);
+
+        var steps = await store.GetSagaHandlerStepsAsync(fixedSagaId);
+
+        Assert.Contains(steps.Values, meta => meta.Status == StepStatus.CompensationFailed);
+        // Parent should not have been compensated
+        var parentStep = steps.FirstOrDefault(x => x.Key.stepType.Contains(nameof(ParentEvent)));
+        if (!parentStep.Equals(default(KeyValuePair<(string, string, string), SagaStepMetadata>)))
+        {
+            Assert.False(parentStep.Value.Status == StepStatus.Compensated);
+        }
+    }
+
     [Fact]
     public async Task DispatchAsync_Should_Invoke_CompensateStartAsync_When_Overridden()
     {
@@ -221,19 +269,22 @@ public class SagaDispatcherTests
         var createOrderCommandMessageId =
             SagaDispatcherTestHelper.GetMessageId<CreateOrderCommand, CreateOrderSagaHandler>(steps);
 
-        var wasLogged = await sagaStore.IsStepCompletedAsync(fixedSagaId, createOrderCommandMessageId!.Value, typeof(CreateOrderCommand),
+        var wasLogged = await sagaStore.IsStepCompletedAsync(fixedSagaId, createOrderCommandMessageId!.Value,
+            typeof(CreateOrderCommand),
             typeof(CreateOrderSagaHandler));
         Assert.True(wasLogged);
 
         var orderCreatedEventMessageId =
             SagaDispatcherTestHelper.GetMessageId<OrderCreatedEvent, ShipOrderSagaHandler>(steps);
         var wasShipped =
-            await sagaStore.IsStepCompletedAsync(fixedSagaId, orderCreatedEventMessageId!.Value, typeof(OrderCreatedEvent), typeof(ShipOrderSagaHandler));
+            await sagaStore.IsStepCompletedAsync(fixedSagaId, orderCreatedEventMessageId!.Value,
+                typeof(OrderCreatedEvent), typeof(ShipOrderSagaHandler));
 
         var orderShippedEventMessageId =
             SagaDispatcherTestHelper.GetMessageId<OrderShippedEvent, DeliverOrderSagaHandler>(steps);
         var wasDelivered =
-            await sagaStore.IsStepCompletedAsync(fixedSagaId,orderShippedEventMessageId!.Value, typeof(OrderShippedEvent),
+            await sagaStore.IsStepCompletedAsync(fixedSagaId, orderShippedEventMessageId!.Value,
+                typeof(OrderShippedEvent),
                 typeof(DeliverOrderSagaHandler));
         Assert.True(wasShipped);
         Assert.True(wasDelivered);
@@ -437,5 +488,65 @@ public class SagaDispatcherTests
 
         Assert.All(steps.Where(x => x.Key.stepType.Contains(nameof(CreateOrderCommand))),
             kv => Assert.Equal(StepStatus.Completed, kv.Value.Status));
+    }
+    
+    public class InitialCommand : CommandBase
+    {
+    }
+
+    public class ParentEvent : EventBase
+    {
+    }
+
+    public class FailingEvent : EventBase
+    {
+    }
+
+    public class InitialCompensationSagaHandler : StartReactiveSagaHandler<InitialCommand>
+    {
+        public static bool CompensateCalled = false;
+
+        public override async Task HandleStartAsync(InitialCommand message)
+        {
+            var next = new ParentEvent { ParentMessageId = message.MessageId };
+            await Context.PublishWithTracking(next).ThenMarkAsComplete();
+        }
+
+        public override Task CompensateStartAsync(InitialCommand message)
+        {
+            CompensateCalled = true;
+            return Task.CompletedTask;
+        }
+    }
+
+    public class ParentCompensationSagaHandler : ReactiveSagaHandler<ParentEvent>
+    {
+        public static bool CompensateCalled = false;
+
+        public override Task HandleAsync(ParentEvent message)
+        {
+            var fail = new FailingEvent { ParentMessageId = message.MessageId };
+            return Context.PublishWithTracking(fail).ThenMarkAsComplete();
+        }
+
+        public override Task CompensateAsync(ParentEvent message)
+        {
+            CompensateCalled = true;
+            return Task.CompletedTask;
+        }
+    }
+
+    public class FailingCompensationSagaHandler : ReactiveSagaHandler<FailingEvent>
+    {
+        public static bool CompensateCalled = false;
+
+        public override Task HandleAsync(FailingEvent message)
+            => throw new InvalidOperationException("Fail!");
+
+        public override Task CompensateAsync(FailingEvent message)
+        {
+            CompensateCalled = true;
+            throw new Exception("Compensation failed");
+        }
     }
 }

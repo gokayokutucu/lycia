@@ -33,7 +33,7 @@ public interface ISagaStore
     /// <summary>
     /// Retrieves all logged step-handler pairs and their statuses for the given saga.
     /// </summary>
-    Task<IReadOnlyDictionary<(string stepType, string handlerType), SagaStepMetadata>> GetSagaHandlerStepsAsync(Guid sagaId);
+    Task<IReadOnlyDictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>> GetSagaHandlerStepsAsync(Guid sagaId);
 
     /// <summary>
     /// Loads the persisted saga data for a given saga instance.

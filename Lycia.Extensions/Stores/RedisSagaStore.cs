@@ -25,7 +25,7 @@ public class RedisSagaStore(
 
     public async Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status, Type handlerType, object? payload = null)
     {
-        var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType);
+        var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
         var routingKey = RoutingKeyHelper.GetRoutingKey(stepType);
         var applicationId = routingKey.Split('.')[0];
         var messageTypeName = stepType.AssemblyQualifiedName ?? stepType.ToSagaStepName();
@@ -61,7 +61,7 @@ public class RedisSagaStore(
     public async Task<bool> IsStepCompletedAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType)
     {
         var redisStepLogKey = StepLogKey(sagaId);
-        var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType);
+        var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
 
         var metaJson = await redisDb.HashGetAsync(redisStepLogKey, stepKey);
         if (!metaJson.HasValue)
@@ -74,7 +74,7 @@ public class RedisSagaStore(
     public async Task<StepStatus> GetStepStatusAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType)
     {
         var redisStepLogKey = StepLogKey(sagaId);
-        var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType);
+        var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
 
         var metaJson = await redisDb.HashGetAsync(redisStepLogKey, stepKey);
         if (!metaJson.HasValue)
@@ -84,11 +84,11 @@ public class RedisSagaStore(
         return metadata?.Status ?? StepStatus.None;
     }
 
-    public async Task<IReadOnlyDictionary<(string stepType, string handlerType), SagaStepMetadata>> GetSagaHandlerStepsAsync(Guid sagaId)
+    public async Task<IReadOnlyDictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>> GetSagaHandlerStepsAsync(Guid sagaId)
     {
         var redisStepLogKey = StepLogKey(sagaId);
         var entries = await redisDb.HashGetAllAsync(redisStepLogKey);
-        var dict = new Dictionary<(string stepType, string handlerType), SagaStepMetadata>();
+        var dict = new Dictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>();
 
         foreach (var entry in entries)
         {
@@ -100,11 +100,12 @@ public class RedisSagaStore(
             {
                 var stepTypeName = key.Substring(0, separatorIndex);
                 var handlerTypeName = key.Substring(separatorIndex + 1);
-                dict[(stepTypeName, handlerTypeName)] = metadata;
+                var messageId = string.Empty;
+                dict[(stepTypeName, handlerTypeName, messageId )] = metadata;
             }
             else
             {
-                dict[(key, string.Empty)] = metadata;
+                dict[(key, string.Empty, Guid.Empty.ToString())] = metadata;
             }
         }
 

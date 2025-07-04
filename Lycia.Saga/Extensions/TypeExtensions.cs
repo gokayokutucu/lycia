@@ -4,7 +4,7 @@ public static class TypeExtensions
 {
     public static string ToSagaStepName(this Type type)
     {
-        return $"{type.FullName}, {type.Assembly.GetName().Name}";
+        return $"{type.FullName}:assembly:{type.Assembly.GetName().Name}";
     }
     
     public static Type? TryResolveSagaStepType(this string qualifiedName)

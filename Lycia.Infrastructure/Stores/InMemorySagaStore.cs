@@ -37,7 +37,7 @@ public class InMemorySagaStore(
         try
         {
             var stepDict = _stepLogs.GetOrAdd(sagaId, _ => new ConcurrentDictionary<string, SagaStepMetadata>());
-            var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType);
+            var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
 
             var messageTypeName = GetMessageTypeName(stepType);
 
@@ -81,7 +81,7 @@ public class InMemorySagaStore(
     {
         if (_stepLogs.TryGetValue(sagaId, out var steps))
         {
-            var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType);
+            var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
             return Task.FromResult(
                 steps.TryGetValue(stepKey, out var metadata) && metadata.Status == StepStatus.Completed
             );
@@ -98,7 +98,7 @@ public class InMemorySagaStore(
     {
         if (_stepLogs.TryGetValue(sagaId, out var steps))
         {
-            var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType);
+            var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
             if (steps.TryGetValue(stepKey, out var metadata))
             {
                 return Task.FromResult(metadata.Status);
@@ -112,38 +112,52 @@ public class InMemorySagaStore(
     /// Retrieves all saga handler steps for the given sagaId.
     /// Returns a dictionary keyed by (stepType, handlerType) tuple.
     /// </summary>
-    public Task<IReadOnlyDictionary<(string stepType, string handlerType), SagaStepMetadata>>
+    public Task<IReadOnlyDictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>>
         GetSagaHandlerStepsAsync(Guid sagaId)
     {
         if (_stepLogs.TryGetValue(sagaId, out var steps))
         {
-            // Parse keys of the form "stepType_handlerType" into tuple keys
-            var result = new Dictionary<(string stepType, string handlerType), SagaStepMetadata>();
+            // Parse keys of the form "step:{stepType}:handler:{handlerType}:message:{messageId}"
+            var result = new Dictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>();
             foreach (var kvp in steps)
             {
                 var key = kvp.Key;
                 var metadata = kvp.Value;
 
-                var separatorIndex = key.IndexOf('_');
-                if (separatorIndex > 0 && separatorIndex < key.Length - 1)
+                try
                 {
-                    var stepTypeName = key.Substring(0, separatorIndex);
-                    var handlerTypeName = key.Substring(separatorIndex + 1);
-                    result[(stepTypeName, handlerTypeName)] = metadata;
+                    // Expected format: step:{stepType}:handler:{handlerType}:message:{messageId}
+                    var parts = key.Split(':');
+                    if (parts.Length == 8 &&
+                        parts[0] == "step" &&
+                        parts[2] == "assembly" &&
+                        parts[4] == "handler" &&
+                        parts[6] == "message-id")
+                    {
+                        var stepTypeName = $"{parts[1]}, {parts[3]}"; // Combine step type and assembly
+                        var handlerTypeName = parts[5];
+                        var messageId = parts[7];
+                        
+                        result[(stepTypeName, handlerTypeName, messageId)] = metadata;
+                    }
+                    else
+                    {
+                        // Fallback for keys without handler type part
+                        result[(key, string.Empty, Guid.Empty.ToString())] = metadata;
+                    }
                 }
-                else
+                catch
                 {
-                    // Fallback for keys without handler type part
-                    result[(key, string.Empty)] = metadata;
+                    // ignore malformed keys
                 }
             }
 
             return Task
-                .FromResult<IReadOnlyDictionary<(string stepType, string handlerType), SagaStepMetadata>>(result);
+                .FromResult<IReadOnlyDictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>>(result);
         }
 
-        return Task.FromResult<IReadOnlyDictionary<(string stepType, string handlerType), SagaStepMetadata>>(
-            new Dictionary<(string stepType, string handlerType), SagaStepMetadata>());
+        return Task.FromResult<IReadOnlyDictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>>(
+            new Dictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>());
     }
 
     public Task<SagaData?> LoadSagaDataAsync(Guid sagaId)
