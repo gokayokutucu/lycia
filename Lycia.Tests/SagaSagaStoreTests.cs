@@ -5,6 +5,7 @@ using Lycia.Saga.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Lycia.Infrastructure.Compensating;
 using Lycia.Messaging.Utility;
+using Lycia.Tests.Messages;
 
 namespace Lycia.Tests;
 

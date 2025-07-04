@@ -214,38 +214,33 @@ public class SagaDispatcher(
     /// Invokes the CompensateAsync method on a compensation handler and checks the saga step status.
     /// Returns false if the compensation chain should break (due to failure or exception), true otherwise.
     /// </summary>
-    private async Task<bool> InvokeCompensationAsync(object handler, object message, Type handlerType, Guid messageId,
+    private async Task<bool> InvokeCompensationAsync(
+        object handler,
+        object message,
+        Type handlerType,
+        Guid messageId,
         Guid sagaId,
         Type messageType)
     {
-        MethodInfo? method;
+        var methodName =
+            handlerType.IsSubclassOfRawGenericBase(typeof(StartReactiveSagaHandler<>)) ||
+            handlerType.IsSubclassOfRawGenericBase(typeof(StartCoordinatedSagaHandler<,,>)) || 
+            handlerType.IsSubclassOfRawGenericBase(typeof(ReactiveSagaHandler<>)) ||
+            handlerType.IsSubclassOfRawGenericBase(typeof(CoordinatedSagaHandler<,,>))
+                    ? "CompensateAsyncInternal"
+                    // Fallback for ISagaCompensationHandler<> interface implementations
+                    : "CompensateAsync";
 
-        if (handlerType.IsSubclassOfRawGenericBase(typeof(StartReactiveSagaHandler<>)) ||
-            handlerType.IsSubclassOfRawGenericBase(typeof(StartCoordinatedSagaHandler<,,>)))
-        {
-            method = handlerType.GetMethod("CompensateStartAsync");
-        }
-        else if (handlerType.IsSubclassOfRawGenericBase(typeof(ReactiveSagaHandler<>)) ||
-                 handlerType.IsSubclassOfRawGenericBase(typeof(CoordinatedSagaHandler<,,>)))
-        {
-            method = handlerType.GetMethod("CompensateAsync");
-        }
-        else
-        {
-            // Fallback for interface-based handler
-            var compensationInterface = typeof(ISagaCompensationHandler<>).MakeGenericType(messageType);
-            method = compensationInterface.GetMethod("CompensateAsync")
-                     ?? handlerType.GetMethod("CompensateAsync");
-        }
-
-        if (method == null) return true;
+        // Create a delegate for the compensation method
+        var compensateDelegate = HandlerDelegateHelper.GetHandlerDelegate(handlerType, methodName, messageType);
 
         try
         {
 #if UNIT_TESTING
             await LogStep(handlerType);
 #endif
-            await (Task)method.Invoke(handler, [message])!;
+            // Call through delegate
+            await compensateDelegate(handler, message);
 #if UNIT_TESTING
             await LogStep(handlerType);
 #endif
@@ -430,11 +425,11 @@ public class SagaDispatcher(
                 // Call HandleStartAsync
                 try
                 {
-                    dynamic dynamicHandler = handler;
-
                     var sagaId = GetSagaId(message);
 
-                    await dynamicHandler.HandleAsyncInternal((dynamic)message);
+                    var delegateMethod =
+                        HandlerDelegateHelper.GetHandlerDelegate(handlerType, "HandleAsyncInternal", message.GetType());
+                    await delegateMethod(handler, message);
 
                     await ValidateSagaStepCompletionAsync(message, handlerType, sagaId);
                 }
@@ -449,11 +444,11 @@ public class SagaDispatcher(
                 // Call HandleAsync for other handlers
                 try
                 {
-                    dynamic dynamicHandler = handler;
-
                     var sagaId = GetSagaId(message);
 
-                    await dynamicHandler.HandleAsyncInternal((dynamic)message);
+                    var delegateMethod =
+                        HandlerDelegateHelper.GetHandlerDelegate(handlerType, "HandleAsyncInternal", message.GetType());
+                    await delegateMethod(handler, message);
 
                     await ValidateSagaStepCompletionAsync(message, handlerType, sagaId);
                 }
