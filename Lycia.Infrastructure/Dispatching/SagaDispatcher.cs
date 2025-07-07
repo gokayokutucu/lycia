@@ -78,65 +78,11 @@ public class SagaDispatcher(
     }
 
     /// <summary>
-    /// Compensation handler discovery strategy:
-    /// Gathers all registered ISagaStartHandler<>, ISagaHandler<>, and ISagaCompensationHandler<> for the current message type,
-    /// then filters for handlers whose type is a subclass of one of the four saga handler base types:
-    ///   - StartReactiveSagaHandler<>
-    ///   - ReactiveSagaHandler<>
-    ///   - StartCoordinatedSagaHandler<,,>
-    ///   - CoordinatedSagaHandler<,,>
-    /// or implements ISagaCompensationHandler<>.
-    /// Uses DistinctBy(x => x.GetType()) to prevent duplicates.
-    /// </summary>
-    private List<object?> FindCompensationHandlers<TMessage>(Type messageType) where TMessage : IMessage
-    {
-        var allSagaHandlerTypes = new[]
-        {
-            typeof(ISagaStartHandler<>),
-            typeof(ISagaHandler<>),
-            typeof(ISagaCompensationHandler<>)
-        };
-        var allHandlers = new List<object?>();
-        foreach (var handlerInterface in allSagaHandlerTypes)
-        {
-            var closedType = handlerInterface.MakeGenericType(messageType);
-            allHandlers.AddRange(serviceProvider.GetServices(closedType));
-        }
-
-        var compensationHandlers = allHandlers
-            .Where(handler =>
-            {
-                if (handler is null) return false;
-                var ht = handler.GetType();
-                // Check if subclass of any of the four saga handler base types
-                if (ht.IsSubclassOfRawGenericBase(typeof(StartReactiveSagaHandler<>)) ||
-                    ht.IsSubclassOfRawGenericBase(typeof(ReactiveSagaHandler<>)) ||
-                    ht.IsSubclassOfRawGenericBase(typeof(StartCoordinatedSagaHandler<,,>)) ||
-                    ht.IsSubclassOfRawGenericBase(typeof(CoordinatedSagaHandler<,,>)))
-                {
-                    return true;
-                }
-
-                // Check if implements ISagaCompensationHandler<>
-                var compensationInterface = typeof(ISagaCompensationHandler<>).MakeGenericType(messageType);
-                if (compensationInterface.IsAssignableFrom(ht))
-                {
-                    return true;
-                }
-
-                return false;
-            })
-            .DistinctBy(x => x!.GetType())
-            .ToList();
-        return compensationHandlers;
-    }
-
-    /// <summary>
     /// Dispatches the compensation handlers for the given message and saga id.
     /// Initializes handler contexts and invokes compensation methods,
     /// stopping the compensation chain if a failure or exception occurs.
     /// </summary>
-    private async Task DispatchCompensationHandlersAsync<TMessage>(TMessage message, List<object?> handlers,
+    protected virtual async Task DispatchCompensationHandlersAsync<TMessage>(TMessage message, List<object?> handlers,
         Guid sagaId)
         where TMessage : IMessage
     {
@@ -327,7 +273,7 @@ public class SagaDispatcher(
         }
     }
 
-    private async Task InvokeHandlerAsync(
+    protected virtual async Task InvokeHandlerAsync(
         IEnumerable<object?> handlers,
         IMessage message,
         FailResponse? fail = null)
