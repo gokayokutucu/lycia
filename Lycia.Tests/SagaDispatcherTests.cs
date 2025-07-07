@@ -12,6 +12,9 @@ using Lycia.Saga.Handlers;
 using Lycia.Tests.Helper;
 using Lycia.Tests.Sagas;
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
+using Moq.AutoMock;
+using Moq.Protected;
 using Sample.Shared.Messages.Commands;
 using Sample.Shared.Messages.Events;
 using Sample.Shared.Messages.Sagas;
@@ -20,6 +23,90 @@ namespace Lycia.Tests;
 
 public class SagaDispatcherTests
 {
+    
+    [Fact]
+    public async Task DispatchAsync_Should_Not_Invoke_Handler_On_MessageType_Mismatch()
+    {
+        // Arrange: Only a handler for a different message type is registered.
+        var services = new ServiceCollection();
+        var fixedSagaId = Guid.NewGuid();
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
+        services.AddScoped<ISagaStore, InMemorySagaStore>();
+        services.AddScoped<IEventBus>(sp =>
+            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
+
+        // Register handler for another message type (OrderCreatedEvent).
+        services.AddScoped<ISagaHandler<OrderCreatedEvent>, ShipOrderSagaHandler>();
+
+        var provider = services.BuildServiceProvider();
+
+        // Create dispatcher mock to track calls to protected methods.
+        var dispatcherMock = new Mock<SagaDispatcher>(
+            provider.GetRequiredService<ISagaStore>(),
+            provider.GetRequiredService<ISagaIdGenerator>(),
+            provider.GetRequiredService<IEventBus>(),
+            provider.GetRequiredService<ISagaCompensationCoordinator>(),
+            provider
+        ) { CallBase = true };
+
+        var message = new InitialCommand(); // No handler registered for this type.
+
+        // Act
+        await dispatcherMock.Object.DispatchAsync(message);
+
+        // Assert: Neither InvokeHandlerAsync nor DispatchCompensationHandlersAsync should be called.
+        dispatcherMock.Protected().Verify(
+            "InvokeHandlerAsync",
+            Times.Never(),
+            ItExpr.IsAny<IEnumerable<object?>>(),
+            ItExpr.IsAny<IMessage>(),
+            ItExpr.IsAny<FailResponse>()
+        );
+    }
+    
+    [Fact]
+    public async Task DispatchAsync_Should_Detect_And_Stop_On_CircularParentChain()
+    {
+        // Arrange: Build a circular parent chain in the step log
+        var fixedSagaId = Guid.NewGuid();
+        var services = new ServiceCollection();
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
+        services.AddScoped<ISagaStore, InMemorySagaStore>();
+        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
+        services.AddScoped<IEventBus>(sp =>
+            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
+
+        services.AddScoped<ISagaHandler<ParentEvent>, ParentCompensationSagaHandler>();
+        services.AddScoped<ISagaHandler<FailingEvent>, FailingCompensationSagaHandler>();
+
+        var provider = services.BuildServiceProvider();
+        var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
+        var store = provider.GetRequiredService<ISagaStore>();
+
+        var parentEventId = Guid.NewGuid();
+        var failingEventId = Guid.NewGuid();
+
+        // parentEvent.ParentMessageId = failingEventId
+        // failingEvent.ParentMessageId = parentEventId
+        var parentEvent = new ParentEvent
+            { SagaId = fixedSagaId, MessageId = parentEventId, ParentMessageId = failingEventId };
+        var failingEvent = new FailingEvent
+            { SagaId = fixedSagaId, MessageId = failingEventId, ParentMessageId = parentEventId };
+
+        // Log both steps to simulate the circular chain
+        await store.LogStepAsync(fixedSagaId, parentEventId, failingEventId, typeof(ParentEvent), StepStatus.Completed,
+            typeof(ParentCompensationSagaHandler), parentEvent);
+        await store.LogStepAsync(fixedSagaId, failingEventId, parentEventId, typeof(FailingEvent), StepStatus.Failed,
+            typeof(FailingCompensationSagaHandler), failingEvent);
+
+        // Act & Assert: Expect an InvalidOperationException due to the circular parent chain
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            dispatcher.DispatchAsync(parentEvent)
+        );
+        Assert.Contains("Illegal StepStatus transition", ex.Message);
+    }
 
     [Fact]
     public async Task DispatchAsync_Should_Not_Continue_CompensationChain_After_CompensationFailure()
@@ -489,7 +576,7 @@ public class SagaDispatcherTests
         Assert.All(steps.Where(x => x.Key.stepType.Contains(nameof(CreateOrderCommand))),
             kv => Assert.Equal(StepStatus.Completed, kv.Value.Status));
     }
-    
+
     public class InitialCommand : CommandBase
     {
     }

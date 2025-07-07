@@ -34,15 +34,22 @@ public static class HandlerDelegateHelper
         if (method == null)
             throw new InvalidOperationException($"Method '{methodName}' not found on {handlerType.FullName}");
 
-        // (object handler, object message) => ((THandler)handler).Method((TMessage)message)
         var handlerParam = Expression.Parameter(typeof(object), "handler");
         var messageParam = Expression.Parameter(typeof(object), "message");
 
-        var body = Expression.Call(
-            Expression.Convert(handlerParam, method.DeclaringType!),
-            method,
-            Expression.Convert(messageParam, messageType)
+        // Add type checks to ensure the parameters are of the correct types
+        var body = Expression.Block(
+            Expression.IfThen(
+                Expression.Not(Expression.TypeIs(messageParam, messageType)),
+                Expression.Throw(Expression.New(typeof(InvalidCastException)))
+            ),
+            Expression.Call(
+                Expression.Convert(handlerParam, method.DeclaringType!),
+                method,
+                Expression.Convert(messageParam, messageType)
+            )
         );
+
         var lambda = Expression.Lambda<Func<object, object, Task>>(body, handlerParam, messageParam);
         var compiled = lambda.Compile();
         DelegateCache[key] = compiled;
