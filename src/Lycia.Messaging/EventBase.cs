@@ -6,17 +6,38 @@ namespace Lycia.Messaging;
 
 public abstract class EventBase : IEvent
 {
-    protected EventBase(Guid? parentMessageId = null, Guid? correlationId = null)
+    protected EventBase()
     {
+        SagaId = Guid.Empty;
         MessageId = Guid.CreateVersion7();
-        ParentMessageId = parentMessageId ?? Guid.Empty;
+        ParentMessageId = Guid.Empty; // CausationId
+        CorrelationId = MessageId;
+        Timestamp = DateTime.UtcNow;
+        ApplicationId  = EventMetadata.ApplicationId;
+    }
+    
+    protected EventBase(Guid? sagaId = null)
+    {
+        SagaId = sagaId;
+        MessageId = Guid.CreateVersion7();
+        ParentMessageId = Guid.Empty; // CausationId
+        CorrelationId = MessageId;
+        Timestamp = DateTime.UtcNow;
+        ApplicationId  = EventMetadata.ApplicationId;
+    }
+    
+    protected EventBase(Guid? sagaId = null, Guid? parentMessageId = null, Guid? correlationId = null)
+    {
+        SagaId = sagaId;
+        MessageId = Guid.CreateVersion7();
+        ParentMessageId = parentMessageId ?? Guid.Empty; // CausationId
         CorrelationId = correlationId ?? MessageId;
         Timestamp = DateTime.UtcNow;
         ApplicationId  = EventMetadata.ApplicationId;
     }
 
     public Guid MessageId { get; init; }
-    public Guid ParentMessageId { get; init; }
+    public Guid ParentMessageId { get; init; } // CausationId
 #if NET5_0_OR_GREATER
     public  Guid CorrelationId { get; init; }
 #else

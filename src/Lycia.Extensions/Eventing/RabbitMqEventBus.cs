@@ -28,9 +28,11 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         _logger = logger;
         _queueTypeMap = queueTypeMap;
 
+        if (conn == null) throw new Exception("RabbitMqEventBus connection is null");
+        
         _factory = new ConnectionFactory
         {
-            Endpoint = new AmqpTcpEndpoint(conn),
+            Uri = new Uri(conn),
             AutomaticRecoveryEnabled = true
         };
     }
@@ -96,6 +98,21 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             type: ExchangeType.Topic,
             durable: true,
             autoDelete: false,
+            arguments: null, cancellationToken: cancellationToken);
+
+        var queueName = exchangeName;
+        // Ensure the queue exists and is bound to the exchange.
+        await _channel.QueueDeclareAsync(
+            queue: queueName,
+            durable: true,
+            exclusive: false,
+            autoDelete: false,
+            arguments: null, cancellationToken: cancellationToken);
+
+        await _channel.QueueBindAsync(
+            queue: queueName,
+            exchange: exchangeName,
+            routingKey: routingKey,
             arguments: null, cancellationToken: cancellationToken);
 
         // Prepare headers:
@@ -181,18 +198,18 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         {
         }
 
-        // CausationId
+        // ParentMessageId
         try
         {
-            var causationId = eventBase?.CausationId;
-            if (causationId is Guid guidCausationId && guidCausationId != Guid.Empty)
-                headers["CausationId"] = guidCausationId.ToString();
+            var parentMessageId = eventBase?.ParentMessageId;
+            if (parentMessageId is Guid guidParentMessageId && guidParentMessageId != Guid.Empty)
+                headers["ParentMessageId"] = guidParentMessageId.ToString();
             else
-                headers["CausationId"] = Guid.NewGuid().ToString();
+                headers["ParentMessageId"] = Guid.NewGuid().ToString();
         }
         catch
         {
-            headers["CausationId"] = Guid.NewGuid().ToString();
+            headers["ParentMessageId"] = Guid.NewGuid().ToString();
         }
 
         headers["EventType"] = typeof(TEvent).FullName;
@@ -228,6 +245,20 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             exclusive: false,
             autoDelete: false,
             arguments: null, cancellationToken: cancellationToken)!;
+
+        // Ensure the queue is bound to the exchange if necessary.
+        // For direct (default) exchange, no binding is needed unless using a custom exchange.
+        // If you want to bind to a custom exchange, set exchangeName accordingly and bind.
+        // Here, if exchange is not empty, bind the queue to the exchange.
+        var exchangeName = string.Empty;
+        if (!string.IsNullOrWhiteSpace(exchangeName))
+        {
+            await _channel.QueueBindAsync(
+                queue: queueName,
+                exchange: exchangeName,
+                routingKey: routingKey,
+                arguments: null, cancellationToken: cancellationToken);
+        }
 
         // Prepare headers:
         // "SagaId" - from command.SagaId if present, else sagaId parameter if provided
