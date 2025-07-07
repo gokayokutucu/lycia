@@ -1,16 +1,217 @@
 using Lycia.Infrastructure.Compensating;
+using Lycia.Infrastructure.Dispatching;
+using Lycia.Infrastructure.Eventing;
 using Lycia.Infrastructure.Stores;
+using Lycia.Messaging;
 using Lycia.Saga.Abstractions;
 using Lycia.Messaging.Enums;
 using Lycia.Saga.Extensions;
 using Lycia.Tests.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
+using Moq.Protected;
+using Sample.Shared.Messages.Events;
+using Sample.Shared.Messages.Sagas;
 
 namespace Lycia.Tests;
 
 public class SagaCompensationCoordinatorTests
 {
+    
+    [Fact]
+    public async Task Compensation_Should_Not_Invoke_Handler_If_Already_Compensated_Or_CompensationFailed()
+    {
+        // Arrange
+        var sagaId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var stepType = typeof(DummyEvent);
+
+        // Define a handler that records invocation
+        var handler = new NoOpHandler();
+        NoOpHandler.Invocations.Clear();
+
+        var services = new ServiceCollection();
+        var eventBusMock = Mock.Of<IEventBus>();
+        var sagaIdGen = Mock.Of<ISagaIdGenerator>();
+        var dummyCoordinator = Mock.Of<ISagaCompensationCoordinator>();
+        var store = new InMemorySagaStore(eventBusMock, sagaIdGen, dummyCoordinator);
+
+        // Case 1: StepStatus is already Compensated
+        var payload = new DummyEvent()
+        {
+            MessageId = messageId,
+            ParentMessageId = Guid.Empty,
+            CorrelationId = Guid.NewGuid(),
+            Timestamp = DateTime.UtcNow,
+            ApplicationId = "Test"
+        };
+        await store.LogStepAsync(sagaId, messageId, Guid.Empty, stepType, StepStatus.Compensated, typeof(NoOpHandler),
+            payload);
+
+        services.AddSingleton<ISagaStore>(store);
+        services.AddSingleton<ISagaCompensationHandler<DummyEvent>>(handler);
+
+        var provider = services.BuildServiceProvider();
+        var coordinator = new SagaCompensationCoordinator(provider);
+
+        // Act
+        await coordinator.CompensateAsync(sagaId, stepType);
+
+        // Assert: Handler should NOT be called because step is already Compensated
+        Assert.Empty(NoOpHandler.Invocations);
+
+        // Case 2: StepStatus is already CompensationFailed
+        NoOpHandler.Invocations.Clear();
+        var sagaId2 = Guid.NewGuid();
+        var messageId2 = Guid.NewGuid();
+        var payload2 = new DummyEvent()
+        {
+            MessageId = messageId2,
+            ParentMessageId = Guid.Empty,
+            CorrelationId = Guid.NewGuid(),
+            Timestamp = DateTime.UtcNow,
+            ApplicationId = "Test"
+        };
+        await store.LogStepAsync(sagaId2, messageId2, Guid.Empty, stepType, StepStatus.CompensationFailed,
+            typeof(NoOpHandler), payload2);
+
+        // Act
+        await coordinator.CompensateAsync(sagaId2, stepType);
+
+        // Assert: Handler should NOT be called because step is already CompensationFailed
+        Assert.Empty(NoOpHandler.Invocations);
+    }
+
+    [Fact]
+    public async Task CompensateParentAsync_Should_Detect_And_Stop_On_CircularParentChain()
+    {
+        // Arrange
+        var sagaId = Guid.NewGuid();
+        var stepType = typeof(DummyEvent);
+
+        var messageId1 = Guid.NewGuid();
+        var messageId2 = Guid.NewGuid();
+
+        // Create a circular chain:
+        // msg1.ParentMessageId = msg2
+        // msg2.ParentMessageId = msg1
+        var msg1 = new DummyEvent
+        {
+            SagaId = sagaId,
+            MessageId = messageId1,
+            ParentMessageId = messageId2,
+            CorrelationId = Guid.NewGuid(),
+            Timestamp = DateTime.UtcNow,
+            ApplicationId = "Test"
+        };
+
+        var msg2 = new DummyEvent
+        {
+            SagaId = sagaId,
+            MessageId = messageId2,
+            ParentMessageId = messageId1,
+            CorrelationId = msg1.CorrelationId,
+            Timestamp = DateTime.UtcNow,
+            ApplicationId = "Test"
+        };
+
+        // Handlers will record invocations
+        CircularHandler.Invocations.Clear();
+
+        var services = new ServiceCollection();
+        var eventBus = Mock.Of<IEventBus>();
+        var sagaIdGen = new TestSagaIdGenerator(sagaId);
+        var dummyCoordinator = Mock.Of<ISagaCompensationCoordinator>();
+        var store = new InMemorySagaStore(eventBus, sagaIdGen, dummyCoordinator);
+
+        // Log both steps with compensation failed status to trigger parent chain
+        await store.LogStepAsync(sagaId, messageId1, messageId2, stepType, StepStatus.CompensationFailed,
+            typeof(CircularHandler), msg1);
+        await store.LogStepAsync(sagaId, messageId2, messageId1, stepType, StepStatus.CompensationFailed,
+            typeof(CircularHandler), msg2);
+
+        services.AddSingleton<ISagaStore>(store);
+        services.AddSingleton<ISagaCompensationHandler<DummyEvent>, CircularHandler>();
+
+        var provider = services.BuildServiceProvider();
+        var coordinator = new SagaCompensationCoordinator(provider);
+
+        // Act + Assert: Should NOT throw or enter infinite loop
+        var exception = await Record.ExceptionAsync(() =>
+            coordinator.CompensateParentAsync(sagaId, stepType, msg1)
+        );
+
+        // Assert
+        Assert.Null(exception);
+        // Only one invocation expected, because chain breaks at cycle detection.
+        Assert.Single(CircularHandler.Invocations);
+    }
+
+    private class CircularHandler : ISagaCompensationHandler<DummyEvent>
+    {
+        public static readonly List<string> Invocations = [];
+
+        public Task CompensateAsync(DummyEvent message)
+        {
+            Invocations.Add(nameof(CircularHandler));
+            return Task.CompletedTask;
+        }
+    }
+
+    [Fact]
+    public async Task CompensateAsync_Should_Invoke_All_Registered_CompensationHandlers_For_SameMessageType()
+    {
+        // Arrange
+        var sagaId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+
+        var handler1 = new MultiHandler1();
+        var handler2 = new MultiHandler2();
+
+        var services = new ServiceCollection();
+        var eventBusMock = new Mock<IEventBus>().Object;
+        var sagaIdGen = Mock.Of<ISagaIdGenerator>();
+        var dummyCoordinator = Mock.Of<ISagaCompensationCoordinator>();
+        var store = new InMemorySagaStore(eventBusMock, sagaIdGen, dummyCoordinator);
+
+        var stepType = typeof(DummyEvent);
+        var payload = new DummyEvent
+        {
+            MessageId = messageId,
+            ParentMessageId = Guid.Empty,
+            CorrelationId = Guid.NewGuid(),
+            Timestamp = DateTime.UtcNow,
+            ApplicationId = "Test"
+        };
+
+        await store.LogStepAsync(
+            sagaId,
+            messageId,
+            Guid.Empty,
+            stepType,
+            StepStatus.Failed, // Force compensation trigger
+            stepType,
+            payload);
+
+        // Register two different handlers for the same message type
+        services.AddSingleton<ISagaCompensationHandler<DummyEvent>>(handler1);
+        services.AddSingleton<ISagaCompensationHandler<DummyEvent>>(handler2);
+        services.AddSingleton<ISagaStore>(store);
+
+        var provider = services.BuildServiceProvider();
+        var coordinator = new SagaCompensationCoordinator(provider);
+
+        MultiHandler1.Called = false;
+        MultiHandler2.Called = false;
+
+        // Act
+        await coordinator.CompensateAsync(sagaId, stepType);
+
+        // Assert
+        Assert.True(MultiHandler1.Called);
+        Assert.True(MultiHandler2.Called);
+    }
+
     [Fact]
     public async Task CompensationChain_Should_Stop_On_CompensationFailure()
     {
@@ -130,7 +331,7 @@ public class SagaCompensationCoordinatorTests
             Guid.Empty,
             stepType,
             StepStatus.Failed, // Triggering compensation set failed or another proper status
-            handlerType,       // Burada interface kullanıldı!
+            handlerType, // Burada interface kullanıldı!
             payload);
 
         services.AddSingleton<ISagaStore>(store);
@@ -300,7 +501,45 @@ public class SagaCompensationCoordinatorTests
         Assert.Empty(ParentCompensationHandler.Invocations);
     }
 
-    public class GrandparentCompensationHandler : ISagaCompensationHandler<DummyEvent>
+    private class NotDummyEvent : EventBase
+    {
+    }
+
+    private class NoOpHandler : ISagaCompensationHandler<DummyEvent>
+    {
+        public static readonly List<string> Invocations = [];
+
+        public Task CompensateAsync(DummyEvent message)
+        {
+            Invocations.Add(nameof(NoOpHandler));
+            return Task.CompletedTask;
+        }
+    }
+
+    // Dummy multi-handler implementations for testing
+    private class MultiHandler1 : ISagaCompensationHandler<DummyEvent>
+    {
+        public static bool Called = false;
+
+        public Task CompensateAsync(DummyEvent message)
+        {
+            Called = true;
+            return Task.CompletedTask;
+        }
+    }
+
+    private class MultiHandler2 : ISagaCompensationHandler<DummyEvent>
+    {
+        public static bool Called = false;
+
+        public Task CompensateAsync(DummyEvent message)
+        {
+            Called = true;
+            return Task.CompletedTask;
+        }
+    }
+
+    private class GrandparentCompensationHandler : ISagaCompensationHandler<DummyEvent>
     {
         public static readonly List<string> Invocations = [];
 
@@ -311,7 +550,7 @@ public class SagaCompensationCoordinatorTests
         }
     }
 
-    public class ParentCompensationHandler : ISagaCompensationHandler<DummyEvent>
+    private class ParentCompensationHandler : ISagaCompensationHandler<DummyEvent>
     {
         public static readonly List<string> Invocations = [];
 
@@ -322,7 +561,7 @@ public class SagaCompensationCoordinatorTests
         }
     }
 
-    public class ChildCompensationHandler : ISagaCompensationHandler<DummyEvent>
+    private class ChildCompensationHandler : ISagaCompensationHandler<DummyEvent>
     {
         public static readonly List<string> Invocations = [];
 
