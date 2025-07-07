@@ -1,11 +1,12 @@
-﻿using Lycia.Messaging;
+﻿// All async operations are now cancellation-aware and propagate the CancellationToken for graceful shutdown and responsiveness.
+
+using Lycia.Messaging;
 using Lycia.Saga.Abstractions;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
-using Newtonsoft.Json;
 using System.Text;
 using Lycia.Infrastructure.Helpers;
 using Lycia.Saga.Helpers;
@@ -35,26 +36,26 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
     }
 
     public static async Task<RabbitMqEventBus> CreateAsync(string? conn, ILogger<RabbitMqEventBus> logger,
-        IDictionary<string, Type> queueTypeMap)
+        IDictionary<string, Type> queueTypeMap, CancellationToken cancellationToken = default)
     {
         var bus = new RabbitMqEventBus(conn, logger, queueTypeMap);
-        await bus.ConnectAsync().ConfigureAwait(false);
+        await bus.ConnectAsync(cancellationToken).ConfigureAwait(false);
         return bus;
     }
 
 
-    private async Task ConnectAsync()
+    private async Task ConnectAsync(CancellationToken cancellationToken = default)
     {
-        _connection = await _factory.CreateConnectionAsync().ConfigureAwait(false);
-        _channel = await _connection.CreateChannelAsync().ConfigureAwait(false);
+        _connection = await _factory.CreateConnectionAsync(cancellationToken).ConfigureAwait(false);
+        _channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task EnsureChannelAsync()
+    private async Task EnsureChannelAsync(CancellationToken cancellationToken = default)
     {
         if (_channel is { IsOpen: true })
             return;
 
-        await _connectionLock.WaitAsync();
+        await _connectionLock.WaitAsync(cancellationToken);
         try
         {
             if (_channel is { IsOpen: true })
@@ -63,11 +64,12 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             if (_connection is null || !_connection.IsOpen)
             {
                 _logger.LogWarning("RabbitMQ connection lost. Reconnecting...");
-                await ConnectAsync().ConfigureAwait(false);
+                await ConnectAsync(cancellationToken).ConfigureAwait(false);
             }
             else
             {
-                _channel = await _connection.CreateChannelAsync().ConfigureAwait(false);
+                _channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
             }
         }
         finally
@@ -76,65 +78,10 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         }
     }
 
-    public async ValueTask DisposeAsync()
+    public async Task Publish<TEvent>(TEvent @event, Guid? sagaId = null, CancellationToken cancellationToken = default)
+        where TEvent : IEvent
     {
-        try
-        {
-            if (_channel != null)
-            {
-                try
-                {
-                    await _channel.CloseAsync().ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "RabbitMQ channel CloseAsync failed");
-                }
-
-                try
-                {
-                    await _channel.DisposeAsync().ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "RabbitMQ channel DisposeAsync failed");
-                }
-
-                _channel = null;
-            }
-
-            if (_connection != null)
-            {
-                try
-                {
-                    await _connection.CloseAsync().ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "RabbitMQ connection CloseAsync failed");
-                }
-
-                try
-                {
-                    await _connection.DisposeAsync().ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "RabbitMQ connection DisposeAsync failed");
-                }
-
-                _connection = null;
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "RabbitMQ cleanup failed");
-        }
-    }
-
-    public async Task Publish<TEvent>(TEvent @event, Guid? sagaId = null) where TEvent : IEvent
-    {
-        await EnsureChannelAsync().ConfigureAwait(false);
+        await EnsureChannelAsync(cancellationToken).ConfigureAwait(false);
         var routingKey = RoutingKeyHelper.GetRoutingKey(typeof(TEvent));
         var exchangeName = routingKey;
 
@@ -149,7 +96,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             type: ExchangeType.Topic,
             durable: true,
             autoDelete: false,
-            arguments: null);
+            arguments: null, cancellationToken: cancellationToken);
 
         // Prepare headers:
         // "SagaId" - from event.SagaId if present, else sagaId parameter if provided
@@ -265,12 +212,13 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             routingKey: routingKey,
             mandatory: false,
             basicProperties: properties,
-            body: body);
+            body: body, cancellationToken: cancellationToken);
     }
 
-    public async Task Send<TCommand>(TCommand command, Guid? sagaId = null) where TCommand : ICommand
+    public async Task Send<TCommand>(TCommand command, Guid? sagaId = null,
+        CancellationToken cancellationToken = default) where TCommand : ICommand
     {
-        await EnsureChannelAsync().ConfigureAwait(false);
+        await EnsureChannelAsync(cancellationToken).ConfigureAwait(false);
         var queueName = RoutingKeyHelper.GetRoutingKey(typeof(TCommand));
         var routingKey = queueName;
 
@@ -279,7 +227,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             durable: true,
             exclusive: false,
             autoDelete: false,
-            arguments: null)!;
+            arguments: null, cancellationToken: cancellationToken)!;
 
         // Prepare headers:
         // "SagaId" - from command.SagaId if present, else sagaId parameter if provided
@@ -395,14 +343,15 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             routingKey: routingKey,
             mandatory: false,
             basicProperties: properties,
-            body: body);
+            body: body, cancellationToken: cancellationToken);
     }
 
-    private async Task PublishToDeadLetterQueueAsync(string dlqName, byte[] body, IReadOnlyBasicProperties props)
+    private async Task PublishToDeadLetterQueueAsync(string dlqName, byte[] body, IReadOnlyBasicProperties props,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            await EnsureChannelAsync();
+            await EnsureChannelAsync(cancellationToken);
             if (_channel == null)
                 throw new InvalidOperationException("Channel is not initialized for DLQ publish.");
 
@@ -411,11 +360,12 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                 durable: true,
                 exclusive: false,
                 autoDelete: false,
-                arguments: null);
+                arguments: null,
+                cancellationToken: cancellationToken);
 
             // For RabbitMQ.Client 7.x+ this is the only valid way:
             var basicProps = props as BasicProperties ?? new BasicProperties();
-            if (props != null && props != basicProps)
+            if (props != basicProps)
             {
                 basicProps.Headers = props.Headers;
                 basicProps.CorrelationId = props.CorrelationId;
@@ -441,7 +391,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                 mandatory: false,
                 basicProps,
                 body,
-                CancellationToken.None
+                cancellationToken
             );
 
             _logger.LogWarning("Dead-lettered message published to DLQ: {DlqName}", dlqName);
@@ -481,7 +431,8 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                         "Failed to process message from queue '{QueueName}' of type '{MessageType}'. Dead-lettering the message",
                         queueName, messageType.FullName);
                     // DLQ logic:
-                    await PublishToDeadLetterQueueAsync(queueName + ".dlq", ea.Body.ToArray(), ea.BasicProperties);
+                    await PublishToDeadLetterQueueAsync(queueName + ".dlq", ea.Body.ToArray(), ea.BasicProperties,
+                        cancellationToken);
                 }
             };
 
@@ -508,5 +459,84 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             throw new InvalidOperationException(
                 "Queue/message type map is not configured for this event bus instance.");
         return ConsumeAsync(_queueTypeMap, cancellationToken);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            // Explicitly cancel and clean up all consumers
+            // This ensures there are no orphaned consumers on the channel during shutdown.
+            if (_channel != null)
+            {
+                foreach (var consumer in _consumers)
+                {
+                    try
+                    {
+                        if (consumer.ConsumerTags.Length == 0) continue;
+                        foreach (var tag in consumer.ConsumerTags)
+                            await _channel.BasicCancelAsync(consumerTag: tag)
+                                .ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to cancel consumer with tag {ConsumerTags}",
+                            string.Join(", ", consumer.ConsumerTags));
+                    }
+                }
+
+                _consumers.Clear();
+            }
+
+            if (_channel != null)
+            {
+                try
+                {
+                    await _channel.CloseAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "RabbitMQ channel CloseAsync failed");
+                }
+
+                try
+                {
+                    await _channel.DisposeAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "RabbitMQ channel DisposeAsync failed");
+                }
+
+                _channel = null;
+            }
+
+            if (_connection != null)
+            {
+                try
+                {
+                    await _connection.CloseAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "RabbitMQ connection CloseAsync failed");
+                }
+
+                try
+                {
+                    await _connection.DisposeAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "RabbitMQ connection DisposeAsync failed");
+                }
+
+                _connection = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "RabbitMQ cleanup failed");
+        }
     }
 }
