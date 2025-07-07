@@ -1,24 +1,24 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Messaging", "Lycia.Messaging\Lycia.Messaging.csproj", "{BD73C6EC-E726-4B73-9F7B-F10E06B2D6C3}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Messaging", "src\Lycia.Messaging\Lycia.Messaging.csproj", "{BD73C6EC-E726-4B73-9F7B-F10E06B2D6C3}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Saga", "Lycia.Saga\Lycia.Saga.csproj", "{A49DCEDA-15C8-410A-9ECD-229644DE5559}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Saga", "src\Lycia.Saga\Lycia.Saga.csproj", "{A49DCEDA-15C8-410A-9ECD-229644DE5559}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Infrastructure", "Lycia.Infrastructure\Lycia.Infrastructure.csproj", "{C57C60D9-A8CC-4055-A8F3-D4DBB13156B4}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Infrastructure", "src\Lycia.Infrastructure\Lycia.Infrastructure.csproj", "{C57C60D9-A8CC-4055-A8F3-D4DBB13156B4}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Samples", "Samples", "{BC1E10B1-10E1-456F-9496-6DA354303160}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "samples", "samples", "{BC1E10B1-10E1-456F-9496-6DA354303160}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Choreography.Api", "Sample.Choreography.Api\Sample.Choreography.Api.csproj", "{A0A37466-E91D-4199-ABD2-679F8A3A9731}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Choreography.Api", "samples\Sample.Choreography.Api\Sample.Choreography.Api.csproj", "{A0A37466-E91D-4199-ABD2-679F8A3A9731}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Orchestration.Worker", "Sample.Orchestration.Worker\Sample.Orchestration.Worker.csproj", "{DFDC4E24-CD6F-40EF-9AF2-D2E3F2CB9976}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Orchestration.Worker", "samples\Sample.Orchestration.Worker\Sample.Orchestration.Worker.csproj", "{DFDC4E24-CD6F-40EF-9AF2-D2E3F2CB9976}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Shared", "Sample.Shared\Sample.Shared.csproj", "{D2CFB436-054B-4795-8B47-40452CD8B143}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Shared", "samples\Sample.Shared\Sample.Shared.csproj", "{D2CFB436-054B-4795-8B47-40452CD8B143}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{39547434-F68A-4275-8482-B1EB3CFC8F02}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{59E39671-6EFC-4EE2-B70F-DF6955451C7C}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Extensions", "Lycia.Extensions\Lycia.Extensions.csproj", "{EED82447-E52F-4A54-A6CF-45EC98C1C37B}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Extensions", "src\Lycia.Extensions\Lycia.Extensions.csproj", "{EED82447-E52F-4A54-A6CF-45EC98C1C37B}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.IntegrationTests", "tests\Lycia.IntegrationTests\Lycia.IntegrationTests.csproj", "{3F72F5DD-76D9-4899-A920-736D82D06603}"
 EndProject
