@@ -11,7 +11,7 @@ namespace Lycia.Infrastructure.Eventing;
 /// </summary>
 public class InMemoryEventBus(Lazy<ISagaDispatcher> sagaDispatcherLazy) : IEventBus
 {
-    public Task Send<TCommand>(TCommand command, Guid? sagaId = null) where TCommand : ICommand
+    public Task Send<TCommand>(TCommand command, Guid? sagaId = null, CancellationToken cancellationToken = default) where TCommand : ICommand
     {
         // The sagaId parameter passed to Send/Publish is not directly used by DispatchAsync,
         // as DispatchAsync typically resolves SagaId from the message properties or generates it.
@@ -19,7 +19,7 @@ public class InMemoryEventBus(Lazy<ISagaDispatcher> sagaDispatcherLazy) : IEvent
         return sagaDispatcherLazy.Value.DispatchAsync(command);
     }
 
-    public Task Publish<TEvent>(TEvent @event, Guid? sagaId = null) where TEvent : IEvent
+    public Task Publish<TEvent>(TEvent @event, Guid? sagaId = null, CancellationToken cancellationToken = default) where TEvent : IEvent
     {
         return sagaDispatcherLazy.Value.DispatchAsync(@event);
     }
