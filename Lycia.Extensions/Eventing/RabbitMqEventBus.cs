@@ -20,6 +20,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
     private IChannel? _channel;
     private readonly IDictionary<string, Type> _queueTypeMap;
     private readonly List<AsyncEventingBasicConsumer> _consumers = [];
+    private readonly SemaphoreSlim _connectionLock = new(1, 1);
 
     private RabbitMqEventBus(string? conn, ILogger<RabbitMqEventBus> logger, IDictionary<string, Type> queueTypeMap)
     {
@@ -52,14 +53,26 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         if (_channel is { IsOpen: true })
             return;
 
-        if (_connection is null || !_connection.IsOpen)
+        await _connectionLock.WaitAsync();
+        try
         {
-            _logger.LogWarning("RabbitMQ connection lost. Reconnecting...");
-            await ConnectAsync().ConfigureAwait(false);
-            return;
-        }
+            if (_channel is { IsOpen: true })
+                return;
 
-        _channel = await _connection.CreateChannelAsync().ConfigureAwait(false);
+            if (_connection is null || !_connection.IsOpen)
+            {
+                _logger.LogWarning("RabbitMQ connection lost. Reconnecting...");
+                await ConnectAsync().ConfigureAwait(false);
+            }
+            else
+            {
+                _channel = await _connection.CreateChannelAsync().ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            _connectionLock.Release();
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -68,14 +81,44 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         {
             if (_channel != null)
             {
-                await _channel.CloseAsync().ConfigureAwait(false);
-                await _channel.DisposeAsync().ConfigureAwait(false);
+                try
+                {
+                    await _channel.CloseAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "RabbitMQ channel CloseAsync failed");
+                }
+                try
+                {
+                    await _channel.DisposeAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "RabbitMQ channel DisposeAsync failed");
+                }
+                _channel = null;
             }
 
             if (_connection != null)
             {
-                await _connection.CloseAsync().ConfigureAwait(false);
-                await _connection.DisposeAsync().ConfigureAwait(false);
+                try
+                {
+                    await _connection.CloseAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "RabbitMQ connection CloseAsync failed");
+                }
+                try
+                {
+                    await _connection.DisposeAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "RabbitMQ connection DisposeAsync failed");
+                }
+                _connection = null;
             }
         }
         catch (Exception ex)
