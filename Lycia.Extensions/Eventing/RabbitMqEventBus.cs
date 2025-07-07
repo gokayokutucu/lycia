@@ -34,7 +34,8 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         };
     }
 
-    public static async Task<RabbitMqEventBus> CreateAsync(string? conn, ILogger<RabbitMqEventBus> logger, IDictionary<string, Type> queueTypeMap)
+    public static async Task<RabbitMqEventBus> CreateAsync(string? conn, ILogger<RabbitMqEventBus> logger,
+        IDictionary<string, Type> queueTypeMap)
     {
         var bus = new RabbitMqEventBus(conn, logger, queueTypeMap);
         await bus.ConnectAsync().ConfigureAwait(false);
@@ -89,6 +90,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                 {
                     _logger.LogWarning(ex, "RabbitMQ channel CloseAsync failed");
                 }
+
                 try
                 {
                     await _channel.DisposeAsync().ConfigureAwait(false);
@@ -97,6 +99,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                 {
                     _logger.LogWarning(ex, "RabbitMQ channel DisposeAsync failed");
                 }
+
                 _channel = null;
             }
 
@@ -110,6 +113,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                 {
                     _logger.LogWarning(ex, "RabbitMQ connection CloseAsync failed");
                 }
+
                 try
                 {
                     await _connection.DisposeAsync().ConfigureAwait(false);
@@ -118,6 +122,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                 {
                     _logger.LogWarning(ex, "RabbitMQ connection DisposeAsync failed");
                 }
+
                 _connection = null;
             }
         }
@@ -135,7 +140,8 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
 
         if (_channel == null)
         {
-            throw new InvalidOperationException("Channel is not initialized. Ensure RabbitMqEventBus is properly created.");
+            throw new InvalidOperationException(
+                "Channel is not initialized. Ensure RabbitMqEventBus is properly created.");
         }
 
         await _channel.ExchangeDeclareAsync(
@@ -160,7 +166,10 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         {
             effectiveSagaId = eventBase?.SagaId;
         }
-        catch { }
+        catch
+        {
+        }
+
         if (effectiveSagaId == null)
             effectiveSagaId = sagaId;
 
@@ -188,7 +197,9 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             if (messageId is Guid guidMessageId && guidMessageId != Guid.Empty)
                 headers["MessageId"] = guidMessageId.ToString();
         }
-        catch { }
+        catch
+        {
+        }
 
         // ParentMessageId
         try
@@ -197,7 +208,9 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             if (parentMessageId is Guid guidParentMessageId && guidParentMessageId != Guid.Empty)
                 headers["ParentMessageId"] = guidParentMessageId.ToString();
         }
-        catch { }
+        catch
+        {
+        }
 
         // Timestamp
         try
@@ -206,7 +219,9 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             if (timestamp is DateTime dtTimestamp && dtTimestamp != default)
                 headers["Timestamp"] = dtTimestamp.ToString("o");
         }
-        catch { }
+        catch
+        {
+        }
 
         // ApplicationId
         try
@@ -215,7 +230,9 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             if (applicationId is string appId && !string.IsNullOrWhiteSpace(appId))
                 headers["ApplicationId"] = appId;
         }
-        catch { }
+        catch
+        {
+        }
 
         // CausationId
         try
@@ -279,7 +296,10 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         {
             effectiveSagaId = commandBase?.SagaId;
         }
-        catch { }
+        catch
+        {
+        }
+
         if (effectiveSagaId == null)
             effectiveSagaId = sagaId;
 
@@ -307,7 +327,9 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             if (messageId is Guid guidMessageId && guidMessageId != Guid.Empty)
                 headers["MessageId"] = guidMessageId.ToString();
         }
-        catch { }
+        catch
+        {
+        }
 
         // ParentMessageId
         try
@@ -316,7 +338,9 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             if (parentMessageId is Guid guidParentMessageId && guidParentMessageId != Guid.Empty)
                 headers["ParentMessageId"] = guidParentMessageId.ToString();
         }
-        catch { }
+        catch
+        {
+        }
 
         // Timestamp
         try
@@ -325,7 +349,9 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             if (timestamp is DateTime dtTimestamp && dtTimestamp != default)
                 headers["Timestamp"] = dtTimestamp.ToString("o");
         }
-        catch { }
+        catch
+        {
+        }
 
         // ApplicationId
         try
@@ -334,7 +360,9 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             if (applicationId is string appId && !string.IsNullOrWhiteSpace(appId))
                 headers["ApplicationId"] = appId;
         }
-        catch { }
+        catch
+        {
+        }
 
         // CausationId
         try
@@ -370,12 +398,67 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             body: body);
     }
 
+    private async Task PublishToDeadLetterQueueAsync(string dlqName, byte[] body, IReadOnlyBasicProperties props)
+    {
+        try
+        {
+            await EnsureChannelAsync();
+            if (_channel == null)
+                throw new InvalidOperationException("Channel is not initialized for DLQ publish.");
+
+            await _channel.QueueDeclareAsync(
+                queue: dlqName,
+                durable: true,
+                exclusive: false,
+                autoDelete: false,
+                arguments: null);
+
+            // For RabbitMQ.Client 7.x+ this is the only valid way:
+            var basicProps = props as BasicProperties ?? new BasicProperties();
+            if (props != null && props != basicProps)
+            {
+                basicProps.Headers = props.Headers;
+                basicProps.CorrelationId = props.CorrelationId;
+                basicProps.ContentType = props.ContentType;
+                basicProps.MessageId = props.MessageId;
+                basicProps.Type = props.Type;
+                basicProps.UserId = props.UserId;
+                basicProps.AppId = props.AppId;
+                basicProps.ClusterId = props.ClusterId;
+                basicProps.ContentEncoding = props.ContentEncoding;
+                basicProps.DeliveryMode = props.DeliveryMode;
+                basicProps.Expiration = props.Expiration;
+                basicProps.Priority = props.Priority;
+                basicProps.ReplyTo = props.ReplyTo;
+                basicProps.Timestamp = props.Timestamp;
+                basicProps.Persistent = props.Persistent;
+                basicProps.ReplyToAddress = props.ReplyToAddress;
+            }
+
+            await _channel.BasicPublishAsync(
+                exchange: "",
+                routingKey: dlqName,
+                mandatory: false,
+                basicProps,
+                body,
+                CancellationToken.None
+            );
+
+            _logger.LogWarning("Dead-lettered message published to DLQ: {DlqName}", dlqName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to publish message to dead letter queue: {DlqName}", dlqName);
+        }
+    }
+
     private async IAsyncEnumerable<(byte[] Body, Type MessageType)> ConsumeAsync(
         IDictionary<string, Type> queueTypeMap,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (_channel == null)
-            throw new InvalidOperationException("Channel is not initialized. Ensure RabbitMqEventBus is properly created.");
+            throw new InvalidOperationException(
+                "Channel is not initialized. Ensure RabbitMqEventBus is properly created.");
 
         var messageQueue = new ConcurrentQueue<(byte[] Body, Type MessageType)>();
 
@@ -383,10 +466,23 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         {
             var consumer = new AsyncEventingBasicConsumer(_channel);
 
+            // This pattern ensures that message handling errors are caught and do not crash the consumer loop.
+            // Instead, problematic messages are logged and can be dead-lettered for later analysis.
             consumer.ReceivedAsync += async (model, ea) =>
             {
-                messageQueue.Enqueue((ea.Body.ToArray(), messageType));
-                await Task.CompletedTask;
+                try
+                {
+                    messageQueue.Enqueue((ea.Body.ToArray(), messageType));
+                    await Task.CompletedTask;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "Failed to process message from queue '{QueueName}' of type '{MessageType}'. Dead-lettering the message",
+                        queueName, messageType.FullName);
+                    // DLQ logic:
+                    await PublishToDeadLetterQueueAsync(queueName + ".dlq", ea.Body.ToArray(), ea.BasicProperties);
+                }
             };
 
             await _channel.BasicConsumeAsync(
@@ -409,7 +505,8 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
     public IAsyncEnumerable<(byte[] Body, Type MessageType)> ConsumeAsync(CancellationToken cancellationToken)
     {
         if (_queueTypeMap == null)
-            throw new InvalidOperationException("Queue/message type map is not configured for this event bus instance.");
+            throw new InvalidOperationException(
+                "Queue/message type map is not configured for this event bus instance.");
         return ConsumeAsync(_queueTypeMap, cancellationToken);
     }
 }
