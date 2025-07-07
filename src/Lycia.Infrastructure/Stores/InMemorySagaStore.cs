@@ -25,13 +25,6 @@ public class InMemorySagaStore(
     // Stores step logs per sagaId with composite key "stepTypeName_handlerTypeFullName"
     private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<string, SagaStepMetadata>> _stepLogs = new();
 
-    /// <summary>
-    /// Constructs the dictionary key used for storing step metadata when handlerType is unknown or not applicable.
-    /// Uses only the step type name.
-    /// </summary>
-    private static string GetStepKey(Type stepType)
-        => stepType.ToSagaStepName();
-
     public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status, Type handlerType, object? payload = null)
     {
         try
@@ -44,7 +37,7 @@ public class InMemorySagaStore(
             // State transition validation
             if (stepDict.TryGetValue(stepKey, out var existingMeta))
             {
-                var previousStatus = existingMeta.Status;
+                var previousStatus = existingMeta?.Status ?? StepStatus.None;
                 if (!SagaStepHelper.IsValidStepTransition(previousStatus, status))
                 {
                     var msg = $"Illegal StepStatus transition: {previousStatus} -> {status} for {stepKey}";
