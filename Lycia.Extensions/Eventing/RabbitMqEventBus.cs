@@ -145,12 +145,99 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             autoDelete: false,
             arguments: null);
 
+        // Prepare headers:
+        // "SagaId" - from event.SagaId if present, else sagaId parameter if provided
+        // "CorrelationId", "MessageId", "ParentMessageId", "Timestamp", "ApplicationId" - extracted from event if present, not generated
+        // "CausationId" - new Guid for this message if not present in event
+        // "EventType" - full name of the event type
+        // "PublishedAt" - UTC ISO-8601 timestamp of publishing
+        var headers = new Dictionary<string, object?>();
+        var eventBase = @event as dynamic;
+
+        // SagaId preference: event.SagaId if available, else sagaId parameter
+        Guid? effectiveSagaId = null;
+        try
+        {
+            effectiveSagaId = eventBase?.SagaId;
+        }
+        catch { }
+        if (effectiveSagaId == null)
+            effectiveSagaId = sagaId;
+
+        if (effectiveSagaId.HasValue)
+            headers["SagaId"] = effectiveSagaId.Value.ToString();
+
+        // CorrelationId
+        try
+        {
+            var correlationId = eventBase?.CorrelationId;
+            if (correlationId is Guid guidCorrelationId && guidCorrelationId != Guid.Empty)
+                headers["CorrelationId"] = guidCorrelationId.ToString();
+            else
+                headers["CorrelationId"] = (effectiveSagaId ?? Guid.NewGuid()).ToString();
+        }
+        catch
+        {
+            headers["CorrelationId"] = (effectiveSagaId ?? Guid.NewGuid()).ToString();
+        }
+
+        // MessageId
+        try
+        {
+            var messageId = eventBase?.MessageId;
+            if (messageId is Guid guidMessageId && guidMessageId != Guid.Empty)
+                headers["MessageId"] = guidMessageId.ToString();
+        }
+        catch { }
+
+        // ParentMessageId
+        try
+        {
+            var parentMessageId = eventBase?.ParentMessageId;
+            if (parentMessageId is Guid guidParentMessageId && guidParentMessageId != Guid.Empty)
+                headers["ParentMessageId"] = guidParentMessageId.ToString();
+        }
+        catch { }
+
+        // Timestamp
+        try
+        {
+            var timestamp = eventBase?.Timestamp;
+            if (timestamp is DateTime dtTimestamp && dtTimestamp != default)
+                headers["Timestamp"] = dtTimestamp.ToString("o");
+        }
+        catch { }
+
+        // ApplicationId
+        try
+        {
+            var applicationId = eventBase?.ApplicationId;
+            if (applicationId is string appId && !string.IsNullOrWhiteSpace(appId))
+                headers["ApplicationId"] = appId;
+        }
+        catch { }
+
+        // CausationId
+        try
+        {
+            var causationId = eventBase?.CausationId;
+            if (causationId is Guid guidCausationId && guidCausationId != Guid.Empty)
+                headers["CausationId"] = guidCausationId.ToString();
+            else
+                headers["CausationId"] = Guid.NewGuid().ToString();
+        }
+        catch
+        {
+            headers["CausationId"] = Guid.NewGuid().ToString();
+        }
+
+        headers["EventType"] = typeof(TEvent).FullName;
+        headers["PublishedAt"] = DateTime.UtcNow.ToString("o");
+
         var properties = new BasicProperties
         {
             Persistent = true,
-            Headers = sagaId.HasValue
-                ? new Dictionary<string, object?> { { "SagaId", sagaId.Value.ToString() } }
-                : null
+            Headers = headers
         };
 
         var json = JsonHelper.SerializeSafe(@event);
@@ -177,12 +264,99 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             autoDelete: false,
             arguments: null)!;
 
+        // Prepare headers:
+        // "SagaId" - from command.SagaId if present, else sagaId parameter if provided
+        // "CorrelationId", "MessageId", "ParentMessageId", "Timestamp", "ApplicationId" - extracted from command if present, not generated
+        // "CausationId" - new Guid for this message if not present in command
+        // "CommandType" - full name of the command type
+        // "PublishedAt" - UTC ISO-8601 timestamp of publishing
+        var headers = new Dictionary<string, object?>();
+        var commandBase = command as dynamic;
+
+        // SagaId preference: command.SagaId if available, else sagaId parameter
+        Guid? effectiveSagaId = null;
+        try
+        {
+            effectiveSagaId = commandBase?.SagaId;
+        }
+        catch { }
+        if (effectiveSagaId == null)
+            effectiveSagaId = sagaId;
+
+        if (effectiveSagaId.HasValue)
+            headers["SagaId"] = effectiveSagaId.Value.ToString();
+
+        // CorrelationId
+        try
+        {
+            var correlationId = commandBase?.CorrelationId;
+            if (correlationId is Guid guidCorrelationId && guidCorrelationId != Guid.Empty)
+                headers["CorrelationId"] = guidCorrelationId.ToString();
+            else
+                headers["CorrelationId"] = (effectiveSagaId ?? Guid.NewGuid()).ToString();
+        }
+        catch
+        {
+            headers["CorrelationId"] = (effectiveSagaId ?? Guid.NewGuid()).ToString();
+        }
+
+        // MessageId
+        try
+        {
+            var messageId = commandBase?.MessageId;
+            if (messageId is Guid guidMessageId && guidMessageId != Guid.Empty)
+                headers["MessageId"] = guidMessageId.ToString();
+        }
+        catch { }
+
+        // ParentMessageId
+        try
+        {
+            var parentMessageId = commandBase?.ParentMessageId;
+            if (parentMessageId is Guid guidParentMessageId && guidParentMessageId != Guid.Empty)
+                headers["ParentMessageId"] = guidParentMessageId.ToString();
+        }
+        catch { }
+
+        // Timestamp
+        try
+        {
+            var timestamp = commandBase?.Timestamp;
+            if (timestamp is DateTime dtTimestamp && dtTimestamp != default)
+                headers["Timestamp"] = dtTimestamp.ToString("o");
+        }
+        catch { }
+
+        // ApplicationId
+        try
+        {
+            var applicationId = commandBase?.ApplicationId;
+            if (applicationId is string appId && !string.IsNullOrWhiteSpace(appId))
+                headers["ApplicationId"] = appId;
+        }
+        catch { }
+
+        // CausationId
+        try
+        {
+            var causationId = commandBase?.CausationId;
+            if (causationId is Guid guidCausationId && guidCausationId != Guid.Empty)
+                headers["CausationId"] = guidCausationId.ToString();
+            else
+                headers["CausationId"] = Guid.NewGuid().ToString();
+        }
+        catch
+        {
+            headers["CausationId"] = Guid.NewGuid().ToString();
+        }
+
+        headers["CommandType"] = typeof(TCommand).FullName;
+        headers["PublishedAt"] = DateTime.UtcNow.ToString("o");
+
         var properties = new BasicProperties
         {
             Persistent = true,
-            Headers = sagaId.HasValue
-                ? new Dictionary<string, object?> { { "SagaId", sagaId.Value.ToString() } }
-                : null
+            Headers = headers
         };
 
         var json = JsonHelper.SerializeSafe(command);
