@@ -28,7 +28,7 @@ public class RedisSagaStore(
         var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
         var routingKey = RoutingKeyHelper.GetRoutingKey(stepType);
         var applicationId = routingKey.Split('.')[0];
-        var messageTypeName = stepType.AssemblyQualifiedName ?? stepType.ToSagaStepName();
+        var messageTypeName = GetMessageTypeName(stepType);
         var redisStepLogKey = StepLogKey(sagaId);
 
         // State transition validation
@@ -88,28 +88,33 @@ public class RedisSagaStore(
     {
         var redisStepLogKey = StepLogKey(sagaId);
         var entries = await redisDb.HashGetAllAsync(redisStepLogKey);
-        var dict = new Dictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>();
+        var result = new Dictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>();
 
         foreach (var entry in entries)
         {
             var key = (string)entry.Name!;
-            var separatorIndex = key.IndexOf('_');
+            var parts = key.Split(':');
             var metadata = JsonConvert.DeserializeObject<SagaStepMetadata>(entry.Value!)!;
 
-            if (separatorIndex > 0 && separatorIndex < key.Length - 1)
+            if (parts.Length == 8 &&
+                parts[0] == "step" &&
+                parts[2] == "assembly" &&
+                parts[4] == "handler" &&
+                parts[6] == "message-id")
             {
-                var stepTypeName = key.Substring(0, separatorIndex);
-                var handlerTypeName = key.Substring(separatorIndex + 1);
-                var messageId = string.Empty;
-                dict[(stepTypeName, handlerTypeName, messageId )] = metadata;
+                var stepTypeName = $"{parts[1]}, {parts[3]}"; // Combine step type and assembly
+                var handlerTypeName = parts[5];
+                var messageId = parts[7];
+                
+                result[(stepTypeName, handlerTypeName, messageId )] = metadata;
             }
             else
             {
-                dict[(key, string.Empty, Guid.Empty.ToString())] = metadata;
+                result[(key, string.Empty, Guid.Empty.ToString())] = metadata;
             }
         }
 
-        return dict;
+        return result;
     }
 
     public async Task<SagaData?> LoadSagaDataAsync(Guid sagaId)
@@ -153,5 +158,11 @@ public class RedisSagaStore(
             compensationCoordinator:sagaCompensationCoordinator
         );
         return context;
+    }
+    
+    private static string GetMessageTypeName(Type stepType)
+    {
+        return stepType.AssemblyQualifiedName ?? throw new InvalidOperationException(
+            $"Step type {stepType.FullName} does not have an AssemblyQualifiedName");
     }
 }
