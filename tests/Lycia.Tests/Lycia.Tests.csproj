@@ -21,19 +21,16 @@
     <ItemGroup>
         <Using Include="Xunit"/>
     </ItemGroup>
-    
-    
-
-    <ItemGroup>
-      <ProjectReference Include="..\..\Lycia.Extensions\Lycia.Extensions.csproj" />
-      <ProjectReference Include="..\..\Lycia.Infrastructure\Lycia.Infrastructure.csproj" />
-      <ProjectReference Include="..\..\Sample.Shared\Sample.Shared.csproj" />
-    </ItemGroup>
-    
-    
 
     <ItemGroup>
       <Folder Include="Helper\" />
     </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\..\samples\Sample.Shared\Sample.Shared.csproj" />
+      <ProjectReference Include="..\..\src\Lycia.Extensions\Lycia.Extensions.csproj" />
+      <ProjectReference Include="..\..\src\Lycia.Infrastructure\Lycia.Infrastructure.csproj" />
+    </ItemGroup>
+    
 
 </Project>
