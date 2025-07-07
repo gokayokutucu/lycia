@@ -10,9 +10,9 @@ public interface IMessage
     Guid MessageId { get; }
     
     /// <summary>
-    /// Unique ID for this parent message instance (deduplication, replay-safe).
+    /// Unique ID for this parent message instance (deduplication, replay-safe). Equivalents to CausationId. 
     /// </summary>
-    Guid ParentMessageId { get; }
+    Guid ParentMessageId { get; } // CausationId
 
     /// <summary>
     /// Correlates this message with a logical operation, transaction, or saga flow.
