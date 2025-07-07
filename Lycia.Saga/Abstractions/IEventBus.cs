@@ -17,10 +17,11 @@ public interface IEventBus
     /// <param name="sagaId">
     ///     (Optional) The saga identifier associated with this command, if part of a saga. Used for correlation or tracing.
     /// </param>
+    /// <param name="cancellationToken"></param>
     /// <returns>
     ///     A <see cref="Task"/> representing the asynchronous send operation.
     /// </returns>
-    Task Send<TCommand>(TCommand command, Guid? sagaId = null) where TCommand : ICommand;
+    Task Send<TCommand>(TCommand command, Guid? sagaId = null, CancellationToken cancellationToken = default) where TCommand : ICommand;
 
     /// <summary>
     /// Publishes an event to all interested subscribers for broadcasting state changes or domain events in the system.
@@ -34,10 +35,11 @@ public interface IEventBus
     /// <param name="sagaId">
     ///     (Optional) The saga identifier associated with this event, if part of a saga. Used for correlation or tracing.
     /// </param>
+    /// <param name="cancellationToken"></param>
     /// <returns>
     ///     A <see cref="Task"/> representing the asynchronous publish operation.
     /// </returns>
-    Task Publish<TEvent>(TEvent @event, Guid? sagaId = null) where TEvent : IEvent;
+    Task Publish<TEvent>(TEvent @event, Guid? sagaId = null, CancellationToken cancellationToken = default) where TEvent : IEvent;
     
     /// <summary>
     /// Asynchronously consumes messages from the registered queues and yields each message as a tuple containing the raw message body and its resolved message type.
