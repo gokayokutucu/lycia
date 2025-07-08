@@ -1,8 +1,11 @@
 using System.Reflection;
 using Lycia.Extensions.Eventing;
 using Lycia.Extensions.Stores;
+using Lycia.Infrastructure.Compensating;
 using Lycia.Infrastructure.Dispatching;
+using Lycia.Infrastructure.Eventing;
 using Lycia.Infrastructure.Listener;
+using Lycia.Infrastructure.Stores;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Common;
 using Lycia.Saga.Extensions;
@@ -28,6 +31,8 @@ public static class LyciaRegistrationExtension
         services.TryAddScoped<ISagaIdGenerator, DefaultSagaIdGenerator>();
         // Production default registration for ISagaDispatcher
         services.TryAddScoped<ISagaDispatcher, SagaDispatcher>();
+        // Production default registration for ISagaCompensationCoordinator
+        services.TryAddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
 
         // Add Redis connection (if Provider is Redis)
         if (eventStoreProvider == "Redis")
@@ -65,10 +70,28 @@ public static class LyciaRegistrationExtension
                 var eventBus = provider.GetRequiredService<IEventBus>();
                 var sagaIdGen = provider.GetRequiredService<ISagaIdGenerator>();
                 var sagaCompensationCoordinator = provider.GetRequiredService<ISagaCompensationCoordinator>();
-                return new RedisSagaStore(redisDb, eventBus, sagaIdGen, sagaCompensationCoordinator);
+                var config = provider.GetService<IConfiguration>();
+                int ttlSeconds = 3600; // Default: 1 hour
+                if (config != null)
+                {
+                    var ttlConfig = config["Lycia:EventStore:StepLogTTL"];
+                    if (int.TryParse(ttlConfig, out var parsedTtl) && parsedTtl > 0)
+                        ttlSeconds = parsedTtl;
+                }
+                return new RedisSagaStore(redisDb, eventBus, sagaIdGen, sagaCompensationCoordinator, TimeSpan.FromSeconds(ttlSeconds));
             });
         }
 
         return new LyciaServiceCollection(services, configuration);
+    }
+    
+    public static ILyciaServiceCollection AddLyciaInMemory(this IServiceCollection services)
+    {
+        services.TryAddScoped<ISagaIdGenerator, DefaultSagaIdGenerator>();
+        services.TryAddScoped<ISagaDispatcher, SagaDispatcher>();
+        services.TryAddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
+        services.TryAddScoped<ISagaStore, InMemorySagaStore>();
+        services.TryAddScoped<IEventBus, InMemoryEventBus>();
+        return new LyciaServiceCollection(services, null);
     }
 }
