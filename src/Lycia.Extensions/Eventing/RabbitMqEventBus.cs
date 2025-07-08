@@ -343,18 +343,18 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         {
         }
 
-        // CausationId
+        // ParentMessageId
         try
         {
-            var causationId = commandBase?.CausationId;
-            if (causationId is Guid guidCausationId && guidCausationId != Guid.Empty)
-                headers["CausationId"] = guidCausationId.ToString();
+            var parentMessageId = commandBase?.ParentMessageId;
+            if (parentMessageId is Guid guidParentMessageId && guidParentMessageId != Guid.Empty)
+                headers["ParentMessageId"] = guidParentMessageId.ToString();
             else
-                headers["CausationId"] = Guid.NewGuid().ToString();
+                headers["ParentMessageId"] = Guid.NewGuid().ToString();
         }
         catch
         {
-            headers["CausationId"] = Guid.NewGuid().ToString();
+            headers["ParentMessageId"] = Guid.NewGuid().ToString();
         }
 
         headers["CommandType"] = typeof(TCommand).FullName;
@@ -445,6 +445,36 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
 
         foreach (var (queueName, messageType) in queueTypeMap)
         {
+            // Ensure queue and exchange exist and are bound before subscribing the consumer.
+            // These operations are idempotent.
+            var exchangeName = queueName;
+
+            // Declare exchange (topic)
+            await _channel.ExchangeDeclareAsync(
+                exchange: exchangeName,
+                type: ExchangeType.Topic,
+                durable: true,
+                autoDelete: false,
+                arguments: null,
+                cancellationToken: cancellationToken);
+
+            // Declare queue
+            await _channel.QueueDeclareAsync(
+                queue: queueName,
+                durable: true,
+                exclusive: false,
+                autoDelete: false,
+                arguments: null,
+                cancellationToken: cancellationToken);
+
+            // Bind queue to exchange with queue name as routing key
+            await _channel.QueueBindAsync(
+                queue: queueName,
+                exchange: exchangeName,
+                routingKey: queueName,
+                arguments: null,
+                cancellationToken: cancellationToken);
+
             var consumer = new AsyncEventingBasicConsumer(_channel);
 
             // This pattern ensures that message handling errors are caught and do not crash the consumer loop.
