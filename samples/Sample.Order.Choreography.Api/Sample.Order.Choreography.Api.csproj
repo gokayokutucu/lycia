@@ -11,6 +11,7 @@
     </ItemGroup>
 
     <ItemGroup>
+        <ProjectReference Include="..\..\src\Lycia.Extensions\Lycia.Extensions.csproj" />
         <ProjectReference Include="..\..\src\Lycia.Infrastructure\Lycia.Infrastructure.csproj"/>
         <ProjectReference Include="..\Sample.Shared\Sample.Shared.csproj" />
     </ItemGroup>
