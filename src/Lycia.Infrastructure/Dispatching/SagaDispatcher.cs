@@ -31,7 +31,6 @@ public class SagaDispatcher(
         {
             Console.WriteLine($"[Dispatch] Dispatching {messageType.Name} to start handler: {startHandlerType.Name}");
             await InvokeHandlerAsync(startHandlers, message);
-            //return;
         }
 
         var stepHandlerType = typeof(ISagaHandler<>).MakeGenericType(messageType);
@@ -355,7 +354,6 @@ public class SagaDispatcher(
                 initializeMethod?.Invoke(handler, [contextInstance]);
 
                 await HandleSagaAsync(handler, handlerType);
-                continue;
             }
         }
 

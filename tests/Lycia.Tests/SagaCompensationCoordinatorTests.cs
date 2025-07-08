@@ -11,7 +11,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Moq.Protected;
 using Sample.Shared.Messages.Events;
-using Sample.Shared.Messages.Sagas;
 
 namespace Lycia.Tests;
 
