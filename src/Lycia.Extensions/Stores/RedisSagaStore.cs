@@ -17,9 +17,17 @@ public class RedisSagaStore(
     IDatabase redisDb,
     IEventBus eventBus,
     ISagaIdGenerator sagaIdGenerator,
-    ISagaCompensationCoordinator sagaCompensationCoordinator
+    ISagaCompensationCoordinator sagaCompensationCoordinator,
+    TimeSpan? stepLogTtl = null // Optional TTL parameter, defaults to DefaultStepLogTtl if null
 ) : ISagaStore
 {
+    /// <summary>
+    /// Default TTL for step log keys (1 hour).
+    /// </summary>
+    private static readonly TimeSpan DefaultStepLogTtl = TimeSpan.FromHours(1);
+
+    private readonly TimeSpan _stepLogTtl = stepLogTtl ?? DefaultStepLogTtl;
+
     private static string SagaDataKey(Guid sagaId) => $"saga:data:{sagaId}";
     private static string StepLogKey(Guid sagaId) => $"saga:steps:{sagaId}";
 
@@ -56,6 +64,9 @@ public class RedisSagaStore(
         };
 
         await redisDb.HashSetAsync(redisStepLogKey, stepKey, JsonHelper.SerializeSafe(metadata));
+        // Ensure the step log key has an expiry (TTL) set to avoid memory bloat.
+        // Expiry is updated on each log call (idempotent).
+        await redisDb.KeyExpireAsync(redisStepLogKey, _stepLogTtl);
     }
 
     public async Task<bool> IsStepCompletedAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType)
