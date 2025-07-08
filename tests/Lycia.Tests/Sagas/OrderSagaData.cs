@@ -1,6 +1,6 @@
 using Lycia.Saga;
 
-namespace Sample.Shared.Messages.Sagas;
+namespace Lycia.Tests.Sagas;
 
 /// <summary>
 /// Saga data for the order creation process.
