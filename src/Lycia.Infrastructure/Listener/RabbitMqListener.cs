@@ -38,15 +38,22 @@ public class RabbitMqListener(
                 }
 
                 logger.LogInformation("Dispatching {MessageType} to SagaDispatcher", messageType.Name);
-                var dispatchMethod = typeof(ISagaDispatcher)
-                    .GetMethod(nameof(ISagaDispatcher.DispatchAsync), [deserialized.GetType()]);
+                // Find the generic DispatchAsync<TMessage> method definition
+                var genericMethod = typeof(ISagaDispatcher)
+                    .GetMethods()
+                    .FirstOrDefault(m =>
+                        m is { Name: nameof(ISagaDispatcher.DispatchAsync), IsGenericMethodDefinition: true }
+                        && m.GetParameters().Length == 1);
 
-                if (dispatchMethod == null)
+                // Fallback if not found
+                if (genericMethod == null)
                 {
-                    logger.LogWarning("No suitable DispatchAsync found for message type {MessageType}",
-                        messageType.Name);
+                    logger.LogWarning("No suitable DispatchAsync<TMessage> found for message type {MessageType}", messageType.Name);
                     continue;
                 }
+
+                // Construct generic method for actual message type
+                var dispatchMethod = genericMethod.MakeGenericMethod(deserialized.GetType());
 
                 if (dispatchMethod.Invoke(sagaDispatcher, [deserialized]) is not Task dispatchTask)
                 {
