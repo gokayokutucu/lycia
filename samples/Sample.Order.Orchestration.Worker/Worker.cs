@@ -1,4 +1,4 @@
-namespace Sample.Orchestration.Worker;
+namespace Sample.Order.Orchestration.Worker;
 
 public class Worker : BackgroundService
 {

@@ -1,4 +1,4 @@
-using Sample.Orchestration.Worker;
+using Sample.Order.Orchestration.Worker;
 
 var builder = Host.CreateApplicationBuilder(args);
 builder.Services.AddHostedService<Worker>();

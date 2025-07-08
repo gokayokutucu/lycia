@@ -5,7 +5,6 @@
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
         <UserSecretsId>dotnet-Sample.Orchestration.Worker-5d41d558-e9fb-4259-a0ef-cbe3ddcaf348</UserSecretsId>
-        <RootNamespace>Sample.Orchestration.Worker</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>

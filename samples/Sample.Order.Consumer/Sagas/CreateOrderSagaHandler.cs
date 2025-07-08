@@ -1,10 +1,8 @@
-using Lycia.Messaging;
-using Lycia.Saga.Abstractions;
 using Lycia.Saga.Handlers;
 using Sample.Shared.Messages.Commands;
 using Sample.Shared.Messages.Events;
 
-namespace Sample.Shared.Messages.Sagas;
+namespace Sample.Order.Consumer.Sagas;
 
 /// <summary>
 /// Handles the start of the order process in a reactive saga flow and emits an OrderCreatedEvent.
@@ -20,13 +18,13 @@ public class CreateOrderSagaHandler :
     public override async Task HandleStartAsync(CreateOrderCommand command)
     {
         // Publish the success response event
-        await Context
-            .PublishWithTracking(new OrderCreatedEvent
-            {
-                OrderId = command.OrderId,
-                UserId = command.UserId,
-                TotalPrice = command.TotalPrice
-            }).ThenMarkAsComplete();
+        // await Context
+        //     .PublishWithTracking(new OrderCreatedEvent
+        //     {
+        //         OrderId = command.OrderId,
+        //         UserId = command.UserId,
+        //         TotalPrice = command.TotalPrice
+        //     }).ThenMarkAsComplete();
 
         // await Context.Publish(new OrderCreatedEvent
         // {
@@ -35,7 +33,7 @@ public class CreateOrderSagaHandler :
         //     TotalPrice = command.TotalPrice
         // });
         //
-        // await Context.MarkAsComplete<CreateOrderCommand>();
+        await Context.MarkAsComplete<CreateOrderCommand>();
     }
 
     public override async Task CompensateStartAsync(CreateOrderCommand message)
