@@ -7,6 +7,7 @@ using Lycia.Saga.Abstractions;
 using Lycia.Saga.Extensions;
 using Lycia.Saga.Helpers;
 using StackExchange.Redis;
+using Lycia.Extensions.Configurations;
 
 namespace Lycia.Extensions.Stores;
 
@@ -18,15 +19,10 @@ public class RedisSagaStore(
     IEventBus eventBus,
     ISagaIdGenerator sagaIdGenerator,
     ISagaCompensationCoordinator sagaCompensationCoordinator,
-    TimeSpan? stepLogTtl = null // Optional TTL parameter, defaults to DefaultStepLogTtl if null
-) : ISagaStore
+    SagaStoreOptions? options)
+    : ISagaStore
 {
-    /// <summary>
-    /// Default TTL for step log keys (1 hour).
-    /// </summary>
-    private static readonly TimeSpan DefaultStepLogTtl = TimeSpan.FromHours(1);
-
-    private readonly TimeSpan _stepLogTtl = stepLogTtl ?? DefaultStepLogTtl;
+    private readonly SagaStoreOptions _options = options ?? new SagaStoreOptions();
 
     private static string SagaDataKey(Guid sagaId) => $"saga:data:{sagaId}";
     private static string StepLogKey(Guid sagaId) => $"saga:steps:{sagaId}";
@@ -34,8 +30,9 @@ public class RedisSagaStore(
     public async Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status, Type handlerType, object? payload = null)
     {
         var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
-        var routingKey = RoutingKeyHelper.GetRoutingKey(stepType);
-        var applicationId = routingKey.Split('.')[0];
+        var applicationId = !string.IsNullOrWhiteSpace(_options.ApplicationId)
+            ? _options.ApplicationId
+            : throw new InvalidOperationException("ApplicationId is required");
         var messageTypeName = GetMessageTypeName(stepType);
         var redisStepLogKey = StepLogKey(sagaId);
 
@@ -59,14 +56,14 @@ public class RedisSagaStore(
             MessageId = messageId,
             ParentMessageId = parentMessageId,
             MessageTypeName = messageTypeName,
-            ApplicationId = applicationId, // TODO: Get from configuration or context if available
+            ApplicationId = applicationId,
             MessagePayload = JsonHelper.SerializeSafe(payload)
         };
 
         await redisDb.HashSetAsync(redisStepLogKey, stepKey, JsonHelper.SerializeSafe(metadata));
         // Ensure the step log key has an expiry (TTL) set to avoid memory bloat.
         // Expiry is updated on each log call (idempotent).
-        await redisDb.KeyExpireAsync(redisStepLogKey, _stepLogTtl);
+        await redisDb.KeyExpireAsync(redisStepLogKey, _options.StepLogTtl ?? TimeSpan.FromHours(1));
     }
 
     public async Task<bool> IsStepCompletedAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType)
