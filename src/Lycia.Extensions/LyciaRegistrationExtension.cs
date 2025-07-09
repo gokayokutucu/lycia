@@ -1,10 +1,11 @@
 using System.Reflection;
+using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Eventing;
+using Lycia.Extensions.Listener;
 using Lycia.Extensions.Stores;
 using Lycia.Infrastructure.Compensating;
 using Lycia.Infrastructure.Dispatching;
 using Lycia.Infrastructure.Eventing;
-using Lycia.Infrastructure.Listener;
 using Lycia.Infrastructure.Stores;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Common;
@@ -19,14 +20,22 @@ namespace Lycia.Extensions;
 
 public static class LyciaRegistrationExtension
 {
-    public static ILyciaServiceCollection AddLycia(this IServiceCollection services, IConfiguration? configuration = null,
+    public static ILyciaServiceCollection AddLycia(this IServiceCollection services,
+        IConfiguration? configuration = null,
         Type? sagaType = null)
     {
-        if(configuration is null ) return new LyciaServiceCollection(services, null);
-        
+        if (configuration is null) return new LyciaServiceCollection(services, null);
+
         var eventBusProvider = configuration["Lycia:EventBus:Provider"] ?? "RabbitMQ";
         var eventStoreProvider = configuration["Lycia:EventStore:Provider"] ?? "Redis";
-
+        // ApplicationId resolution: config["ApplicationId"]
+        var appId = configuration["ApplicationId"] ??
+                    throw new InvalidOperationException("ApplicationId is not configured.");
+        // TTL resolution: use Lycia:CommonTTL
+        var ttlSeconds = int.TryParse(configuration["Lycia:CommonTTL"], out var parsedTtl) && parsedTtl > 0
+            ? parsedTtl
+            : Constants.Ttl;
+        
         // Production default registration for ISagaIdGenerator
         services.TryAddScoped<ISagaIdGenerator, DefaultSagaIdGenerator>();
         // Production default registration for ISagaDispatcher
@@ -45,7 +54,7 @@ public static class LyciaRegistrationExtension
         }
 
         var queueTypeMap =
-            SagaHandlerRegistrationExtensions.DiscoverQueueTypeMap(sagaType?.Assembly ?? Assembly.GetCallingAssembly());
+            SagaHandlerRegistrationExtensions.DiscoverQueueTypeMap(appId, sagaType?.Assembly ?? Assembly.GetCallingAssembly());
 
         // Configure and add RabbitMqEventBus (if Provider is RabbitMQ)
         if (eventBusProvider == "RabbitMQ")
@@ -55,7 +64,14 @@ public static class LyciaRegistrationExtension
                 var conn = configuration["Lycia:EventBus:ConnectionString"]
                            ?? throw new InvalidOperationException("Lycia:EventBus:ConnectionString is not configured.");
                 var logger = provider.GetRequiredService<ILogger<RabbitMqEventBus>>();
-                return RabbitMqEventBus.CreateAsync(conn, logger, queueTypeMap).GetAwaiter().GetResult();
+
+                var eventBusOptions = new EventBusOptions
+                {
+                    ApplicationId = appId,
+                    MessageTTL = TimeSpan.FromSeconds(ttlSeconds)
+                };
+                return RabbitMqEventBus.CreateAsync(conn, logger, queueTypeMap, eventBusOptions).GetAwaiter()
+                    .GetResult();
             });
 
             services.AddHostedService<RabbitMqListener>();
@@ -70,21 +86,19 @@ public static class LyciaRegistrationExtension
                 var eventBus = provider.GetRequiredService<IEventBus>();
                 var sagaIdGen = provider.GetRequiredService<ISagaIdGenerator>();
                 var sagaCompensationCoordinator = provider.GetRequiredService<ISagaCompensationCoordinator>();
-                var config = provider.GetService<IConfiguration>();
-                int ttlSeconds = 3600; // Default: 1 hour
-                if (config != null)
+
+                var options = new SagaStoreOptions
                 {
-                    var ttlConfig = config["Lycia:EventStore:StepLogTTL"];
-                    if (int.TryParse(ttlConfig, out var parsedTtl) && parsedTtl > 0)
-                        ttlSeconds = parsedTtl;
-                }
-                return new RedisSagaStore(redisDb, eventBus, sagaIdGen, sagaCompensationCoordinator, TimeSpan.FromSeconds(ttlSeconds));
+                    ApplicationId = appId,
+                    StepLogTtl = TimeSpan.FromSeconds(ttlSeconds)
+                };
+                return new RedisSagaStore(redisDb, eventBus, sagaIdGen, sagaCompensationCoordinator, options);
             });
         }
 
         return new LyciaServiceCollection(services, configuration);
     }
-    
+
     public static ILyciaServiceCollection AddLyciaInMemory(this IServiceCollection services)
     {
         services.TryAddScoped<ISagaIdGenerator, DefaultSagaIdGenerator>();
