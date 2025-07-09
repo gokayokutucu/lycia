@@ -249,7 +249,7 @@ public static class SagaHandlerRegistrationExtensions
         }
     }
     
-    public static Dictionary<string, Type> DiscoverQueueTypeMap(params Assembly[] assemblies)
+    public static Dictionary<string, Type> DiscoverQueueTypeMap(string applicationId, params Assembly[] assemblies)
     {
         var handlerTypes = assemblies
             .SelectMany(a => a.GetTypes())
@@ -273,7 +273,7 @@ public static class SagaHandlerRegistrationExtensions
             var messageTypes = GetMessageTypesFromHandler(handlerType);
             foreach (var messageType in messageTypes)
             {
-                var routingKey = RoutingKeyHelper.GetRoutingKey(messageType);
+                var routingKey = RoutingKeyHelper.GetRoutingKey(messageType, handlerType, applicationId);
                 queueTypeMap[routingKey] = messageType;
             }
         }
