@@ -6,15 +6,22 @@ using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
 using Lycia.Infrastructure.Helpers;
 using Lycia.Saga.Helpers;
 
+using Lycia.Extensions.Configurations;
+using Lycia.Extensions.Helpers;
+using Constants = Lycia.Extensions.Configurations.Constants;
+
 namespace Lycia.Extensions.Eventing;
 
 public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
 {
+    private const string XMesssageTtl = "x-message-ttl";
+    
     private readonly ConnectionFactory _factory;
     private readonly ILogger<RabbitMqEventBus> _logger;
     private IConnection? _connection;
@@ -22,13 +29,15 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
     private readonly IDictionary<string, Type> _queueTypeMap;
     private readonly List<AsyncEventingBasicConsumer> _consumers = [];
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
+    private readonly EventBusOptions _options;
 
-    private RabbitMqEventBus(string? conn, ILogger<RabbitMqEventBus> logger, IDictionary<string, Type> queueTypeMap)
+    private RabbitMqEventBus(string? conn, ILogger<RabbitMqEventBus> logger, IDictionary<string, Type> queueTypeMap, EventBusOptions options)
     {
         _logger = logger;
         _queueTypeMap = queueTypeMap;
+        _options = options;
 
-        if (conn == null) throw new Exception("RabbitMqEventBus connection is null");
+        if (conn == null) throw new InvalidOperationException("RabbitMqEventBus connection is null");
         
         _factory = new ConnectionFactory
         {
@@ -37,10 +46,14 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         };
     }
 
-    public static async Task<RabbitMqEventBus> CreateAsync(string? conn, ILogger<RabbitMqEventBus> logger,
-        IDictionary<string, Type> queueTypeMap, CancellationToken cancellationToken = default)
+    public static async Task<RabbitMqEventBus> CreateAsync(
+        string? conn,
+        ILogger<RabbitMqEventBus> logger,
+        IDictionary<string, Type> queueTypeMap,
+        EventBusOptions options,
+        CancellationToken cancellationToken = default)
     {
-        var bus = new RabbitMqEventBus(conn, logger, queueTypeMap);
+        var bus = new RabbitMqEventBus(conn, logger, queueTypeMap, options);
         await bus.ConnectAsync(cancellationToken).ConfigureAwait(false);
         return bus;
     }
@@ -84,8 +97,8 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         where TEvent : IEvent
     {
         await EnsureChannelAsync(cancellationToken).ConfigureAwait(false);
-        var routingKey = RoutingKeyHelper.GetRoutingKey(typeof(TEvent));
-        var exchangeName = routingKey;
+        // routingKey equivalent to the exchange name in RabbitMQ terminology
+        var routingKey = RoutingKeyHelper.GetRoutingKey(typeof(TEvent)); // event.OrderCreatedEvent.#
 
         if (_channel == null)
         {
@@ -93,128 +106,15 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                 "Channel is not initialized. Ensure RabbitMqEventBus is properly created.");
         }
 
+        // Declare the exchange (topic) and publish to it. No queue or binding logic here.
         await _channel.ExchangeDeclareAsync(
-            exchange: exchangeName,
+            exchange: routingKey,
             type: ExchangeType.Topic,
             durable: true,
             autoDelete: false,
             arguments: null, cancellationToken: cancellationToken);
 
-        var queueName = exchangeName;
-        // Ensure the queue exists and is bound to the exchange.
-        await _channel.QueueDeclareAsync(
-            queue: queueName,
-            durable: true,
-            exclusive: false,
-            autoDelete: false,
-            arguments: null, cancellationToken: cancellationToken);
-
-        await _channel.QueueBindAsync(
-            queue: queueName,
-            exchange: exchangeName,
-            routingKey: routingKey,
-            arguments: null, cancellationToken: cancellationToken);
-
-        // Prepare headers:
-        // "SagaId" - from event.SagaId if present, else sagaId parameter if provided
-        // "CorrelationId", "MessageId", "ParentMessageId", "Timestamp", "ApplicationId" - extracted from event if present, not generated
-        // "CausationId" - new Guid for this message if not present in event
-        // "EventType" - full name of the event type
-        // "PublishedAt" - UTC ISO-8601 timestamp of publishing
-        var headers = new Dictionary<string, object?>();
-        var eventBase = @event as dynamic;
-
-        // SagaId preference: event.SagaId if available, else sagaId parameter
-        Guid? effectiveSagaId = null;
-        try
-        {
-            effectiveSagaId = eventBase?.SagaId;
-        }
-        catch
-        {
-        }
-
-        if (effectiveSagaId == null)
-            effectiveSagaId = sagaId;
-
-        if (effectiveSagaId.HasValue)
-            headers["SagaId"] = effectiveSagaId.Value.ToString();
-
-        // CorrelationId
-        try
-        {
-            var correlationId = eventBase?.CorrelationId;
-            if (correlationId is Guid guidCorrelationId && guidCorrelationId != Guid.Empty)
-                headers["CorrelationId"] = guidCorrelationId.ToString();
-            else
-                headers["CorrelationId"] = (effectiveSagaId ?? Guid.NewGuid()).ToString();
-        }
-        catch
-        {
-            headers["CorrelationId"] = (effectiveSagaId ?? Guid.NewGuid()).ToString();
-        }
-
-        // MessageId
-        try
-        {
-            var messageId = eventBase?.MessageId;
-            if (messageId is Guid guidMessageId && guidMessageId != Guid.Empty)
-                headers["MessageId"] = guidMessageId.ToString();
-        }
-        catch
-        {
-        }
-
-        // ParentMessageId
-        try
-        {
-            var parentMessageId = eventBase?.ParentMessageId;
-            if (parentMessageId is Guid guidParentMessageId && guidParentMessageId != Guid.Empty)
-                headers["ParentMessageId"] = guidParentMessageId.ToString();
-        }
-        catch
-        {
-        }
-
-        // Timestamp
-        try
-        {
-            var timestamp = eventBase?.Timestamp;
-            if (timestamp is DateTime dtTimestamp && dtTimestamp != default)
-                headers["Timestamp"] = dtTimestamp.ToString("o");
-        }
-        catch
-        {
-        }
-
-        // ApplicationId
-        try
-        {
-            var applicationId = eventBase?.ApplicationId;
-            if (applicationId is string appId && !string.IsNullOrWhiteSpace(appId))
-                headers["ApplicationId"] = appId;
-        }
-        catch
-        {
-        }
-
-        // ParentMessageId
-        try
-        {
-            var parentMessageId = eventBase?.ParentMessageId;
-            if (parentMessageId is Guid guidParentMessageId && guidParentMessageId != Guid.Empty)
-                headers["ParentMessageId"] = guidParentMessageId.ToString();
-            else
-                headers["ParentMessageId"] = Guid.NewGuid().ToString();
-        }
-        catch
-        {
-            headers["ParentMessageId"] = Guid.NewGuid().ToString();
-        }
-
-        headers["EventType"] = typeof(TEvent).FullName;
-        headers["PublishedAt"] = DateTime.UtcNow.ToString("o");
-
+        var headers = RabbitMqEventBusHelper.BuildMessageHeaders(@event, sagaId, typeof(TEvent), Constants.EventTypeHeader);
         var properties = new BasicProperties
         {
             Persistent = true,
@@ -225,7 +125,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         var body = Encoding.UTF8.GetBytes(json);
 
         await _channel.BasicPublishAsync(
-            exchange: exchangeName,
+            exchange: routingKey,
             routingKey: routingKey,
             mandatory: false,
             basicProperties: properties,
@@ -236,130 +136,19 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         CancellationToken cancellationToken = default) where TCommand : ICommand
     {
         await EnsureChannelAsync(cancellationToken).ConfigureAwait(false);
-        var queueName = RoutingKeyHelper.GetRoutingKey(typeof(TCommand));
-        var routingKey = queueName;
+        // routingKey equivalent to the queue name in RabbitMQ terminology
+        var queueName = RoutingKeyHelper.GetRoutingKey(typeof(TCommand)); // command.CreateOrderCommand.#
 
-        await _channel?.QueueDeclareAsync(
-            queue: queueName,
-            durable: true,
-            exclusive: false,
-            autoDelete: false,
-            arguments: null, cancellationToken: cancellationToken)!;
-
-        // Ensure the queue is bound to the exchange if necessary.
-        // For direct (default) exchange, no binding is needed unless using a custom exchange.
-        // If you want to bind to a custom exchange, set exchangeName accordingly and bind.
-        // Here, if exchange is not empty, bind the queue to the exchange.
-        var exchangeName = string.Empty;
-        if (!string.IsNullOrWhiteSpace(exchangeName))
+        if (_channel == null)
         {
-            await _channel.QueueBindAsync(
-                queue: queueName,
-                exchange: exchangeName,
-                routingKey: routingKey,
-                arguments: null, cancellationToken: cancellationToken);
+            throw new InvalidOperationException(
+                "Channel is not initialized. Ensure RabbitMqEventBus is properly created.");
         }
 
-        // Prepare headers:
-        // "SagaId" - from command.SagaId if present, else sagaId parameter if provided
-        // "CorrelationId", "MessageId", "ParentMessageId", "Timestamp", "ApplicationId" - extracted from command if present, not generated
-        // "CausationId" - new Guid for this message if not present in command
-        // "CommandType" - full name of the command type
-        // "PublishedAt" - UTC ISO-8601 timestamp of publishing
-        var headers = new Dictionary<string, object?>();
-        var commandBase = command as dynamic;
+        // Only publish to the default exchange with the routing key (queue name).
+        // No queue declaration or binding is performed here; assumes consumer setup elsewhere.
 
-        // SagaId preference: command.SagaId if available, else sagaId parameter
-        Guid? effectiveSagaId = null;
-        try
-        {
-            effectiveSagaId = commandBase?.SagaId;
-        }
-        catch
-        {
-        }
-
-        if (effectiveSagaId == null)
-            effectiveSagaId = sagaId;
-
-        if (effectiveSagaId.HasValue)
-            headers["SagaId"] = effectiveSagaId.Value.ToString();
-
-        // CorrelationId
-        try
-        {
-            var correlationId = commandBase?.CorrelationId;
-            if (correlationId is Guid guidCorrelationId && guidCorrelationId != Guid.Empty)
-                headers["CorrelationId"] = guidCorrelationId.ToString();
-            else
-                headers["CorrelationId"] = (effectiveSagaId ?? Guid.NewGuid()).ToString();
-        }
-        catch
-        {
-            headers["CorrelationId"] = (effectiveSagaId ?? Guid.NewGuid()).ToString();
-        }
-
-        // MessageId
-        try
-        {
-            var messageId = commandBase?.MessageId;
-            if (messageId is Guid guidMessageId && guidMessageId != Guid.Empty)
-                headers["MessageId"] = guidMessageId.ToString();
-        }
-        catch
-        {
-        }
-
-        // ParentMessageId
-        try
-        {
-            var parentMessageId = commandBase?.ParentMessageId;
-            if (parentMessageId is Guid guidParentMessageId && guidParentMessageId != Guid.Empty)
-                headers["ParentMessageId"] = guidParentMessageId.ToString();
-        }
-        catch
-        {
-        }
-
-        // Timestamp
-        try
-        {
-            var timestamp = commandBase?.Timestamp;
-            if (timestamp is DateTime dtTimestamp && dtTimestamp != default)
-                headers["Timestamp"] = dtTimestamp.ToString("o");
-        }
-        catch
-        {
-        }
-
-        // ApplicationId
-        try
-        {
-            var applicationId = commandBase?.ApplicationId;
-            if (applicationId is string appId && !string.IsNullOrWhiteSpace(appId))
-                headers["ApplicationId"] = appId;
-        }
-        catch
-        {
-        }
-
-        // ParentMessageId
-        try
-        {
-            var parentMessageId = commandBase?.ParentMessageId;
-            if (parentMessageId is Guid guidParentMessageId && guidParentMessageId != Guid.Empty)
-                headers["ParentMessageId"] = guidParentMessageId.ToString();
-            else
-                headers["ParentMessageId"] = Guid.NewGuid().ToString();
-        }
-        catch
-        {
-            headers["ParentMessageId"] = Guid.NewGuid().ToString();
-        }
-
-        headers["CommandType"] = typeof(TCommand).FullName;
-        headers["PublishedAt"] = DateTime.UtcNow.ToString("o");
-
+        var headers = RabbitMqEventBusHelper.BuildMessageHeaders(command, sagaId, typeof(TCommand), Constants.CommandTypeHeader);
         var properties = new BasicProperties
         {
             Persistent = true,
@@ -371,7 +160,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
 
         await _channel.BasicPublishAsync(
             exchange: string.Empty,
-            routingKey: routingKey,
+            routingKey: queueName,
             mandatory: false,
             basicProperties: properties,
             body: body, cancellationToken: cancellationToken);
@@ -386,12 +175,17 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             if (_channel == null)
                 throw new InvalidOperationException("Channel is not initialized for DLQ publish.");
 
+            var dlqArgs = new Dictionary<string, object?>();
+            if (_options.MessageTTL is { TotalMilliseconds: > 0 } ttl)
+            {
+                dlqArgs[XMesssageTtl] = (int)ttl.TotalMilliseconds;
+            }
             await _channel.QueueDeclareAsync(
                 queue: dlqName,
                 durable: true,
                 exclusive: false,
                 autoDelete: false,
-                arguments: null,
+                arguments: dlqArgs.Count > 0 ? dlqArgs : null,
                 cancellationToken: cancellationToken);
 
             // For RabbitMQ.Client 7.x+ this is the only valid way:
@@ -447,11 +241,10 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         {
             // Ensure queue and exchange exist and are bound before subscribing the consumer.
             // These operations are idempotent.
-            var exchangeName = queueName;
 
             // Declare exchange (topic)
             await _channel.ExchangeDeclareAsync(
-                exchange: exchangeName,
+                exchange: queueName,
                 type: ExchangeType.Topic,
                 durable: true,
                 autoDelete: false,
@@ -459,18 +252,24 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                 cancellationToken: cancellationToken);
 
             // Declare queue
+            var queueArgs = new Dictionary<string, object?>();
+            if (_options?.MessageTTL is { TotalMilliseconds: > 0 } ttl)
+            {
+                queueArgs[XMesssageTtl] = (int)ttl.TotalMilliseconds;
+            }
+            
             await _channel.QueueDeclareAsync(
                 queue: queueName,
                 durable: true,
                 exclusive: false,
                 autoDelete: false,
-                arguments: null,
+                arguments: queueArgs.Count > 0 ? queueArgs : null,
                 cancellationToken: cancellationToken);
 
             // Bind queue to exchange with queue name as routing key
             await _channel.QueueBindAsync(
                 queue: queueName,
-                exchange: exchangeName,
+                exchange: queueName,
                 routingKey: queueName,
                 arguments: null,
                 cancellationToken: cancellationToken);
@@ -522,6 +321,10 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         return ConsumeAsync(_queueTypeMap, cancellationToken);
     }
 
+    /// <summary>
+    /// Performs application-defined tasks associated with freeing, releasing, or
+    /// resetting unmanaged resources asynchronously.</summary>
+    /// <returns>A task that represents the asynchronous dispose operation.</returns>
     public async ValueTask DisposeAsync()
     {
         try
@@ -530,19 +333,16 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             // This ensures there are no orphaned consumers on the channel during shutdown.
             if (_channel != null)
             {
-                foreach (var consumer in _consumers)
+                var allTags = _consumers.SelectMany(consumer => consumer.ConsumerTags);
+                foreach (var tag in allTags)
                 {
                     try
                     {
-                        if (consumer.ConsumerTags.Length == 0) continue;
-                        foreach (var tag in consumer.ConsumerTags)
-                            await _channel.BasicCancelAsync(consumerTag: tag)
-                                .ConfigureAwait(false);
+                        await _channel.BasicCancelAsync(consumerTag: tag).ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "Failed to cancel consumer with tag {ConsumerTags}",
-                            string.Join(", ", consumer.ConsumerTags));
+                        _logger.LogWarning(ex, "Failed to cancel consumer with tag {ConsumerTag}", tag);
                     }
                 }
 
@@ -551,46 +351,14 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
 
             if (_channel != null)
             {
-                try
-                {
-                    await _channel.CloseAsync().ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "RabbitMQ channel CloseAsync failed");
-                }
-
-                try
-                {
-                    await _channel.DisposeAsync().ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "RabbitMQ channel DisposeAsync failed");
-                }
+                await CloseAndDisposeChannelAsync();
 
                 _channel = null;
             }
 
             if (_connection != null)
             {
-                try
-                {
-                    await _connection.CloseAsync().ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "RabbitMQ connection CloseAsync failed");
-                }
-
-                try
-                {
-                    await _connection.DisposeAsync().ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "RabbitMQ connection DisposeAsync failed");
-                }
+                await CloseAndDisposeConnectionAsync();
 
                 _connection = null;
             }
@@ -598,6 +366,48 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "RabbitMQ cleanup failed");
+        }
+    }
+
+    private async ValueTask CloseAndDisposeConnectionAsync()
+    {
+        try
+        {
+            await _connection!.CloseAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "RabbitMQ connection CloseAsync failed");
+        }
+
+        try
+        {
+            await _connection!.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "RabbitMQ connection DisposeAsync failed");
+        }
+    }
+
+    private async ValueTask CloseAndDisposeChannelAsync()
+    {
+        try
+        {
+            await _channel!.CloseAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "RabbitMQ channel CloseAsync failed");
+        }
+
+        try
+        {
+            await _channel!.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "RabbitMQ channel DisposeAsync failed");
         }
     }
 }
