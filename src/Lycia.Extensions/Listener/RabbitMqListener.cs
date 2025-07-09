@@ -5,7 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
-namespace Lycia.Infrastructure.Listener;
+namespace Lycia.Extensions.Listener;
 
 public class RabbitMqListener(
     IServiceProvider serviceProvider,
