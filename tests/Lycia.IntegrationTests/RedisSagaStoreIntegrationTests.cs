@@ -1,9 +1,9 @@
 using FluentAssertions;
+using Lycia.Extensions.Configurations;
 using StackExchange.Redis;
 using Testcontainers.Redis;
 using Lycia.Extensions.Stores;
 using Lycia.Messaging;
-using Lycia.Messaging.Attributes;
 using Lycia.Messaging.Enums;
 using Lycia.Saga;
 
@@ -39,8 +39,14 @@ public class RedisSagaStoreIntegrationTests : IAsyncLifetime
         var parentMessageId = Guid.NewGuid();
         var stepType = typeof(DummyStep);
         var handlerType = typeof(DummyHandler);
+        
+        var sagaStoreOptions = new SagaStoreOptions
+        {
+            ApplicationId = "TestApp",
+            StepLogTtl = TimeSpan.FromMinutes(5) // Set a TTL for the messages
+        };
 
-        var store = new RedisSagaStore(_db, null!, null!, null!);
+        var store = new RedisSagaStore(_db, null!, null!, null!, sagaStoreOptions);
 
         // Act & Assert
         await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Started, handlerType, new { Value = 123 });
@@ -67,7 +73,13 @@ public class RedisSagaStoreIntegrationTests : IAsyncLifetime
         var stepType = typeof(DummyStep);
         var handlerType = typeof(DummyHandler);
 
-        var store = new RedisSagaStore(_db, null!, null!, null!);
+        var sagaStoreOptions = new SagaStoreOptions
+        {
+            ApplicationId = "TestApp",
+            StepLogTtl = TimeSpan.FromMinutes(5) // Set a TTL for the messages
+        };
+        
+        var store = new RedisSagaStore(_db, null!, null!, null!, sagaStoreOptions);
 
         await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType);
 
@@ -83,7 +95,13 @@ public class RedisSagaStoreIntegrationTests : IAsyncLifetime
         var sagaId = Guid.NewGuid();
         var data = new SagaData { };
 
-        var store = new RedisSagaStore(_db, null!, null!, null!);
+        var sagaStoreOptions = new SagaStoreOptions
+        {
+            ApplicationId = "TestApp",
+            StepLogTtl = TimeSpan.FromMinutes(5) // Set a TTL for the messages
+        };
+        
+        var store = new RedisSagaStore(_db, null!, null!, null!, sagaStoreOptions);
 
         await store.SaveSagaDataAsync(sagaId, data);
 
@@ -93,7 +111,6 @@ public class RedisSagaStoreIntegrationTests : IAsyncLifetime
         loaded.Should().BeEquivalentTo(data);
     }
 
-    [ApplicationId("TestApp")]
     private class DummyStep : EventBase { }
     private class DummyHandler { }
 }

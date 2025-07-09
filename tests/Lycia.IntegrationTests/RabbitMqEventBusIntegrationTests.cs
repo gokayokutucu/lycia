@@ -1,8 +1,8 @@
 ﻿using System.Text;
 using FluentAssertions;
+using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Eventing;
 using Lycia.Messaging;
-using Lycia.Messaging.Attributes;
 using Lycia.Saga.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Testcontainers.RabbitMq;
@@ -35,10 +35,17 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
             { RoutingKeyHelper.GetRoutingKey(typeof(TestEvent)), typeof(TestEvent) }
         };
 
+        var eventBusOptions = new EventBusOptions
+        {
+            ApplicationId = "TestApp",
+            MessageTTL = TimeSpan.FromMinutes(1) // Set a TTL for the messages
+        };
+
         var eventBus = await RabbitMqEventBus.CreateAsync(
             amqpUri,
             NullLogger<RabbitMqEventBus>.Instance,
-            queueTypeMap);
+            queueTypeMap,
+            eventBusOptions);
 
         var testEvent = new TestEvent { Message = "Integration test message" };
 
@@ -65,8 +72,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
 
         await eventBus.DisposeAsync();
     }
-
-    [ApplicationId("TestApp")]
+    
     private class TestEvent : EventBase
     {
         public string Message { get; init; } = string.Empty;
