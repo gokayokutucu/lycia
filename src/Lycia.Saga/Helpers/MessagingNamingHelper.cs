@@ -39,10 +39,11 @@ public static class MessagingNamingHelper
     /// <param name="handlerType">Type of the handler class consuming this message.</param>
     /// <param name="applicationId">A unique application or consumer/service identifier.</param>
     /// <returns>Unique routing key for queue/exchange binding.</returns>
-    public static string GetRoutingKey(Type messageType, Type handlerType, string applicationId)
+    public static string GetRoutingKey(Type messageType, Type handlerType, string? applicationId)
     {
         if (string.IsNullOrWhiteSpace(applicationId))
             throw new ArgumentException("ApplicationId cannot be null or empty", nameof(applicationId));
+        
         ArgumentNullException.ThrowIfNull(handlerType);
 
         string prefix;

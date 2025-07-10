@@ -93,13 +93,12 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         }
     }
 
-    public async Task Publish<TEvent>(TEvent @event, Guid? sagaId = null, CancellationToken cancellationToken = default)
+    public async Task Publish<TEvent>(TEvent @event, Type? handlerType = null, Guid? sagaId = null, CancellationToken cancellationToken = default)
         where TEvent : IEvent
     {
         await EnsureChannelAsync(cancellationToken).ConfigureAwait(false);
         // routingKey equivalent to the exchange name in RabbitMQ terminology
         var exchangeName = MessagingNamingHelper.GetExchangeName(typeof(TEvent)); // event.OrderCreatedEvent
-        var routingKey = MessagingNamingHelper.GetTopicRoutingKey(typeof(TEvent)); // event.OrderCreatedEvent.#
 
         if (_channel == null)
         {
@@ -129,17 +128,19 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
 
         await _channel.BasicPublishAsync(
             exchange: exchangeName,
-            routingKey: routingKey,
+            routingKey: exchangeName,
             mandatory: false,
             basicProperties: properties,
             body: body, cancellationToken: cancellationToken);
     }
 
-    public async Task Send<TCommand>(TCommand command, Guid? sagaId = null,
+    public async Task Send<TCommand>(TCommand command, Type? handlerType = null, Guid? sagaId = null,
         CancellationToken cancellationToken = default) where TCommand : ICommand
     {
         await EnsureChannelAsync(cancellationToken).ConfigureAwait(false);
-        var queueName = GetQueueName(typeof(TCommand)); // command.CreateOrderCommand.CreateOrderSagaHandler.OrderService
+
+        var queueName = handlerType is not null ? MessagingNamingHelper.GetRoutingKey(typeof(TCommand), handlerType, _options.ApplicationId) : // command.CreateOrderCommand.CreateOrderSagaHandler.OrderService
+            GetCommandQueueName(typeof(TCommand));
         
         if (_channel == null)
         {
@@ -244,7 +245,8 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         {
             // Ensure queue and exchange exist and are bound before subscribing the consumer.
             // These operations are idempotent.
-            var exchangeName = MessagingNamingHelper.GetExchangeName(messageType); // e.g., "order.created"
+            var exchangeName = MessagingNamingHelper.GetExchangeName(messageType); // e.g., "event.OrderCreatedEvent"
+            var routingKey = MessagingNamingHelper.GetTopicRoutingKey(messageType); // e.g., "event.OrderCreatedEvent.#"
             
             await _channel.ExchangeDeclareAsync(
                 exchange: exchangeName,
@@ -272,7 +274,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             await _channel.QueueBindAsync(
                 queue: queueName,
                 exchange: exchangeName,
-                routingKey: queueName,
+                routingKey: routingKey,
                 arguments: null,
                 cancellationToken: cancellationToken);
 
@@ -323,7 +325,12 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         return ConsumeAsync(_queueTypeMap, cancellationToken);
     }
     
-    private string GetQueueName(Type messageType)
+    /// <summary>
+    /// Returns the queue name for the specified command message type.
+    /// This assumes only one queue (one consumer) exists per command type.
+    /// For event message types, multiple queues may exist, so this should not be used for events.
+    /// </summary>
+    private string GetCommandQueueName(Type messageType)
     {
         return _queueTypeMap.FirstOrDefault(kvp => kvp.Value == messageType).Key
                ?? throw new InvalidOperationException($"No handler type found for message type {messageType.FullName}");

@@ -24,14 +24,14 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
 
     public async Task DisposeAsync()
         => await _rabbitMqContainer.DisposeAsync().ConfigureAwait(false);
-    
+
     [Fact]
     public async Task PublishThenConsume_Event_Succeeds()
     {
-        string amqpUri = "amqp://guest:guest@localhost:5672"; 
-        //var amqpUri = _rabbitMqContainer.GetConnectionString();
+        //string amqpUri = "amqp://guest:guest@localhost:5672";
+        var amqpUri = _rabbitMqContainer.GetConnectionString();
         var applicationId = "TestApp";
-        var handlerType = typeof(TestEventHandler);
+        var handlerType = typeof(TestEventHandlerA);
 
         var queueTypeMap = new Dictionary<string, Type>
         {
@@ -50,61 +50,9 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
             queueTypeMap,
             eventBusOptions);
 
-        var testEvent = new TestEvent
-        {
-            SagaId = Guid.NewGuid(),
-            Message = "Integration test message"
-        };
-
-        await eventBus.Publish(testEvent);
-        await Task.Delay(500); // allow async delivery
-
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(300));
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         bool received = false;
 
-        await foreach (var (body, type) in eventBus.ConsumeAsync(cts.Token))
-        {
-            var json = Encoding.UTF8.GetString(body);
-            var evt = System.Text.Json.JsonSerializer.Deserialize(json, type);
-
-            evt.Should().BeOfType<TestEvent>();
-            ((TestEvent)evt).Message.Should().Be("Integration test message");
-            received = true;
-            break;
-        }
-
-        received.Should().BeTrue();
-
-        await eventBus.DisposeAsync();
-    }
-    
-    [Fact]
-    public async Task PublishThenConsume_Event_Succeeds2()
-    {
-        string amqpUri = "amqp://guest:guest@localhost:5672"; 
-        var applicationId = "TestApp";
-        var handlerType = typeof(TestEventHandler);
-
-        var queueTypeMap = new Dictionary<string, Type>
-        {
-            { MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType, applicationId), typeof(TestEvent) }
-        };
-
-        var eventBusOptions = new EventBusOptions
-        {
-            ApplicationId = applicationId,
-            MessageTTL = TimeSpan.FromMinutes(5)
-        };
-
-        var eventBus = await RabbitMqEventBus.CreateAsync(
-            amqpUri,
-            NullLogger<RabbitMqEventBus>.Instance,
-            queueTypeMap,
-            eventBusOptions);
-
-        // 1. Önce ConsumeAsync'i başlat (Background task olarak başlatmak daha iyi)
-        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var received = false;
         var consumeTask = Task.Run(async () =>
         {
             await foreach (var (body, type) in eventBus.ConsumeAsync(cts.Token))
@@ -119,7 +67,8 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
             }
         });
 
-        // 2. Şimdi publish et
+        await Task.Delay(250);
+
         var testEvent = new TestEvent
         {
             SagaId = Guid.NewGuid(),
@@ -127,22 +76,162 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         };
         await eventBus.Publish(testEvent);
 
-        // 3. Consume işlemi tamamlanana kadar bekle
         await consumeTask;
 
         received.Should().BeTrue();
 
         await eventBus.DisposeAsync();
     }
-    
-    private class TestEventHandler : StartReactiveSagaHandler<TestEvent>
+
+    [Fact]
+    public async Task PublishThenConsume_Event_MultiConsumer_Succeeds()
     {
-        public override Task HandleStartAsync(TestEvent message)
+        string amqpUri = "amqp://guest:guest@localhost:5672";
+        //var amqpUri = _rabbitMqContainer.GetConnectionString();
+        var applicationId = "TestApp";
+        var handlerType1 = typeof(TestEventHandlerA);
+        var handlerType2 = typeof(TestEventHandlerB);
+
+        // Separate queueTypeMap entry for each handler
+        var queueTypeMap = new Dictionary<string, Type>
         {
-            return Task.CompletedTask;
-        }
+            { MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType1, applicationId), typeof(TestEvent) },
+            { MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType2, applicationId), typeof(TestEvent) }
+        };
+
+        var eventBusOptions = new EventBusOptions
+        {
+            ApplicationId = applicationId,
+            MessageTTL = TimeSpan.FromMinutes(5)
+        };
+
+        var eventBus = await RabbitMqEventBus.CreateAsync(
+            amqpUri,
+            NullLogger<RabbitMqEventBus>.Instance,
+            queueTypeMap,
+            eventBusOptions);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        int receivedCount = 0;
+
+        var consumeTask = Task.Run(async () =>
+        {
+            await foreach (var (body, type) in eventBus.ConsumeAsync(cts.Token))
+            {
+                var json = Encoding.UTF8.GetString(body);
+                var evt = System.Text.Json.JsonSerializer.Deserialize(json, type);
+                evt.Should().BeOfType<TestEvent>();
+                ((TestEvent)evt).Message.Should().Be("Integration test message multi");
+
+                receivedCount++;
+                if (receivedCount >= 2) // Exit if both handlers have received the message
+                    break;
+            }
+        });
+
+        await Task.Delay(250);
+
+        var testEvent = new TestEvent
+        {
+            SagaId = Guid.NewGuid(),
+            Message = "Integration test message multi"
+        };
+        // Publish is done only once, but both handlers receive it from different queues
+        await eventBus.Publish(testEvent); // Here, handlerType is only important for publish to determine the exchange
+        // You can send handlerType1 or handlerType2 in the above line, it doesn't matter.
+
+        await consumeTask;
+
+        receivedCount.Should().Be(2);
+
+        await eventBus.DisposeAsync();
     }
-    
+
+    [Fact]
+    public async Task SendThenConsume_Command_Succeeds()
+    {
+        //string amqpUri = "amqp://guest:guest@localhost:5672";
+        var amqpUri = _rabbitMqContainer.GetConnectionString();
+        var applicationId = "TestApp";
+        var handlerType = typeof(TestCommandHandlerA);
+
+        // Only a single consumer/queue mapping for command (point-to-point)
+        var queueTypeMap = new Dictionary<string, Type>
+        {
+            {
+                MessagingNamingHelper.GetRoutingKey(typeof(TestCommand), handlerType, applicationId),
+                typeof(TestCommand)
+            }
+        };
+
+        var eventBusOptions = new EventBusOptions
+        {
+            ApplicationId = applicationId,
+            MessageTTL = TimeSpan.FromMinutes(5)
+        };
+
+        var eventBus = await RabbitMqEventBus.CreateAsync(
+            amqpUri,
+            NullLogger<RabbitMqEventBus>.Instance,
+            queueTypeMap,
+            eventBusOptions);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        bool received = false;
+
+        var consumeTask = Task.Run(async () =>
+        {
+            await foreach (var (body, type) in eventBus.ConsumeAsync(cts.Token))
+            {
+                var json = Encoding.UTF8.GetString(body);
+                var cmd = System.Text.Json.JsonSerializer.Deserialize(json, type);
+
+                cmd.Should().BeOfType<TestCommand>();
+                ((TestCommand)cmd).Message.Should().Be("Integration test command");
+                received = true;
+                break;
+            }
+        });
+
+        await Task.Delay(250);
+
+        var testCommand = new TestCommand
+        {
+            SagaId = Guid.NewGuid(),
+            Message = "Integration test command"
+        };
+        await eventBus.Send(testCommand, handlerType);
+
+        await consumeTask;
+
+        received.Should().BeTrue();
+
+        await eventBus.DisposeAsync();
+    }
+
+// Dummy command handler for test
+    private class TestCommandHandlerA : StartReactiveSagaHandler<TestCommand>
+    {
+        public override Task HandleStartAsync(TestCommand message) => Task.CompletedTask;
+    }
+
+// Test command for Send
+    private class TestCommand : CommandBase
+    {
+        public string Message { get; init; } = string.Empty;
+    }
+
+    private class TestEventHandlerA : StartReactiveSagaHandler<TestEvent>
+    {
+        public override Task HandleStartAsync(TestEvent message) => Task.CompletedTask;
+    }
+
+    private class TestEventHandlerB : StartReactiveSagaHandler<TestEvent>
+    {
+        public override Task HandleStartAsync(TestEvent message) => Task.CompletedTask;
+    }
+
+
     private class TestEvent : EventBase
     {
         public string Message { get; init; } = string.Empty;
