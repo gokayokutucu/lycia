@@ -98,7 +98,8 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
     {
         await EnsureChannelAsync(cancellationToken).ConfigureAwait(false);
         // routingKey equivalent to the exchange name in RabbitMQ terminology
-        var routingKey = RoutingKeyHelper.GetRoutingKey(typeof(TEvent)); // event.OrderCreatedEvent.#
+        var exchangeName = MessagingNamingHelper.GetExchangeName(typeof(TEvent)); // event.OrderCreatedEvent
+        var routingKey = MessagingNamingHelper.GetTopicRoutingKey(typeof(TEvent)); // event.OrderCreatedEvent.#
 
         if (_channel == null)
         {
@@ -108,11 +109,13 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
 
         // Declare the exchange (topic) and publish to it. No queue or binding logic here.
         await _channel.ExchangeDeclareAsync(
-            exchange: routingKey,
+            exchange: exchangeName,
             type: ExchangeType.Topic,
             durable: true,
             autoDelete: false,
             arguments: null, cancellationToken: cancellationToken);
+
+        sagaId ??= @event.SagaId; // Ensure sagaId is not null, use a new Guid if not provided
 
         var headers = RabbitMqEventBusHelper.BuildMessageHeaders(@event, sagaId, typeof(TEvent), Constants.EventTypeHeader);
         var properties = new BasicProperties
@@ -125,7 +128,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         var body = Encoding.UTF8.GetBytes(json);
 
         await _channel.BasicPublishAsync(
-            exchange: routingKey,
+            exchange: exchangeName,
             routingKey: routingKey,
             mandatory: false,
             basicProperties: properties,
@@ -136,9 +139,8 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         CancellationToken cancellationToken = default) where TCommand : ICommand
     {
         await EnsureChannelAsync(cancellationToken).ConfigureAwait(false);
-        // routingKey equivalent to the queue name in RabbitMQ terminology
-        var queueName = RoutingKeyHelper.GetRoutingKey(typeof(TCommand)); // command.CreateOrderCommand.#
-
+        var queueName = GetQueueName(typeof(TCommand)); // command.CreateOrderCommand.CreateOrderSagaHandler.OrderService
+        
         if (_channel == null)
         {
             throw new InvalidOperationException(
@@ -159,7 +161,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         var body = Encoding.UTF8.GetBytes(json);
 
         await _channel.BasicPublishAsync(
-            exchange: string.Empty,
+            exchange: string.Empty, // Default exchange
             routingKey: queueName,
             mandatory: false,
             basicProperties: properties,
@@ -211,7 +213,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             }
 
             await _channel.BasicPublishAsync(
-                exchange: "",
+                exchange: string.Empty,
                 routingKey: dlqName,
                 mandatory: false,
                 basicProps,
@@ -237,20 +239,20 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
 
         var messageQueue = new ConcurrentQueue<(byte[] Body, Type MessageType)>();
 
+        // queueName => e.g. Full format: event.OrderCreatedEvent.CreateOrderSagaHandler.OrderService
         foreach (var (queueName, messageType) in queueTypeMap)
         {
             // Ensure queue and exchange exist and are bound before subscribing the consumer.
             // These operations are idempotent.
-
-            // Declare exchange (topic)
+            var exchangeName = MessagingNamingHelper.GetExchangeName(messageType); // e.g., "order.created"
+            
             await _channel.ExchangeDeclareAsync(
-                exchange: queueName,
+                exchange: exchangeName,
                 type: ExchangeType.Topic,
                 durable: true,
                 autoDelete: false,
-                arguments: null,
-                cancellationToken: cancellationToken);
-
+                arguments: null, cancellationToken: cancellationToken);
+            
             // Declare queue
             var queueArgs = new Dictionary<string, object?>();
             if (_options?.MessageTTL is { TotalMilliseconds: > 0 } ttl)
@@ -269,7 +271,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             // Bind queue to exchange with queue name as routing key
             await _channel.QueueBindAsync(
                 queue: queueName,
-                exchange: queueName,
+                exchange: exchangeName,
                 routingKey: queueName,
                 arguments: null,
                 cancellationToken: cancellationToken);
@@ -278,7 +280,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
 
             // This pattern ensures that message handling errors are caught and do not crash the consumer loop.
             // Instead, problematic messages are logged and can be dead-lettered for later analysis.
-            consumer.ReceivedAsync += async (model, ea) =>
+            consumer.ReceivedAsync += async (_, ea) =>
             {
                 try
                 {
@@ -319,6 +321,12 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             throw new InvalidOperationException(
                 "Queue/message type map is not configured for this event bus instance.");
         return ConsumeAsync(_queueTypeMap, cancellationToken);
+    }
+    
+    private string GetQueueName(Type messageType)
+    {
+        return _queueTypeMap.FirstOrDefault(kvp => kvp.Value == messageType).Key
+               ?? throw new InvalidOperationException($"No handler type found for message type {messageType.FullName}");
     }
 
     /// <summary>
