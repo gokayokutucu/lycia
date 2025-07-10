@@ -10,25 +10,28 @@ public static class RabbitMqEventBusHelper
         dynamic msg = message;
 
         // SagaId preference: message.SagaId if available, else sagaId parameter
-        Guid? effectiveSagaId = RabbitMqEventBusHelper.GetGuidProperty("SagaId", msg, sagaId);
-        if (effectiveSagaId.HasValue)
-            headers[Constants.SagaIdHeader] = effectiveSagaId.Value.ToString();
+        Guid effectiveSagaId = RabbitMqEventBusHelper.GetGuidProperty("SagaId", msg, sagaId ?? Guid.Empty);
+        if (effectiveSagaId != Guid.Empty)
+            headers[Constants.SagaIdHeader] = effectiveSagaId.ToString();
 
         // CorrelationId: prefer property, else effectiveSagaId or new Guid
-        var correlationId = RabbitMqEventBusHelper.GetGuidProperty("CorrelationId", msg, effectiveSagaId ?? Guid.NewGuid());
-        headers[Constants.CorrelationIdHeader] = correlationId.ToString();
+        var correlationId = RabbitMqEventBusHelper.GetGuidProperty("CorrelationId", msg, effectiveSagaId != Guid.Empty ? effectiveSagaId : Guid.NewGuid());
+        if (correlationId != Guid.Empty)
+            headers[Constants.CorrelationIdHeader] = correlationId.ToString();
 
         // MessageId
         var messageId = RabbitMqEventBusHelper.GetGuidProperty("MessageId", msg);
-        if (messageId.HasValue) headers[Constants.MessageIdHeader] = messageId.Value.ToString();
+        if (messageId != Guid.Empty)
+            headers[Constants.MessageIdHeader] = messageId.ToString();
 
         // ParentMessageId (first instance, only if present)
         var parentMessageId = RabbitMqEventBusHelper.GetGuidProperty("ParentMessageId", msg);
-        if (parentMessageId.HasValue) headers[Constants.ParentMessageIdHeader] = parentMessageId.Value.ToString();
+        if (parentMessageId != Guid.Empty)
+            headers[Constants.ParentMessageIdHeader] = parentMessageId.ToString();
 
         // Timestamp
         var timestamp = RabbitMqEventBusHelper.GetDateTimeProperty("Timestamp", msg);
-        if (timestamp.HasValue) headers[Constants.TimestampHeader] = timestamp.Value.ToString("o");
+        headers[Constants.TimestampHeader] = timestamp.ToString("o");
 
         // ApplicationId
         var applicationId = RabbitMqEventBusHelper.GetStringProperty("ApplicationId", msg);
@@ -36,7 +39,7 @@ public static class RabbitMqEventBusHelper
 
         // ParentMessageId (again, fallback/generation)
         var parentMsgIdForFallback = RabbitMqEventBusHelper.GetGuidProperty("ParentMessageId", msg);
-        headers[Constants.ParentMessageIdHeader] = (parentMsgIdForFallback ?? Guid.NewGuid()).ToString();
+        headers[Constants.ParentMessageIdHeader] = (parentMsgIdForFallback != Guid.Empty ? parentMsgIdForFallback : Guid.NewGuid()).ToString();
 
         headers[typeLabel] = messageType.FullName;
         headers[Constants.PublishedAtHeader] = DateTime.UtcNow.ToString("o");
@@ -44,7 +47,7 @@ public static class RabbitMqEventBusHelper
         return headers;
     }
 
-    private static Guid? GetGuidProperty(string propName, dynamic msg, Guid? fallback = null)
+    private static Guid GetGuidProperty(string propName, dynamic msg, Guid fallback = default)
     {
         try
         {
