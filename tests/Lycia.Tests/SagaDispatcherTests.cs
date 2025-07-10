@@ -11,6 +11,7 @@ using Lycia.Saga.Extensions;
 using Lycia.Saga.Handlers;
 using Lycia.Tests.Helper;
 using Lycia.Tests.Sagas;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Moq.Protected;
@@ -285,11 +286,14 @@ public class SagaDispatcherTests
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
         // Register all relevant SagaHandlers
-        // services.AddScoped<ISagaStartHandler<CreateOrderCommand>, CreateOrderSagaHandler>();
-        // services.AddScoped<ISagaCompensationHandler<OrderShippingFailedEvent>, CreateOrderSagaHandler>();
-        // services.AddScoped<ISagaHandler<OrderCreatedEvent>, ShipOrderForCompensationSagaHandler>();
-        // services.AddScoped<ISagaCompensationHandler<OrderCreatedEvent>, ShipOrderForCompensationSagaHandler>();
-        services.AddLycia()
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string>
+            {
+                ["ApplicationId"] = "TestApp"
+            }!)
+            .Build();
+
+        services.AddLyciaInMemory(configuration)
             .AddSagas(typeof(CreateOrderSagaHandler), typeof(ShipOrderForCompensationSagaHandler),
                 typeof(ShipOrderForCompensationSagaHandler));
 
@@ -346,7 +350,7 @@ public class SagaDispatcherTests
         };
 
         // Act
-        await eventBus.Send(command);
+        await eventBus.Send(command, typeof(CreateOrderSagaHandler));
 
         // Assert
         var steps = await sagaStore.GetSagaHandlerStepsAsync(fixedSagaId);

@@ -34,4 +34,4 @@ app.MapPost("/order", async (
     })
     .WithName("CreateOrder");
 
-app.Run();
+await app.RunAsync();

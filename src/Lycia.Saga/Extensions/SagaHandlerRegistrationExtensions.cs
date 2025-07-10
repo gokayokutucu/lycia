@@ -257,7 +257,7 @@ public static class SagaHandlerRegistrationExtensions
         }
     }
     
-    public static Dictionary<string, Type> DiscoverQueueTypeMap(string applicationId, params Assembly[] assemblies)
+    public static Dictionary<string, Type> DiscoverQueueTypeMap(string? applicationId, params Assembly[] assemblies)
     {
         var handlerTypes = assemblies
             .SelectMany(a => a.GetTypes())

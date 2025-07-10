@@ -14,6 +14,9 @@ public interface IEventBus
     /// <param name="command">
     ///     The command object to send to the target consumer.
     /// </param>
+    /// <param name="handlerType">
+    ///     (Optional) The type of the handler that will process this command, if known. Used for correlation or tracing.
+    /// </param>
     /// <param name="sagaId">
     ///     (Optional) The saga identifier associated with this command, if part of a saga. Used for correlation or tracing.
     /// </param>
@@ -21,7 +24,7 @@ public interface IEventBus
     /// <returns>
     ///     A <see cref="Task"/> representing the asynchronous send operation.
     /// </returns>
-    Task Send<TCommand>(TCommand command, Guid? sagaId = null, CancellationToken cancellationToken = default) where TCommand : ICommand;
+    Task Send<TCommand>(TCommand command, Type? handlerType = null, Guid? sagaId = null, CancellationToken cancellationToken = default) where TCommand : ICommand;
 
     /// <summary>
     /// Publishes an event to all interested subscribers for broadcasting state changes or domain events in the system.
@@ -32,6 +35,9 @@ public interface IEventBus
     /// <param name="event">
     ///     The event object to broadcast to all subscribers.
     /// </param>
+    /// <param name="handlerType">
+    ///     (Optional) The type of the handler that will process this event, if known. Used for routing or filtering.
+    /// </param>
     /// <param name="sagaId">
     ///     (Optional) The saga identifier associated with this event, if part of a saga. Used for correlation or tracing.
     /// </param>
@@ -39,7 +45,7 @@ public interface IEventBus
     /// <returns>
     ///     A <see cref="Task"/> representing the asynchronous publish operation.
     /// </returns>
-    Task Publish<TEvent>(TEvent @event, Guid? sagaId = null, CancellationToken cancellationToken = default) where TEvent : IEvent;
+    Task Publish<TEvent>(TEvent @event, Type? handlerType = null, Guid? sagaId = null, CancellationToken cancellationToken = default) where TEvent : IEvent;
     
     /// <summary>
     /// Asynchronously consumes messages from the registered queues and yields each message as a tuple containing the raw message body and its resolved message type.

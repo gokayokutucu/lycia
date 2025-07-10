@@ -198,10 +198,10 @@ public class SagaSagaStoreTests
 
     private class DummyEventBus : IEventBus
     {
-        public Task Send<TCommand>(TCommand command, Guid? sagaId = null, CancellationToken cancellationToken = default) where TCommand : ICommand =>
+        public Task Send<TCommand>(TCommand command, Type handlerType, Guid? sagaId = null, CancellationToken cancellationToken = default) where TCommand : ICommand =>
             Task.CompletedTask;
 
-        public Task Publish<TEvent>(TEvent @event, Guid? sagaId = null, CancellationToken cancellationToken = default) where TEvent : IEvent => Task.CompletedTask;
+        public Task Publish<TEvent>(TEvent @event, Type handlerType, Guid? sagaId = null, CancellationToken cancellationToken = default) where TEvent : IEvent => Task.CompletedTask;
 
         public IAsyncEnumerable<(byte[] Body, Type MessageType)> ConsumeAsync(CancellationToken cancellationToken)
         {

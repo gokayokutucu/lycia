@@ -99,13 +99,13 @@ public static class LyciaRegistrationExtension
         return new LyciaServiceCollection(services, configuration);
     }
 
-    public static ILyciaServiceCollection AddLyciaInMemory(this IServiceCollection services)
+    public static ILyciaServiceCollection AddLyciaInMemory(this IServiceCollection services, IConfiguration? configuration = null)
     {
         services.TryAddScoped<ISagaIdGenerator, DefaultSagaIdGenerator>();
         services.TryAddScoped<ISagaDispatcher, SagaDispatcher>();
         services.TryAddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.TryAddScoped<ISagaStore, InMemorySagaStore>();
         services.TryAddScoped<IEventBus, InMemoryEventBus>();
-        return new LyciaServiceCollection(services, null);
+        return new LyciaServiceCollection(services, configuration);
     }
 }
