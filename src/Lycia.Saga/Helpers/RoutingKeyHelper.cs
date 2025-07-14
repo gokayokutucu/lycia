@@ -32,7 +32,12 @@ public static class RoutingKeyHelper
     {
         if (string.IsNullOrWhiteSpace(applicationId))
             throw new ArgumentException("ApplicationId cannot be null or empty", nameof(applicationId));
-        ArgumentNullException.ThrowIfNull(handlerType);
+#if NET6_0_OR_GREATER
+        ArgumentNullException.ThrowIfNull(handlerType); 
+#else
+        if (handlerType is null)
+            throw new ArgumentNullException(nameof(handlerType), "Handler type cannot be null");
+#endif
 
         string prefix;
         if (messageType.IsSubclassOf(typeof(EventBase)))
