@@ -1,3 +1,4 @@
+using Lycia.Messaging.Utility;
 using Lycia.Saga.Extensions;
 
 namespace Lycia.Tests;
@@ -12,7 +13,7 @@ public class TestSagaIdGenerator(Guid fixedId) : ISagaIdGenerator
     /// <summary>
     /// Creates a new generator with a random version 7 Guid.
     /// </summary>
-    public TestSagaIdGenerator() : this(Guid.CreateVersion7()) { }
+    public TestSagaIdGenerator() : this(GuidV7.NewGuidV7()) { }
 
     public Guid Generate() => FixedId;
 

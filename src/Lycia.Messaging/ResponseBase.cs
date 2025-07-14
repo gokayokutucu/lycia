@@ -12,18 +12,22 @@ public abstract class ResponseBase<TPrevious> :
 {
     protected ResponseBase(Guid? parentMessageId = null, Guid? correlationId = null)
     {
-        MessageId = Guid.CreateVersion7();
+        MessageId = GuidV7.NewGuidV7();
         ParentMessageId = parentMessageId ?? Guid.Empty;
         CorrelationId = correlationId ?? MessageId;
         Timestamp = DateTime.UtcNow;
         ApplicationId  = EventMetadata.ApplicationId;
     }
     
-    public Guid MessageId { get; init; }
-    public Guid ParentMessageId { get; init; }
-    public DateTime Timestamp { get; init; } 
-    public string ApplicationId { get; init; }
-    public Guid CorrelationId { get; init; }
+    public Guid MessageId { get; private set; }
+    public Guid ParentMessageId { get; private set; }
+    public DateTime Timestamp { get; private set; } 
+    public string ApplicationId { get; private set; }
+#if NET9_0_OR_GREATER
+    public  Guid CorrelationId { get; init; }
+#else
+    public Guid CorrelationId { get; set; }
+#endif
     public Guid? SagaId { get; set; }
 #if UNIT_TESTING
     [JsonIgnore]

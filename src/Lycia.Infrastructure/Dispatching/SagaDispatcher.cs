@@ -376,7 +376,7 @@ public class SagaDispatcher(
 
                     await ValidateSagaStepCompletionAsync(message, handlerType, sagaId);
                 }
-                catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException ex)
+                catch (Exception ex)
                 {
                     // Optionally log or throw a descriptive error
                     throw new InvalidOperationException($"Failed to invoke HandleAsync dynamically: {ex.Message}", ex);
@@ -395,7 +395,7 @@ public class SagaDispatcher(
 
                     await ValidateSagaStepCompletionAsync(message, handlerType, sagaId);
                 }
-                catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException ex)
+                catch (Exception ex)
                 {
                     // Optionally log or throw a descriptive error
                     throw new InvalidOperationException($"Failed to invoke HandleAsync dynamically: {ex.Message}", ex);

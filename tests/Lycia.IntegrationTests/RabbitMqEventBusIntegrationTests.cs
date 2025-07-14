@@ -6,6 +6,7 @@ using Lycia.Messaging;
 using Lycia.Saga.Handlers;
 using Lycia.Saga.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
+using RabbitMQ.Client;
 using Testcontainers.RabbitMq;
 
 namespace Lycia.IntegrationTests;
@@ -24,6 +25,104 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
 
     public async Task DisposeAsync()
         => await _rabbitMqContainer.DisposeAsync().ConfigureAwait(false);
+
+    [Fact]
+    public async Task Publish_Event_Expires_To_DLQ_Succeeds()
+    {
+        string amqpUri = "amqp://guest:guest@localhost:5672";
+        var applicationId = "TestApp";
+        var handlerType = typeof(TestEventHandlerA);
+        var queueName = MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType, applicationId);
+
+        // Clean up before test (best practice for integration tests)
+        var factory = new ConnectionFactory { Uri = new Uri(amqpUri) };
+        await using (var conn = await factory.CreateConnectionAsync(CancellationToken.None))
+        await using (var channelDelete = await conn.CreateChannelAsync(cancellationToken: CancellationToken.None))
+        {
+            try
+            {
+                await channelDelete.QueueDeleteAsync(queueName);
+            }
+            catch
+            {
+                // ignored
+            }
+
+            try
+            {
+                await channelDelete.QueueDeleteAsync(queueName + ".dlq");
+            }
+            catch
+            {
+                // ignored
+            }
+        }
+
+        var queueTypeMap = new Dictionary<string, Type>
+        {
+            { queueName, typeof(TestEvent) }
+        };
+
+        var ttl = TimeSpan.FromSeconds(15);
+        var eventBusOptions = new EventBusOptions
+        {
+            ApplicationId = applicationId,
+            MessageTTL = ttl
+        };
+
+        var eventBus = await RabbitMqEventBus.CreateAsync(
+            amqpUri,
+            NullLogger<RabbitMqEventBus>.Instance,
+            queueTypeMap,
+            eventBusOptions);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20)); // Extra time for test
+
+        // Trigger consumer (do not process any messages)
+        var setupTask = Task.Run(async () =>
+        {
+            var setupCts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            await eventBus.ConsumeAsync(autoAck: false, cancellationToken: setupCts.Token)
+                .GetAsyncEnumerator(setupCts.Token).MoveNextAsync();
+            setupCts.Dispose();
+        });
+        await setupTask;
+
+
+        await Task.Delay(500);
+
+        // Publish event
+        var testEvent = new TestEvent
+        {
+            SagaId = Guid.NewGuid(),
+            Message = "DLQ Test Message"
+        };
+        await eventBus.Publish(testEvent, handlerType: handlerType);
+
+        // Wait for TTL + DLQ transfer
+        await Task.Delay(ttl + TimeSpan.FromSeconds(3));
+
+        await using var conn2 = await factory.CreateConnectionAsync(CancellationToken.None);
+        await using var channel = await conn2.CreateChannelAsync(cancellationToken: CancellationToken.None);
+
+        var dlqName = queueName + ".dlq";
+
+        var result = await channel.QueueDeclarePassiveAsync(dlqName, CancellationToken.None);
+        result.MessageCount.Should().Be(1, "The message should be dead-lettered after TTL expires.");
+
+        var dlqResult = await channel.BasicGetAsync(dlqName, autoAck: true, cancellationToken: CancellationToken.None);
+        dlqResult.Should().NotBeNull();
+
+        var body = Encoding.UTF8.GetString(dlqResult.Body.ToArray());
+        body.Should().Contain("DLQ Test Message");
+
+        await eventBus.DisposeAsync();
+#if NET8_0_OR_GREATER || NET7_0_OR_GREATER
+        await cts.CancelAsync();
+#else
+        cts.Cancel();
+#endif
+    }
 
     [Fact]
     public async Task PublishThenConsume_Event_Succeeds()
@@ -55,7 +154,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
 
         var consumeTask = Task.Run(async () =>
         {
-            await foreach (var (body, type) in eventBus.ConsumeAsync(cts.Token))
+            await foreach (var (body, type) in eventBus.ConsumeAsync(cancellationToken: cts.Token))
             {
                 var json = Encoding.UTF8.GetString(body);
                 var evt = System.Text.Json.JsonSerializer.Deserialize(json, type);
@@ -116,7 +215,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
 
         var consumeTask = Task.Run(async () =>
         {
-            await foreach (var (body, type) in eventBus.ConsumeAsync(cts.Token))
+            await foreach (var (body, type) in eventBus.ConsumeAsync(cancellationToken: cts.Token))
             {
                 var json = Encoding.UTF8.GetString(body);
                 var evt = System.Text.Json.JsonSerializer.Deserialize(json, type);
@@ -181,7 +280,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
 
         var consumeTask = Task.Run(async () =>
         {
-            await foreach (var (body, type) in eventBus.ConsumeAsync(cts.Token))
+            await foreach (var (body, type) in eventBus.ConsumeAsync(cancellationToken: cts.Token))
             {
                 var json = Encoding.UTF8.GetString(body);
                 var cmd = System.Text.Json.JsonSerializer.Deserialize(json, type);
@@ -218,7 +317,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
 // Test command for Send
     private class TestCommand : CommandBase
     {
-        public string Message { get; init; } = string.Empty;
+        public string Message { get; set; } = string.Empty;
     }
 
     private class TestEventHandlerA : StartReactiveSagaHandler<TestEvent>
@@ -234,6 +333,6 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
 
     private class TestEvent : EventBase
     {
-        public string Message { get; init; } = string.Empty;
+        public string Message { get; set; } = string.Empty;
     }
 }
