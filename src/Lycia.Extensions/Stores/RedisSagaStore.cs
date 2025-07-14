@@ -63,7 +63,7 @@ public class RedisSagaStore(
         await redisDb.HashSetAsync(redisStepLogKey, stepKey, JsonHelper.SerializeSafe(metadata));
         // Ensure the step log key has an expiry (TTL) set to avoid memory bloat.
         // Expiry is updated on each log call (idempotent).
-        await redisDb.KeyExpireAsync(redisStepLogKey, _options.StepLogTtl ?? TimeSpan.FromHours(1));
+        await redisDb.KeyExpireAsync(redisStepLogKey, _options.StepLogTtl != default ? _options.StepLogTtl : TimeSpan.FromHours(1));
     }
 
     public async Task<bool> IsStepCompletedAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType)
