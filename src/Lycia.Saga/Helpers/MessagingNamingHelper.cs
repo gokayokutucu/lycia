@@ -44,7 +44,8 @@ public static class MessagingNamingHelper
         if (string.IsNullOrWhiteSpace(applicationId))
             throw new ArgumentException("ApplicationId cannot be null or empty", nameof(applicationId));
         
-        ArgumentNullException.ThrowIfNull(handlerType);
+        if (handlerType is null)
+            throw new ArgumentNullException(nameof(handlerType));
 
         string prefix;
         if (messageType.IsSubclassOf(typeof(EventBase)))

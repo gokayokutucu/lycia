@@ -9,7 +9,7 @@ public abstract class EventBase : IEvent
     protected EventBase()
     {
         SagaId = Guid.Empty;
-        MessageId = Guid.CreateVersion7();
+        MessageId = GuidV7.NewGuidV7();
         ParentMessageId = Guid.Empty; // CausationId
         CorrelationId = MessageId;
         Timestamp = DateTime.UtcNow;
@@ -19,7 +19,7 @@ public abstract class EventBase : IEvent
     protected EventBase(Guid? sagaId = null)
     {
         SagaId = sagaId;
-        MessageId = Guid.CreateVersion7();
+        MessageId = GuidV7.NewGuidV7();
         ParentMessageId = Guid.Empty; // CausationId
         CorrelationId = MessageId;
         Timestamp = DateTime.UtcNow;
@@ -29,22 +29,22 @@ public abstract class EventBase : IEvent
     protected EventBase(Guid? sagaId = null, Guid? parentMessageId = null, Guid? correlationId = null)
     {
         SagaId = sagaId;
-        MessageId = Guid.CreateVersion7();
+        MessageId = GuidV7.NewGuidV7();
         ParentMessageId = parentMessageId ?? Guid.Empty; // CausationId
         CorrelationId = correlationId ?? MessageId;
         Timestamp = DateTime.UtcNow;
         ApplicationId  = EventMetadata.ApplicationId;
     }
 
-    public Guid MessageId { get; init; }
-    public Guid ParentMessageId { get; init; } // CausationId
-#if NET5_0_OR_GREATER
+    public Guid MessageId { get; set; }
+    public Guid ParentMessageId { get; set; } // CausationId
+#if NET9_0_OR_GREATER
     public  Guid CorrelationId { get; init; }
 #else
     public Guid CorrelationId { get; set; }
 #endif
-    public DateTime Timestamp { get; init; }
-    public string ApplicationId { get; init; }
+    public DateTime Timestamp { get; private set; }
+    public string ApplicationId { get; private set; }
     public Guid? SagaId { get; set; }
 #if UNIT_TESTING
     [JsonIgnore]
@@ -56,5 +56,5 @@ public abstract class EventBase : IEvent
 
 public abstract class FailedEventBase(string reason) : EventBase
 {
-    public string Reason { get; init; } = reason;
+    public string Reason { get; private set; } = reason;
 }

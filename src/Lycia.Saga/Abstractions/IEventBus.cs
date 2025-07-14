@@ -46,16 +46,17 @@ public interface IEventBus
     ///     A <see cref="Task"/> representing the asynchronous publish operation.
     /// </returns>
     Task Publish<TEvent>(TEvent @event, Type? handlerType = null, Guid? sagaId = null, CancellationToken cancellationToken = default) where TEvent : IEvent;
-    
+
     /// <summary>
     /// Asynchronously consumes messages from the registered queues and yields each message as a tuple containing the raw message body and its resolved message type.
     /// Intended for use in background listeners or workers to process incoming commands and events in a strongly-typed, streaming manner.
     /// </summary>
+    /// <param name="autoAck"></param>
     /// <param name="cancellationToken">
     ///     A cancellation token that can be used to stop message consumption gracefully.
     /// </param>
     /// <returns>
     ///     An asynchronous stream (<see cref="IAsyncEnumerable{T}"/>) yielding a tuple consisting of the raw message body (<see cref="byte[]"/>) and its corresponding <see cref="Type"/>.
     /// </returns>
-    IAsyncEnumerable<(byte[] Body, Type MessageType)> ConsumeAsync(CancellationToken cancellationToken);
+    IAsyncEnumerable<(byte[] Body, Type MessageType)> ConsumeAsync(bool autoAck = true, CancellationToken cancellationToken = default);
 }

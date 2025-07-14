@@ -1,3 +1,4 @@
+using Lycia.Infrastructure.Extensions;
 using Lycia.Messaging;
 using Lycia.Messaging.Enums;
 using Lycia.Saga.Abstractions;
@@ -49,7 +50,7 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider) : ISa
                 // If no handler found, try to find candidate handlers using the new method
                 var handlers = serviceProvider.GetServices(onlySagaCompensationHandlerType).Cast<object>()
                     .Concat(FindCompensationHandlers(stepType)) // ISagaCompensationHandler<> + ISagaStartHandler<> and ISagaHandler<>
-                    .DistinctBy(h => h.GetType())
+                    .DistinctByKey(h => h.GetType())
                     .ToList();
 
                 foreach (var handler in handlers)

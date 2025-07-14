@@ -203,7 +203,7 @@ public class SagaSagaStoreTests
 
         public Task Publish<TEvent>(TEvent @event, Type handlerType, Guid? sagaId = null, CancellationToken cancellationToken = default) where TEvent : IEvent => Task.CompletedTask;
 
-        public IAsyncEnumerable<(byte[] Body, Type MessageType)> ConsumeAsync(CancellationToken cancellationToken)
+        public IAsyncEnumerable<(byte[] Body, Type MessageType)> ConsumeAsync(bool autoAck = true, CancellationToken cancellationToken = default)
         {
             return default;
         }
