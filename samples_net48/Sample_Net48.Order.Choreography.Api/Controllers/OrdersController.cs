@@ -7,6 +7,10 @@ namespace Sample_Net48.Order.Choreography.Api.Controllers
 {
     public class OrdersController : ApiController
     {
+        public OrdersController()
+        {
+            
+        }
         private readonly IEventBus _eventBus;
 
         public OrdersController(IEventBus eventBus)
