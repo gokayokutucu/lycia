@@ -3,14 +3,25 @@ using Lycia.Messaging;
 namespace Lycia.Saga.Helpers;
 
 /// <summary>
-/// RoutingKeyHelper provides methods for generating routing key strings used for exchange and queue naming conventions.
+/// MessagingNamingHelper provides methods for generating naming conventions used for exchanges, queues, routing keys, and other message-related identifiers.
 /// 
-/// IMPORTANT: Routing keys must be unique enough to prevent cross-service message delivery conflicts in distributed saga/event-driven architectures.
+/// This helper is designed for distributed event-driven architectures such as Saga, DDD, CQRS, and similar patterns.
+/// It ensures consistent and unique naming conventions for message routing, queue binding, and exchange declarations.
+/// 
+/// IMPORTANT: Naming conventions must be unique enough to prevent cross-service message delivery conflicts.
 /// - Always ensure handlerType and applicationId are unique per service or consumer.
 /// - Failing to do so may cause multiple consumers to receive the same message or, worse, messages to be lost or misrouted.
 /// - Do NOT hardcode applicationId or handler names across different services.
 /// </summary>
-public static class RoutingKeyHelper
+/// <remarks>
+/// Usage:
+/// - Use this helper for generating routing keys for both producers and consumers.
+/// - Use for exchange and queue naming to maintain consistency across services.
+/// 
+/// Extensibility:
+/// - This class can be extended in the future to support additional naming strategies, such as topics, dead-letter queues (DLQ), or other messaging patterns.
+/// </remarks>
+public static class MessagingNamingHelper
 {
     /// <summary>
     /// Returns a unique routing key for the given message type, handler type, and application/service instance.
@@ -28,7 +39,7 @@ public static class RoutingKeyHelper
     /// <param name="handlerType">Type of the handler class consuming this message.</param>
     /// <param name="applicationId">A unique application or consumer/service identifier.</param>
     /// <returns>Unique routing key for queue/exchange binding.</returns>
-    public static string GetRoutingKey(Type messageType, Type handlerType, string applicationId)
+    public static string GetRoutingKey(Type messageType, Type handlerType, string? applicationId)
     {
         if (string.IsNullOrWhiteSpace(applicationId))
             throw new ArgumentException("ApplicationId cannot be null or empty", nameof(applicationId));
@@ -70,7 +81,7 @@ public static class RoutingKeyHelper
     /// </summary>
     /// <param name="messageType">Type of the message to be published.</param>
     /// <returns>Topic routing key pattern for exchange publishing.</returns>
-    public static string GetRoutingKey(Type messageType)
+    public static string GetTopicRoutingKey(Type messageType)
     {
         string prefix;
         if (messageType.IsSubclassOf(typeof(EventBase)))
@@ -88,5 +99,25 @@ public static class RoutingKeyHelper
 
         // Full format: event.OrderCreatedEvent.#
         return $"{prefix}.{messageType.Name}.#";
+    }
+    
+    /// <summary>
+    /// Returns the exchange name for the given message type.
+    /// Format: "{event|command|message}.{MessageType}"
+    /// 
+    /// Use this for exchange declaration and binding.
+    /// </summary>
+    /// <param name="messageType">Type of the message.</param>
+    /// <returns>Exchange name string.</returns>
+    public static string GetExchangeName(Type messageType)
+    {
+        string prefix;
+        if (messageType.IsSubclassOf(typeof(EventBase)))
+            prefix = "event";
+        else if (messageType.IsSubclassOf(typeof(CommandBase)))
+            prefix = "command";
+        else
+            prefix = "message";
+        return $"{prefix}.{messageType.Name}";
     }
 }

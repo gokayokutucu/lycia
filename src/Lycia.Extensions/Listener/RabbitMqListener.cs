@@ -21,7 +21,7 @@ public class RabbitMqListener(
 
         var sagaDispatcher = scope.ServiceProvider.GetRequiredService<ISagaDispatcher>();
         
-        await foreach (var (body, messageType) in eventBus.ConsumeAsync(stoppingToken))
+        await foreach (var (body, messageType) in eventBus.ConsumeAsync(cancellationToken:stoppingToken))
         {
             if (stoppingToken.IsCancellationRequested)
                 break;
