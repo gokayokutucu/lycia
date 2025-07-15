@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{C424F10D-9A5A-40C6-9BAA-CDE9DFBA7075}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>Sample_Net481.Shared</RootNamespace>
+    <AssemblyName>Sample_Net481.Shared</AssemblyName>
+    <TargetFrameworkVersion>v4.8.1</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Messages\Commands\CreateOrderCommand.cs" />
+    <Compile Include="Messages\Commands\ShipOrderCommand.cs" />
+    <Compile Include="Messages\Events\OrderCreatedEvent.cs" />
+    <Compile Include="Messages\Events\OrderDeliveredEvent.cs" />
+    <Compile Include="Messages\Events\OrderShippedEvent.cs" />
+    <Compile Include="Messages\Events\OrderShippingFailedEvent.cs" />
+    <Compile Include="Messages\Responses\OrderCreatedResponse.cs" />
+    <Compile Include="Messages\Responses\OrderDeliveredResponse.cs" />
+    <Compile Include="Messages\Responses\OrderShippedResponse.cs" />
+    <Compile Include="Messages\Sagas\AuditOrderSagaHandler.cs" />
+    <Compile Include="Messages\Sagas\DeliverOrderSagaHandler.cs" />
+    <Compile Include="Messages\Sagas\OrderSagaData.cs" />
+    <Compile Include="Messages\Sagas\ShipOrderForCompensationSagaHandler.cs" />
+    <Compile Include="Messages\Sagas\ShipOrderSagaHandler.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Lycia.Messaging\Lycia.Messaging.csproj">
+      <Project>{bd73c6ec-e726-4b73-9f7b-f10e06b2d6c3}</Project>
+      <Name>Lycia.Messaging</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\..\..\src\Lycia.Saga\Lycia.Saga.csproj">
+      <Project>{a49dceda-15c8-410a-9ecd-229644de5559}</Project>
+      <Name>Lycia.Saga</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

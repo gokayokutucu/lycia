@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.36221.1 d17.14
+VisualStudioVersion = 17.14.36221.1
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Messaging", "src\Lycia.Messaging\Lycia.Messaging.csproj", "{BD73C6EC-E726-4B73-9F7B-F10E06B2D6C3}"
 EndProject
@@ -32,6 +32,14 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample_Net48.Order.Choreography.Api", "samples_net48z\samples_net48\Sample_Net48.Order.Choreography.Api\Sample_Net48.Order.Choreography.Api.csproj", "{A4F8B432-F504-4E8D-86A5-47F8C0C3B8F2}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample_Net48.Shared", "samples_net48z\samples_net48\Sample_Net48.Shared\Sample_Net48.Shared.csproj", "{88BA340C-179E-450B-AF20-C6C5CD9FA7BF}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "samples_net48", "samples_net48", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample_Net481.Order.Choreography.Api", "samples_net48z\samples_net481\Sample_Net481\Sample_Net481.Order.Choreography.Api.csproj", "{8158F1A4-A23C-4F83-A2FD-3368CF857A24}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "samples_net481", "samples_net481", "{28F6A32B-31B7-4D8D-9552-0D5D9B41F2F7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample_Net481.Shared", "samples_net48z\samples_net481\Sample_Net481.Shared\Sample_Net481.Shared.csproj", "{C424F10D-9A5A-40C6-9BAA-CDE9DFBA7075}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -87,6 +95,14 @@ Global
 		{88BA340C-179E-450B-AF20-C6C5CD9FA7BF}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{88BA340C-179E-450B-AF20-C6C5CD9FA7BF}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{88BA340C-179E-450B-AF20-C6C5CD9FA7BF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8158F1A4-A23C-4F83-A2FD-3368CF857A24}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8158F1A4-A23C-4F83-A2FD-3368CF857A24}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8158F1A4-A23C-4F83-A2FD-3368CF857A24}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8158F1A4-A23C-4F83-A2FD-3368CF857A24}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C424F10D-9A5A-40C6-9BAA-CDE9DFBA7075}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C424F10D-9A5A-40C6-9BAA-CDE9DFBA7075}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C424F10D-9A5A-40C6-9BAA-CDE9DFBA7075}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C424F10D-9A5A-40C6-9BAA-CDE9DFBA7075}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -102,5 +118,12 @@ Global
 		{3F72F5DD-76D9-4899-A920-736D82D06603} = {39547434-F68A-4275-8482-B1EB3CFC8F02}
 		{B2AE5013-780F-4387-970E-F7BAD9D26332} = {39547434-F68A-4275-8482-B1EB3CFC8F02}
 		{454B7D73-55D4-4AD2-B8BD-25B0D4A0AD94} = {BC1E10B1-10E1-456F-9496-6DA354303160}
+		{A4F8B432-F504-4E8D-86A5-47F8C0C3B8F2} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
+		{88BA340C-179E-450B-AF20-C6C5CD9FA7BF} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
+		{8158F1A4-A23C-4F83-A2FD-3368CF857A24} = {28F6A32B-31B7-4D8D-9552-0D5D9B41F2F7}
+		{C424F10D-9A5A-40C6-9BAA-CDE9DFBA7075} = {28F6A32B-31B7-4D8D-9552-0D5D9B41F2F7}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {38C89D67-D8DB-469C-82CA-0CF473B03527}
 	EndGlobalSection
 EndGlobal
