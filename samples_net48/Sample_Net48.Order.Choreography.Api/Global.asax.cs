@@ -1,6 +1,8 @@
 ﻿using Lycia.Extensions;
+using Lycia.Saga.Abstractions;
 using Lycia.Saga.Extensions;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
 using System.Linq;
 using System.Web.Http;
@@ -17,6 +19,7 @@ namespace Sample_Net48.Order.Choreography.Api
         protected void Application_Start()
         {
             var services = new ServiceCollection();
+            services.AddLogging();
 
             var configBuilder = new ConfigurationBuilder()
             .AddInMemoryCollection(
