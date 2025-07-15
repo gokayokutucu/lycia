@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using Lycia.Messaging;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Common;
@@ -24,6 +25,9 @@ public static class SagaHandlerRegistrationExtensions
     /// <returns>The updated service collection.</returns>
     public static ILyciaServiceCollection AddSaga(this ILyciaServiceCollection serviceCollection, Type? handlerType)
     {
+        var appId = serviceCollection.Configuration!["ApplicationId"] ??
+                    throw new InvalidOperationException("ApplicationId is not configured.");
+        
         RegisterSagaHandler(serviceCollection.Services, handlerType);
 
         if (handlerType != null)
@@ -31,7 +35,7 @@ public static class SagaHandlerRegistrationExtensions
             var messageTypes = GetMessageTypesFromHandler(handlerType);
             foreach (var messageType in messageTypes)
             {
-                var routingKey = RoutingKeyHelper.GetRoutingKey(messageType);
+                var routingKey = MessagingNamingHelper.GetRoutingKey(messageType, handlerType, appId);
                 serviceCollection.QueueTypeMap[routingKey] = messageType;
             }
         }
@@ -47,16 +51,19 @@ public static class SagaHandlerRegistrationExtensions
     /// <returns>The updated service collection.</returns>
     public static ILyciaServiceCollection AddSagas(this ILyciaServiceCollection serviceCollection, params Type?[] handlerTypes)
     {
-        foreach (var type in handlerTypes)
+        var appId = serviceCollection.Configuration!["ApplicationId"] ??
+                    throw new InvalidOperationException("ApplicationId is not configured.");
+        
+        foreach (var handlerType in handlerTypes)
         {
-            RegisterSagaHandler(serviceCollection.Services, type);
+            RegisterSagaHandler(serviceCollection.Services, handlerType);
 
-            if (type != null)
+            if (handlerType != null)
             {
-                var messageTypes = GetMessageTypesFromHandler(type);
+                var messageTypes = GetMessageTypesFromHandler(handlerType);
                 foreach (var messageType in messageTypes)
                 {
-                    var routingKey = RoutingKeyHelper.GetRoutingKey(messageType);
+                    var routingKey = MessagingNamingHelper.GetRoutingKey(messageType, handlerType, appId);
                     serviceCollection.QueueTypeMap[routingKey] = messageType;
                 }
             }
@@ -99,24 +106,25 @@ public static class SagaHandlerRegistrationExtensions
     public static ILyciaServiceCollection AddSagasFromAssemblies(this ILyciaServiceCollection serviceCollection,
         params Assembly[] assemblies)
     {
+        var appId = serviceCollection.Configuration!["ApplicationId"] ??
+                    throw new InvalidOperationException("ApplicationId is not configured.");
+        
         foreach (var assembly in assemblies)
         {
-            IEnumerable<Type?> types = assembly.GetTypes().Where(t =>
+            IEnumerable<Type?> handlerTypes = assembly.GetTypes().Where(t =>
                 t is { IsAbstract: false, IsInterface: false } &&
                 (IsSagaHandlerBase(t) || ImplementsAnySagaInterface(t))
             );
-            foreach (var type in types)
+            foreach (var handlerType in handlerTypes)
             {
-                RegisterSagaHandler(serviceCollection.Services, type);
+                RegisterSagaHandler(serviceCollection.Services, handlerType);
 
-                if (type != null)
+                if (handlerType == null) continue;
+                var messageTypes = GetMessageTypesFromHandler(handlerType);
+                foreach (var messageType in messageTypes)
                 {
-                    var messageTypes = GetMessageTypesFromHandler(type);
-                    foreach (var messageType in messageTypes)
-                    {
-                        var routingKey = RoutingKeyHelper.GetRoutingKey(messageType);
-                        serviceCollection.QueueTypeMap[routingKey] = messageType;
-                    }
+                    var routingKey = MessagingNamingHelper.GetRoutingKey(messageType, handlerType, appId);
+                    serviceCollection.QueueTypeMap[routingKey] = messageType;
                 }
             }
         }
@@ -249,7 +257,7 @@ public static class SagaHandlerRegistrationExtensions
         }
     }
     
-    public static Dictionary<string, Type> DiscoverQueueTypeMap(string applicationId, params Assembly[] assemblies)
+    public static Dictionary<string, Type> DiscoverQueueTypeMap(string? applicationId, params Assembly[] assemblies)
     {
         var handlerTypes = assemblies
             .SelectMany(a => a.GetTypes())
@@ -273,7 +281,7 @@ public static class SagaHandlerRegistrationExtensions
             var messageTypes = GetMessageTypesFromHandler(handlerType);
             foreach (var messageType in messageTypes)
             {
-                var routingKey = RoutingKeyHelper.GetRoutingKey(messageType, handlerType, applicationId);
+                var routingKey = MessagingNamingHelper.GetRoutingKey(messageType, handlerType, applicationId);
                 queueTypeMap[routingKey] = messageType;
             }
         }
