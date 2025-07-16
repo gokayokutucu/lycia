@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
+        <TargetFramework>net9.0</TargetFramework>
         <LangVersion>preview</LangVersion>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
@@ -26,6 +26,7 @@
     <ItemGroup>
       <ProjectReference Include="..\..\src\Lycia.Extensions\Lycia.Extensions.csproj" />
       <ProjectReference Include="..\..\src\Lycia.Saga\Lycia.Saga.csproj" />
+      <ProjectReference Include="..\Lycia.Tests.Helpers\Lycia.Tests.Helpers.csproj" />
     </ItemGroup>
 
 </Project>

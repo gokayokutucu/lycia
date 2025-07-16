@@ -1,8 +1,6 @@
-using System.Text.Json;
-using Lycia.Messaging;
 using Lycia.Saga;
 
-namespace Lycia.Tests.Helper;
+namespace Lycia.Tests.Helpers;
 
 public static class SagaDispatcherTestHelper
 {
