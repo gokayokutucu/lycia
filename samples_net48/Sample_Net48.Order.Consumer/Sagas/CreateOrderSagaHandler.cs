@@ -1,7 +1,8 @@
-using Lycia.Saga.Handlers;
+﻿using Lycia.Saga.Handlers;
 using Sample_Net48.Shared.Messages.Commands;
 using Sample_Net48.Shared.Messages.Events;
 using System;
+using System.Runtime.Remoting.Contexts;
 using System.Threading.Tasks;
 
 namespace Sample_Net48.Order.Consumer.Sagas
@@ -16,7 +17,7 @@ namespace Sample_Net48.Order.Consumer.Sagas
         /// For test purposes, we can check if the compensation was called.
         /// </summary>
         public bool CompensateCalled { get; private set; }
-    
+
         public override async Task HandleStartAsync(CreateOrderCommand command)
         {
             // Publish the success response event
@@ -50,7 +51,7 @@ namespace Sample_Net48.Order.Consumer.Sagas
             {
                 // Log, notify, halt chain, etc.
                 Console.WriteLine($"❌ Compensation failed: {ex.Message}");
-            
+
                 await Context.MarkAsCompensationFailed<CreateOrderCommand>();
                 // Optionally: rethrow or store for manual retry
                 throw; // Or suppress and log for retry system

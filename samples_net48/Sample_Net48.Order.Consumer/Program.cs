@@ -1,47 +1,25 @@
-﻿using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using System;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
-using Lycia.Saga.Extensions;
-using Lycia.Extensions;
+using System.ServiceProcess;
+using System.Text;
+using System.Threading.Tasks;
 
 namespace Sample_Net48.Order.Consumer
 {
-    public static class Program
+    internal static class Program
     {
-        static void Main(string[] args)
+        /// <summary>
+        /// The main entry point for the application.
+        /// </summary>
+        static void Main()
         {
-            var isService = !(Environment.UserInteractive || args.Contains("--console"));
-
-            var builder = new HostBuilder()
-                .UseContentRoot(AppDomain.CurrentDomain.BaseDirectory)
-                .ConfigureAppConfiguration((hostContext, config) =>
-                {
-                    config.SetBasePath(AppDomain.CurrentDomain.BaseDirectory);
-                    config.AddJsonFile("appsettings.json", optional: true);
-                    config.AddEnvironmentVariables();
-                })
-                .ConfigureServices((hostContext, services) =>
-                {
-                    services
-                        .AddLogging(configure => configure.AddConsole())
-                        .AddLycia(hostContext.Configuration)
-                        .AddSagasFromCurrentAssembly();
-                });
-
-            if (isService)
+            ServiceBase[] ServicesToRun;
+            ServicesToRun = new ServiceBase[]
             {
-                builder.UseWindowsService();
-            }
-            else
-            {
-                builder.UseConsoleLifetime();
-            }
-
-            var host = builder.Build();
-            host.Run();
+                new OrderWorker()
+            };
+            ServiceBase.Run(ServicesToRun);
         }
     }
 }

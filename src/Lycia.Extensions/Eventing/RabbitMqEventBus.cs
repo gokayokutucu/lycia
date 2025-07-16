@@ -198,6 +198,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             queueArgs[XMesssageTtl] = (int)ttl.TotalMilliseconds;
         }
         // Ensure queue is declared with DLQ/DLX and TTL args (idempotent)
+#if NET6_0_OR_GREATER
         await _channel.QueueDeclareAsync(
             queue: queueName,
             durable: true,
@@ -205,6 +206,14 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             autoDelete: false,
             arguments: queueArgs.Count > 0 ? queueArgs : null,
             cancellationToken: cancellationToken);
+#else
+        _channel.QueueDeclare(
+            queue: queueName,
+            durable: true,
+            exclusive: false,
+            autoDelete: false,
+            arguments: queueArgs.Count > 0 ? queueArgs : null);
+#endif
 
         var headers = RabbitMqEventBusHelper.BuildMessageHeaders(command, sagaId, typeof(TCommand), Constants.CommandTypeHeader);
 #if NET6_0_OR_GREATER
@@ -450,6 +459,7 @@ consumer.ReceivedAsync += async (_, ea) =>
             };
 #endif
 #if NET6_0_OR_GREATER
+            await _channel.BasicConsumeAsync(
                     queue: queueName,
                     autoAck: true,
                     consumer: consumer, cancellationToken: cancellationToken); 
@@ -459,7 +469,6 @@ consumer.ReceivedAsync += async (_, ea) =>
                     autoAck: autoAck,
                     consumer: consumer);
 #endif
-                consumer: consumer, cancellationToken: cancellationToken);
 
             _consumers.Add(consumer);
         }
@@ -477,9 +486,10 @@ consumer.ReceivedAsync += async (_, ea) =>
     {
         var dlxExchange = $"{queueName}.dlx";
         var dlqName = $"{queueName}.dlq";
-        
-        
+
+
         // DLX (Dead Letter Exchange) declare
+#if NET6_0_OR_GREATER
         await _channel!.ExchangeDeclareAsync(
             exchange: dlxExchange,
             type: ExchangeType.Direct,
@@ -487,23 +497,48 @@ consumer.ReceivedAsync += async (_, ea) =>
             autoDelete: false,
             arguments: null,
             cancellationToken: cancellationToken);
+#else
+        _channel!.ExchangeDeclare(
+            exchange: dlxExchange,
+            type: ExchangeType.Direct,
+            durable: true,
+            autoDelete: false,
+            arguments: null);
+#endif
 
         // DLQ (Dead Letter Queue) declare
+#if NET6_0_OR_GREATER
         await _channel!.QueueDeclareAsync(
-            queue: dlqName,
-            durable: true,
-            exclusive: false,
-            autoDelete: false,
-            arguments: null,
-            cancellationToken: cancellationToken);
+           queue: dlqName,
+           durable: true,
+           exclusive: false,
+           autoDelete: false,
+           arguments: null,
+           cancellationToken: cancellationToken);
+#else
+        _channel!.QueueDeclare(
+           queue: dlqName,
+           durable: true,
+           exclusive: false,
+           autoDelete: false,
+           arguments: null);
+#endif
 
         // DLQ binding
+#if NET6_0_OR_GREATER
         await _channel!.QueueBindAsync(
             queue: dlqName,
             exchange: dlxExchange,
             routingKey: dlqName,
             arguments: null,
             cancellationToken: cancellationToken);
+#else
+        _channel!.QueueBind(
+            queue: dlqName,
+            exchange: dlxExchange,
+            routingKey: dlqName,
+            arguments: null);
+#endif
 
         return new Dictionary<string, object?>
         {

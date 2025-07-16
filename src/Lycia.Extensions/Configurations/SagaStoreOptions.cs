@@ -2,7 +2,7 @@ namespace Lycia.Extensions.Configurations;
 
 public class SagaStoreOptions
 {
-#if NET8_0_OR_GREATER
+#if NET5_0_OR_GREATER
 	public string? ApplicationId { get; init; }
 	public TimeSpan? StepLogTtl { get; init; } = TimeSpan.FromSeconds(Constants.Ttl); 
 #else
