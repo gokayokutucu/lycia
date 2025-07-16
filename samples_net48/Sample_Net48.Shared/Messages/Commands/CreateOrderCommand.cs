@@ -1,15 +1,16 @@
 ﻿using Lycia.Messaging;
+using Sample_Net48.Shared.Messages.Dtos;
 using System;
+using System.Collections.Generic;
 
 namespace Sample_Net48.Shared.Messages.Commands
 {
-    /// <summary>
-    /// Command to initiate an order creation saga.
-    /// </summary>
     public class CreateOrderCommand : CommandBase
     {
-        public Guid OrderId { get; set; } = Guid.NewGuid();
-        public Guid UserId { get; set; }
-        public decimal TotalPrice { get; set; }
+        public Guid OrderId { get; set; }
+        public Guid CustomerId { get; set; }
+        public string ShippingAddress { get; set; } = string.Empty;
+        public decimal OrderTotal { get; set; }
+        public List<OrderItemDto> Items { get; set; } = new List<OrderItemDto>();
     }
 }

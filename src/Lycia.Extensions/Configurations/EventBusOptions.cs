@@ -2,7 +2,7 @@ namespace Lycia.Extensions.Configurations;
 
 public class EventBusOptions
 {
-#if NET8_0_OR_GREATER
+#if NET5_0_OR_GREATER
     public string? ApplicationId { get; init; }
     public TimeSpan? MessageTTL { get; init; } = TimeSpan.FromSeconds(Constants.Ttl);
     //Dead Letter Queue (DLQ) TTL must be same or no longer than MessageTTL
