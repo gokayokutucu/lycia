@@ -9,7 +9,7 @@ using Lycia.Saga;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Extensions;
 using Lycia.Saga.Handlers;
-using Lycia.Tests.Helper;
+using Lycia.Tests.Helpers;
 using Lycia.Tests.Sagas;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;

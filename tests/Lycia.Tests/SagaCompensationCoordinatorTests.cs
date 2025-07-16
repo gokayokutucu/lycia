@@ -6,6 +6,7 @@ using Lycia.Messaging;
 using Lycia.Saga.Abstractions;
 using Lycia.Messaging.Enums;
 using Lycia.Saga.Extensions;
+using Lycia.Tests.Helpers;
 using Lycia.Tests.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;

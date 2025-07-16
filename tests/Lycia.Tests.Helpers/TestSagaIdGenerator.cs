@@ -1,7 +1,7 @@
 using Lycia.Messaging.Utility;
 using Lycia.Saga.Extensions;
 
-namespace Lycia.Tests;
+namespace Lycia.Tests.Helpers;
 
 /// <summary>
 /// Provides a consistent SagaId for testing purposes.
