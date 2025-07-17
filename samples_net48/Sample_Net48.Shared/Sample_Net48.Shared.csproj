@@ -54,11 +54,6 @@
     <Compile Include="Messages\Events\ShipmentScheduleFailedEvent.cs" />
     <Compile Include="Messages\Events\StockReservationFailedEvent.cs" />
     <Compile Include="Messages\Events\StockReservedEvent.cs" />
-    <Compile Include="Messages\Sagas\CreatedOrderSagaHandler.cs" />
-    <Compile Include="Messages\Sagas\NotifyPaymentOfUserSagaHandler.cs" />
-    <Compile Include="Messages\Sagas\ProcessPaymentSagaHandler.cs" />
-    <Compile Include="Messages\Sagas\ReserveStockSagaHandler.cs" />
-    <Compile Include="Messages\Sagas\ScheduleShipmentSagaHandler.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

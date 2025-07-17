@@ -4,7 +4,7 @@ using Sample_Net48.Shared.Messages.Events;
 using System;
 using System.Threading.Tasks;
 
-namespace Sample_Net48.Shared.Messages.Sagas
+namespace Sample_Net48.Order.Choreography.Api.Sagas
 {
     public class NotifyPaymentOfUserSagaHandler : ReactiveSagaHandler<PaymentProcessedEvent>
     {
