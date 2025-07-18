@@ -43,11 +43,11 @@ public static class MessagingNamingHelper
     {
         if (string.IsNullOrWhiteSpace(applicationId))
             throw new ArgumentException("ApplicationId cannot be null or empty", nameof(applicationId));
-#if NET6_0_OR_GREATER
-        ArgumentNullException.ThrowIfNull(handlerType); 
-#else
+#if NETSTANDARD2_0
         if (handlerType is null)
             throw new ArgumentNullException(nameof(handlerType), "Handler type cannot be null");
+#else
+        ArgumentNullException.ThrowIfNull(handlerType); 
 #endif
 
         string prefix;
@@ -67,7 +67,7 @@ public static class MessagingNamingHelper
         // Full format: event.OrderCreatedEvent.CreateOrderSagaHandler.OrderService
         return $"{prefix}.{messageType.Name}.{handlerType.Name}.{applicationId}";
     }
-    
+
     /// <summary>
     /// Returns a topic routing key pattern for publishing messages.
     /// Format: "{event|command|message}.{MessageType}.#"
@@ -100,7 +100,7 @@ public static class MessagingNamingHelper
         // Full format: event.OrderCreatedEvent.#
         return $"{prefix}.{messageType.Name}.#";
     }
-    
+
     /// <summary>
     /// Returns the exchange name for the given message type.
     /// Format: "{event|command|message}.{MessageType}"

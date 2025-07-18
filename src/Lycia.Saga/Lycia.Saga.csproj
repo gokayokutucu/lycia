@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-		<TargetFrameworks>net48;netstandard2.0;net6.0;net7.0;net8.0;net9.0</TargetFrameworks>
+		<TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
 		<GenerateReferenceAssembly>false</GenerateReferenceAssembly>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
@@ -9,22 +9,18 @@
 		<LangVersion>preview</LangVersion>
 	</PropertyGroup>
 
+	<ItemGroup>
+	  <PackageReference Include="Autofac" Version="7.1.0" />
+	  <PackageReference Include="Autofac.Extensions.DependencyInjection" Version="8.0.0" />
+	  <PackageReference Include="Autofac.WebApi2" Version="6.1.1" />
+	</ItemGroup>
+
 	<!--    <PropertyGroup Condition="'$(BuildingTests)' == 'true'">-->
 	<!--        <DefineConstants>$(DefineConstants);UNIT_TESTING</DefineConstants>-->
 	<!--    </PropertyGroup>-->
 
 	<ItemGroup>
 		<ProjectReference Include="..\Lycia.Messaging\Lycia.Messaging.csproj" />
-	</ItemGroup>
-
-	<!-- net48 -->
-	<ItemGroup Condition="'$(TargetFramework)' == 'net48'">
-		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="6.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="6.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Primitives" Version="6.0.0" />
-		<PackageReference Include="Scrutor" Version="4.2.2" />
-		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-		<PackageReference Include="System.Configuration.ConfigurationManager" Version="6.0.0" />
 	</ItemGroup>
 
 	<!-- netstandard2.0 -->
@@ -35,26 +31,6 @@
 		<PackageReference Include="Scrutor" Version="4.2.2" />
 		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
 		<PackageReference Include="System.Configuration.ConfigurationManager" Version="6.0.0" />
-	</ItemGroup>
-
-	<!-- net6.0 -->
-	<ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
-		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
-		<PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="8.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Primitives" Version="8.0.0" />
-		<PackageReference Include="Scrutor" Version="6.1.0" />
-		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-		<PackageReference Include="System.Configuration.ConfigurationManager" Version="7.0.0" />
-	</ItemGroup>
-
-	<!-- net7.0 -->
-	<ItemGroup Condition="'$(TargetFramework)' == 'net7.0'">
-		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
-		<PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="8.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Primitives" Version="8.0.0" />
-		<PackageReference Include="Scrutor" Version="6.1.0" />
-		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-		<PackageReference Include="System.Configuration.ConfigurationManager" Version="7.0.0" />
 	</ItemGroup>
 
 	<!-- net8.0 -->

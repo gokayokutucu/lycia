@@ -16,7 +16,7 @@ public abstract class ResponseBase<TPrevious> :
 #if NET9_0_OR_GREATER
         MessageId = Guid.CreateVersion7(); 
 #else
-        MessageId = GuidExtensions.CreateVersion7();
+        MessageId = GuidV7.NewGuidV7();
 #endif
         ParentMessageId = parentMessageId ?? Guid.Empty;
         CorrelationId = correlationId ?? MessageId;
@@ -24,18 +24,18 @@ public abstract class ResponseBase<TPrevious> :
         ApplicationId  = EventMetadata.ApplicationId;
     }
 
-#if NET5_0_OR_GREATER
-    public Guid MessageId { get; init; }
-    public Guid ParentMessageId { get; init; }
-    public DateTime Timestamp { get; init; }
-    public string ApplicationId { get; init; }
-    public Guid CorrelationId { get; init; } 
-#else
+#if NETSTANDARD2_0
     public Guid MessageId { get; set; }
     public Guid ParentMessageId { get; set; }
     public DateTime Timestamp { get; set; }
     public string ApplicationId { get; set; }
     public Guid CorrelationId { get; set; }
+#else
+    public Guid MessageId { get; init; }
+    public Guid ParentMessageId { get; init; }
+    public DateTime Timestamp { get; init; }
+    public string ApplicationId { get; init; }
+    public Guid CorrelationId { get; init; } 
 #endif
     public Guid? SagaId { get; set; }
 #if UNIT_TESTING
