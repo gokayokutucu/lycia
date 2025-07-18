@@ -2,7 +2,7 @@ using Lycia.Saga;
 
 namespace Lycia.Tests.Helpers;
 
-public static class SagaDispatcherTestHelper
+public static class SagaTestHelper
 {
     public static Guid? GetMessageId<TMessage, THandler>(IReadOnlyDictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata> steps)
         where TMessage : class
