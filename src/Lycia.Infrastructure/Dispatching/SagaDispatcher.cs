@@ -1,3 +1,4 @@
+using Lycia.Infrastructure.Helpers;
 using Lycia.Messaging;
 using Lycia.Saga;
 using Lycia.Saga.Abstractions;
@@ -23,26 +24,24 @@ public class SagaDispatcher(
     {
         var messageType = message.GetType();
 
-        var startHandlerType = typeof(ISagaStartHandler<>).MakeGenericType(messageType);
-        var startHandlers = serviceProvider.GetServices(startHandlerType).ToList();
-        if (startHandlers.Count != 0)
+        var startHandlers = SagaHandlerHelper.FindSagaStartHandlers(serviceProvider, messageType);
+        var startHandlersList = startHandlers.ToList();
+        if (startHandlersList.Count != 0)
         {
-            Console.WriteLine($"[Dispatch] Dispatching {messageType.Name} to start handler: {startHandlerType.Name}");
-            await InvokeHandlerAsync(startHandlers, message);
+            await InvokeHandlerAsync(startHandlersList, message);
         }
 
-        var stepHandlerType = typeof(ISagaHandler<>).MakeGenericType(messageType);
-        var stepHandlers = serviceProvider.GetServices(stepHandlerType).ToList();
-        if (stepHandlers.Count != 0)
+        var stepHandlers = SagaHandlerHelper.FindSagaHandlers(serviceProvider, messageType);
+        var stepHandlersList = stepHandlers.ToList();
+        if (stepHandlersList.Count != 0)
         {
-            Console.WriteLine($"[Dispatch] Dispatching {messageType.Name} to step handler: {stepHandlerType.Name}");
-            await InvokeHandlerAsync(stepHandlers, message);
+            await InvokeHandlerAsync(stepHandlersList, message);
         }
     }
 
-    public async Task DispatchAsync<TMessage>(TMessage command) where TMessage : IMessage
+    public async Task DispatchAsync<TMessage>(TMessage message) where TMessage : IMessage
     {
-        await DispatchByMessageTypeAsync(command);
+        await DispatchByMessageTypeAsync(message);
     }
 
     public async Task DispatchAsync<TMessage, TResponse>(TResponse message)

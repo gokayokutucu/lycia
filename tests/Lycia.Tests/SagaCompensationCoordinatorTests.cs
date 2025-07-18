@@ -313,7 +313,7 @@ public class SagaCompensationCoordinatorTests
 
         var store = new InMemorySagaStore(eventBusMock, sagaIdGen, dummyCoordinator);
 
-        // ÖNEMLİ: Burada proxy/Mock tipini değil interface tipini kullanıyoruz!
+        // IMPORTANT: Use the same type as the handler expects
         var stepType = typeof(DummyEvent);
         var handlerType = typeof(ISagaCompensationHandler<DummyEvent>);
         var payload = new DummyEvent()
@@ -331,7 +331,7 @@ public class SagaCompensationCoordinatorTests
             Guid.Empty,
             stepType,
             StepStatus.Failed, // Triggering compensation set failed or another proper status
-            handlerType, // Burada interface kullanıldı!
+            handlerType, // Used an interface type for the handler
             payload);
 
         services.AddSingleton<ISagaStore>(store);
@@ -535,39 +535,6 @@ public class SagaCompensationCoordinatorTests
         public Task CompensateAsync(DummyEvent message)
         {
             Called = true;
-            return Task.CompletedTask;
-        }
-    }
-
-    private class GrandparentCompensationHandler : ISagaCompensationHandler<DummyEvent>
-    {
-        public static readonly List<string> Invocations = [];
-
-        public Task CompensateAsync(DummyEvent message)
-        {
-            Invocations.Add(nameof(GrandparentCompensationHandler));
-            return Task.CompletedTask;
-        }
-    }
-
-    private class ParentCompensationHandler : ISagaCompensationHandler<DummyEvent>
-    {
-        public static readonly List<string> Invocations = [];
-
-        public Task CompensateAsync(DummyEvent message)
-        {
-            Invocations.Add(nameof(ParentCompensationHandler));
-            return Task.CompletedTask;
-        }
-    }
-
-    private class ChildCompensationHandler : ISagaCompensationHandler<DummyEvent>
-    {
-        public static readonly List<string> Invocations = [];
-
-        public Task CompensateAsync(DummyEvent message)
-        {
-            Invocations.Add(nameof(ChildCompensationHandler));
             return Task.CompletedTask;
         }
     }

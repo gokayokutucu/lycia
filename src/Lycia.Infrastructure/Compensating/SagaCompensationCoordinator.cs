@@ -1,4 +1,5 @@
 using Lycia.Infrastructure.Extensions;
+using Lycia.Infrastructure.Helpers;
 using Lycia.Messaging;
 using Lycia.Messaging.Enums;
 using Lycia.Saga.Abstractions;
@@ -49,7 +50,7 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider) : ISa
                 var onlySagaCompensationHandlerType = typeof(ISagaCompensationHandler<>).MakeGenericType(stepType);
                 // If no handler found, try to find candidate handlers using the new method
                 var handlers = serviceProvider.GetServices(onlySagaCompensationHandlerType).Cast<object>()
-                    .Concat(FindCompensationHandlers(stepType)) // ISagaCompensationHandler<> + ISagaStartHandler<> and ISagaHandler<>
+                    .Concat(SagaHandlerHelper.FindCompensationHandlers(serviceProvider, stepType)) // ISagaCompensationHandler<> + ISagaStartHandler<> and ISagaHandler<>
                     .DistinctByKey(h => h.GetType())
                     .ToList();
 
@@ -154,7 +155,7 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider) : ISa
             var handlers = serviceProvider.GetServices(onlySagaCompensationHandlerType);
             var handler = handlers.Cast<object>()
                               .FirstOrDefault(h => h.GetType().FullName == parentStep.Key.handlerType)
-                          ?? FindCompensationHandlers(parentStepType)
+                          ?? SagaHandlerHelper.FindCompensationHandlers(serviceProvider, parentStepType)
                               .FirstOrDefault(h => h.GetType().FullName == parentStep.Key.handlerType);
 
 
@@ -204,87 +205,5 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider) : ISa
             // Log ve error handle the exception appropriately
             throw;
         }
-    }
-
-    /// <summary>
-    /// Finds all candidate compensation handlers for a given message type.
-    /// It collects all registered ISagaStartHandler<>, ISagaHandler<>, and ISagaCompensationHandler<> services,
-    /// then filters those whose types are subclasses of known saga handler base types or implement ISagaCompensationHandler<> for the message type.
-    /// Duplicate handler types are removed.
-    /// </summary>
-    /// <param name="messageType">The message type to find handlers for.</param>
-    /// <returns>An enumerable of handler instances.</returns>
-    private IEnumerable<object> FindCompensationHandlers(Type messageType)
-    {
-        var knownBaseTypes = new[]
-        {
-            typeof(ReactiveSagaHandler<>),
-            typeof(StartReactiveSagaHandler<>),
-            typeof(CoordinatedSagaHandler<,,>),
-            typeof(StartCoordinatedSagaHandler<,,>)
-        };
-
-        var handlerInterfaces = new[]
-        {
-            typeof(ISagaStartHandler<>).MakeGenericType(messageType),
-            typeof(ISagaHandler<>).MakeGenericType(messageType),
-            typeof(ISagaCompensationHandler<>).MakeGenericType(messageType)
-        };
-
-        var handlers = new List<object>();
-
-        // Collect all handlers registered for the messageType for the relevant interfaces
-        foreach (var handlerInterface in handlerInterfaces)
-        {
-            var services = serviceProvider.GetServices(handlerInterface);
-            handlers.AddRange(services!);
-        }
-
-        // Filter handlers whose type is subclass of known saga handler base types or implement ISagaCompensationHandler<> for messageType
-        var filteredHandlers = handlers.Where(handler =>
-        {
-            var handlerType = handler.GetType();
-
-            // Check if handler implements ISagaCompensationHandler<> for messageType
-            var implementsCompensationHandler = handlerType.GetInterfaces().Any(i =>
-                i.IsGenericType &&
-                i.GetGenericTypeDefinition() == typeof(ISagaCompensationHandler<>) &&
-                i.GetGenericArguments()[0] == messageType);
-
-            if (implementsCompensationHandler)
-            {
-                return true;
-            }
-
-            // Check base types for known saga handler base types
-            var baseType = handlerType.BaseType;
-            while (baseType != null)
-            {
-                if (baseType.IsGenericType)
-                {
-                    var genericDef = baseType.GetGenericTypeDefinition();
-                    if (knownBaseTypes.Contains(genericDef))
-                    {
-                        // For CoordinatedSagaHandler and StartCoordinatedSagaHandler, the first generic argument is the message type
-                        var genericArgs = baseType.GetGenericArguments();
-                        if (genericArgs.Length > 0 && genericArgs[0] == messageType)
-                        {
-                            return true;
-                        }
-                    }
-                }
-
-                baseType = baseType.BaseType;
-            }
-
-            return false;
-        });
-
-        // Remove duplicate handler types
-        var distinctHandlers = filteredHandlers
-            .GroupBy(h => h.GetType())
-            .Select(g => g.First());
-
-        return distinctHandlers;
     }
 }

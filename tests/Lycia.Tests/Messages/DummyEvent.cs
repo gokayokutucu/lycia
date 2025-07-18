@@ -3,7 +3,9 @@ using Lycia.Messaging.Enums;
 using Lycia.Messaging.Utility;
 
 namespace Lycia.Tests.Messages;
-
+public class DummyGrandparentEvent: DummyEvent{}
+public class DummyParentEvent: DummyEvent{}
+public class DummyChildEvent: DummyEvent{}
 // Dummy types for test isolation
 public class DummyEvent : IMessage
 {
@@ -19,10 +21,14 @@ public class DummyEvent : IMessage
         Timestamp = DateTime.UtcNow;
         ApplicationId = applicationId ?? EventMetadata.ApplicationId;
     }
+    
+    public bool IsCompensationFailed { get; set; } = false;
+
+    public string Message { get; set; }
 
     public Guid MessageId { get; set; }
     public Guid ParentMessageId { get; set; }
-#if NET9_0_OR_GREATER
+#if NET5_0_OR_GREATER
     public Guid CorrelationId { get; init; }
 #else
     public Guid CorrelationId { get; set; }

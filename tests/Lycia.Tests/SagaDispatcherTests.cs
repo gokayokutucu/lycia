@@ -356,7 +356,7 @@ public class SagaDispatcherTests
         var steps = await sagaStore.GetSagaHandlerStepsAsync(fixedSagaId);
 
         var createOrderCommandMessageId =
-            SagaDispatcherTestHelper.GetMessageId<CreateOrderCommand, CreateOrderSagaHandler>(steps);
+            SagaTestHelper.GetMessageId<CreateOrderCommand, CreateOrderSagaHandler>(steps);
 
         var wasLogged = await sagaStore.IsStepCompletedAsync(fixedSagaId, createOrderCommandMessageId!.Value,
             typeof(CreateOrderCommand),
@@ -364,13 +364,13 @@ public class SagaDispatcherTests
         Assert.True(wasLogged);
 
         var orderCreatedEventMessageId =
-            SagaDispatcherTestHelper.GetMessageId<OrderCreatedEvent, ShipOrderSagaHandler>(steps);
+            SagaTestHelper.GetMessageId<OrderCreatedEvent, ShipOrderSagaHandler>(steps);
         var wasShipped =
             await sagaStore.IsStepCompletedAsync(fixedSagaId, orderCreatedEventMessageId!.Value,
                 typeof(OrderCreatedEvent), typeof(ShipOrderSagaHandler));
 
         var orderShippedEventMessageId =
-            SagaDispatcherTestHelper.GetMessageId<OrderShippedEvent, DeliverOrderSagaHandler>(steps);
+            SagaTestHelper.GetMessageId<OrderShippedEvent, DeliverOrderSagaHandler>(steps);
         var wasDelivered =
             await sagaStore.IsStepCompletedAsync(fixedSagaId, orderShippedEventMessageId!.Value,
                 typeof(OrderShippedEvent),

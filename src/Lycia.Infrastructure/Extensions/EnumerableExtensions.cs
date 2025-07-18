@@ -8,8 +8,8 @@ public static class EnumerableExtensions
     /// <summary>
     /// Returns distinct elements from a sequence by using a specified key selector.
     /// </summary>
-    public static IEnumerable<TSource> DistinctByKey<TSource, TKey>(
-        this IEnumerable<TSource> source,
+    public static IEnumerable<TSource?> DistinctByKey<TSource, TKey>(
+        this IEnumerable<TSource?> source,
         Func<TSource, TKey> keySelector)
     {
         var seenKeys = new HashSet<TKey>();
