@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
+        <TargetFramework>net9.0</TargetFramework>
         <LangVersion>preview</LangVersion>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
@@ -14,6 +14,7 @@
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.6" />
         <PackageReference Include="Microsoft.Extensions.Primitives" Version="9.0.0" />
         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+        <PackageReference Include="RabbitMQ.Client" Version="7.1.2" />
         <PackageReference Include="Testcontainers.RabbitMq" Version="4.6.0" />
         <PackageReference Include="Testcontainers.Redis" Version="4.6.0" />
         <PackageReference Include="xunit" Version="2.9.2" />
@@ -27,6 +28,7 @@
     <ItemGroup>
       <ProjectReference Include="..\..\src\Lycia.Extensions\Lycia.Extensions.csproj" />
       <ProjectReference Include="..\..\src\Lycia.Saga\Lycia.Saga.csproj" />
+      <ProjectReference Include="..\Lycia.Tests.Helpers\Lycia.Tests.Helpers.csproj" />
     </ItemGroup>
 
 </Project>

@@ -26,10 +26,10 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
     private readonly ConnectionFactory _factory;
     private readonly ILogger<RabbitMqEventBus> _logger;
     private IConnection? _connection;
-#if NET6_0_OR_GREATER
-    private IChannel? _channel; 
-#else
+#if NETSTANDARD2_0
     private IModel? _channel;
+#else
+    private IChannel? _channel;
 #endif
     private readonly IDictionary<string, Type> _queueTypeMap;
     private readonly List<AsyncEventingBasicConsumer> _consumers = [];
@@ -66,12 +66,12 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
 
     private async Task ConnectAsync(CancellationToken cancellationToken = default)
     {
-#if NET6_0_OR_GREATER
-    _connection = await _factory.CreateConnectionAsync(cancellationToken).ConfigureAwait(false);
-    _channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
-#else
+#if NETSTANDARD2_0
         _connection = _factory.CreateConnection();
         _channel = _connection.CreateModel();
+#else
+        _connection = await _factory.CreateConnectionAsync(cancellationToken).ConfigureAwait(false);
+        _channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
 #endif
     }
 
@@ -94,10 +94,10 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             }
             else
             {
-#if NET6_0_OR_GREATER
-            _channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
-#else
+#if NETSTANDARD2_0
                 _channel = _connection.CreateModel();
+#else
+                _channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
 #endif
             }
         }
@@ -123,56 +123,50 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         // Declare DLX and DLQ for this exchange (producer-side responsibility)
         await DeclareDeadLetter(exchangeName, cancellationToken);
 
-#if NET6_0_OR_GREATER
         // Declare the exchange (topic) and publish to it. No queue or binding logic here.
+#if NETSTANDARD2_0
+        _channel.ExchangeDeclare(exchange: exchangeName,type: ExchangeType.Topic,durable: true,autoDelete: false,arguments: null);
+#else
         await _channel.ExchangeDeclareAsync(
             exchange: exchangeName,
             type: ExchangeType.Topic,
             durable: true,
             autoDelete: false,
             arguments: null, cancellationToken: cancellationToken);
-#else
-        _channel.ExchangeDeclare(
-            exchange: exchangeName,
-            type: ExchangeType.Topic,
-            durable: true,
-            autoDelete: false,
-            arguments: null);
 #endif
 
         sagaId ??= @event.SagaId; // Ensure sagaId is not null, use a new Guid if not provided
 
         var headers = RabbitMqEventBusHelper.BuildMessageHeaders(@event, sagaId, typeof(TEvent), Constants.EventTypeHeader);
-#if NET6_0_OR_GREATER
+#if NETSTANDARD2_0
+        var properties = _channel.CreateBasicProperties();
+        properties.Persistent = true;
+        properties.Headers = headers;
+#else
         var properties = new BasicProperties
         {
             Persistent = true,
             Headers = headers
-        }; 
-#else
-        var properties = _channel.CreateBasicProperties();
-        properties.Persistent = true;
-        properties.Headers = headers;
-
+        };
 #endif
 
         var json = JsonHelper.SerializeSafe(@event);
         var body = Encoding.UTF8.GetBytes(json);
 
-#if NET6_0_OR_GREATER
-        await _channel.BasicPublishAsync(
-            exchange: exchangeName,
-            routingKey: exchangeName,
-            mandatory: false,
-            basicProperties: properties,
-            body: body, cancellationToken: cancellationToken); 
-#else
+#if NETSTANDARD2_0
         _channel.BasicPublish(
             exchange: exchangeName,
             routingKey: exchangeName,
             mandatory: false,
             basicProperties: properties,
             body: body);
+#else
+        await _channel.BasicPublishAsync(
+            exchange: exchangeName,
+            routingKey: exchangeName,
+            mandatory: false,
+            basicProperties: properties,
+            body: body, cancellationToken: cancellationToken);
 #endif
     }
 
@@ -198,7 +192,9 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             queueArgs[XMesssageTtl] = (int)ttl.TotalMilliseconds;
         }
         // Ensure queue is declared with DLQ/DLX and TTL args (idempotent)
-#if NET6_0_OR_GREATER
+#if NETSTANDARD2_0
+        _channel.QueueDeclare(queue: queueName,durable: true,exclusive: false,autoDelete: false,arguments: queueArgs.Count > 0 ? queueArgs : null);
+#else
         await _channel.QueueDeclareAsync(
             queue: queueName,
             durable: true,
@@ -206,54 +202,45 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             autoDelete: false,
             arguments: queueArgs.Count > 0 ? queueArgs : null,
             cancellationToken: cancellationToken);
-#else
-        _channel.QueueDeclare(
-            queue: queueName,
-            durable: true,
-            exclusive: false,
-            autoDelete: false,
-            arguments: queueArgs.Count > 0 ? queueArgs : null);
 #endif
-
         var headers = RabbitMqEventBusHelper.BuildMessageHeaders(command, sagaId, typeof(TCommand), Constants.CommandTypeHeader);
-#if NET6_0_OR_GREATER
+#if NETSTANDARD2_0
+        var properties = _channel.CreateBasicProperties();
+        properties.Persistent = true;
+        properties.Headers = headers;
+#else
         var properties = new BasicProperties
         {
             Persistent = true,
             Headers = headers
-        }; 
-#else
-        var properties = _channel.CreateBasicProperties();
-        properties.Persistent = true;
-        properties.Headers = headers;
-
+        };
 #endif
 
         var json = JsonHelper.SerializeSafe(command);
         var body = Encoding.UTF8.GetBytes(json);
 
-#if NET6_0_OR_GREATER
-        await _channel.BasicPublishAsync(
-           exchange: string.Empty,
-           routingKey: queueName,
-           mandatory: false,
-           basicProperties: properties,
-           body: body, cancellationToken: cancellationToken); 
-#else
+#if NETSTANDARD2_0
         _channel.BasicPublish(
            exchange: string.Empty,
            routingKey: queueName,
            mandatory: false,
            basicProperties: properties,
            body: body);
+#else
+        await _channel.BasicPublishAsync(
+           exchange: string.Empty,
+           routingKey: queueName,
+           mandatory: false,
+           basicProperties: properties,
+           body: body, cancellationToken: cancellationToken);
 #endif
     }
 
     private async Task PublishToDeadLetterQueueAsync(string dlqName, byte[] body,
-#if NET6_0_OR_GREATER
-        IReadOnlyBasicProperties props, 
-#else
+#if NETSTANDARD2_0
         IBasicProperties props,
+#else
+        IReadOnlyBasicProperties props,
 #endif
         CancellationToken cancellationToken = default)
     {
@@ -268,28 +255,22 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             {
                 dlqArgs[XMesssageTtl] = (int)ttl.TotalMilliseconds;
             }
-#if NET6_0_OR_GREATER
+#if NETSTANDARD2_0
+            _channel.QueueDeclare(queue: dlqName,durable: true,exclusive: false,autoDelete: false,arguments: dlqArgs.Count > 0 ? dlqArgs : null);
+#else
             await _channel.QueueDeclareAsync(
                     queue: dlqName,
                     durable: true,
                     exclusive: false,
                     autoDelete: false,
                     arguments: dlqArgs.Count > 0 ? dlqArgs : null,
-                    cancellationToken: cancellationToken); 
-#else
-            _channel.QueueDeclare(
-                    queue: dlqName,
-                    durable: true,
-                    exclusive: false,
-                    autoDelete: false,
-                    arguments: dlqArgs.Count > 0 ? dlqArgs : null);
+                    cancellationToken: cancellationToken);
 #endif
-
             // For RabbitMQ.Client 7.x+ this is the only valid way:
-#if NET6_0_OR_GREATER
-            var basicProps = props as BasicProperties ?? new BasicProperties(); 
-#else
+#if NETSTANDARD2_0
             var basicProps = props as IBasicProperties ?? _channel.CreateBasicProperties();
+#else
+            var basicProps = props as BasicProperties ?? new BasicProperties();
 #endif
             if (props != basicProps)
             {
@@ -311,7 +292,15 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                 basicProps.ReplyToAddress = props.ReplyToAddress;
             }
 
-#if NET6_0_OR_GREATER
+#if NETSTANDARD2_0
+            _channel.BasicPublish(
+                    exchange: string.Empty,
+                    routingKey: dlqName,
+                    mandatory: false,
+                    basicProps,
+                    body
+                );
+#else
             await _channel.BasicPublishAsync(
                     exchange: string.Empty,
                     routingKey: dlqName,
@@ -319,14 +308,6 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                     basicProps,
                     body,
                     cancellationToken
-                ); 
-#else
-            _channel.BasicPublish(
-                    exchange: string.Empty,
-                    routingKey: dlqName,
-                    mandatory: false,
-                    basicProps,
-                    body
                 );
 #endif
 
@@ -359,86 +340,54 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             var routingKey = MessagingNamingHelper.GetTopicRoutingKey(messageType); // e.g., "event.OrderCreatedEvent.#"
 
             // Declare exchange (topic)
-#if NET6_0_OR_GREATER
+#if NETSTANDARD2_0
+            _channel.ExchangeDeclare(exchange: exchangeName,type: ExchangeType.Topic,durable: true,autoDelete: false,arguments: null);
+#else
             await _channel.ExchangeDeclareAsync(
                 exchange: exchangeName,
                 type: ExchangeType.Topic,
                 durable: true,
                 autoDelete: false,
                 arguments: null,
-                cancellationToken: cancellationToken); 
-#else
-            _channel.ExchangeDeclare(
-                exchange: exchangeName,
-                type: ExchangeType.Topic,
-                durable: true,
-                autoDelete: false,
-                arguments: null);
+                cancellationToken: cancellationToken);
 #endif
-
             // Declare queue
-            var queueArgs = new Dictionary<string, object?>();
+            var queueArgs = await DeclareDeadLetter(queueName, cancellationToken);
             if (_options?.MessageTTL is { TotalMilliseconds: > 0 } ttl)
             {
                 queueArgs[XMesssageTtl] = (int)ttl.TotalMilliseconds;
             }
-
-#if NET6_0_OR_GREATER
+#if NETSTANDARD2_0
+            _channel.QueueDeclare(queue: queueName,durable: true,exclusive: false,autoDelete: false,arguments: queueArgs.Count > 0 ? queueArgs : null);
+#else
             await _channel.QueueDeclareAsync(
                     queue: queueName,
                     durable: true,
                     exclusive: false,
                     autoDelete: false,
                     arguments: queueArgs.Count > 0 ? queueArgs : null,
-                    cancellationToken: cancellationToken); 
-#else
-            _channel.QueueDeclare(
-                    queue: queueName,
-                    durable: true,
-                    exclusive: false,
-                    autoDelete: false,
-                    arguments: queueArgs.Count > 0 ? queueArgs : null);
+                    cancellationToken: cancellationToken);
 #endif
-
             // Bind queue to exchange with queue name as a routing key
-#if NET6_0_OR_GREATER
-            await _channel.QueueBindAsync(
-                    queue: queueName,
-                    exchange: exchangeName,
-                    routingKey: routingKey,
-                    arguments: null,
-                    cancellationToken: cancellationToken); 
-#else
+#if NETSTANDARD2_0
             _channel.QueueBind(
                     queue: queueName,
                     exchange: exchangeName,
                     routingKey: routingKey,
                     arguments: null);
+#else
+            await _channel.QueueBindAsync(
+                    queue: queueName,
+                    exchange: exchangeName,
+                    routingKey: routingKey,
+                    arguments: null,
+                    cancellationToken: cancellationToken);
 #endif
-
             var consumer = new AsyncEventingBasicConsumer(_channel);
 
             // This pattern ensures that message handling errors are caught and do not crash the consumer loop.
             // Instead, problematic messages are logged and can be dead-lettered for later analysis.
-#if NET6_0_OR_GREATER
-consumer.ReceivedAsync += async (_, ea) =>
-            {
-                try
-                {
-                    messageQueue.Enqueue((ea.Body.ToArray(), messageType));
-                    await Task.CompletedTask;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex,
-                        "Failed to process message from queue '{QueueName}' of type '{MessageType}'. Dead-lettering the message",
-                        queueName, messageType.FullName);
-                    // DLQ logic:
-                    await PublishToDeadLetterQueueAsync(queueName + ".dlq", ea.Body.ToArray(), ea.BasicProperties,
-                        cancellationToken);
-                }
-            };
-# else
+#if NETSTANDARD2_0
             consumer.Received += (_, ea) =>
             {
                 try
@@ -457,17 +406,35 @@ consumer.ReceivedAsync += async (_, ea) =>
                     return Task.CompletedTask;
                 }
             };
+# else
+            consumer.ReceivedAsync += async (_, ea) =>
+                        {
+                            try
+                            {
+                                messageQueue.Enqueue((ea.Body.ToArray(), messageType));
+                                await Task.CompletedTask;
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex,
+                                    "Failed to process message from queue '{QueueName}' of type '{MessageType}'. Dead-lettering the message",
+                                    queueName, messageType.FullName);
+                                // DLQ logic:
+                                await PublishToDeadLetterQueueAsync(queueName + ".dlq", ea.Body.ToArray(), ea.BasicProperties,
+                                    cancellationToken);
+                            }
+                        };
 #endif
-#if NET6_0_OR_GREATER
-            await _channel.BasicConsumeAsync(
-                    queue: queueName,
-                    autoAck: true,
-                    consumer: consumer, cancellationToken: cancellationToken); 
-#else
+#if NETSTANDARD2_0
             _channel.BasicConsume(
                     queue: queueName,
                     autoAck: autoAck,
                     consumer: consumer);
+#else
+            await _channel.BasicConsumeAsync(
+                    queue: queueName,
+                    autoAck: true,
+                    consumer: consumer, cancellationToken: cancellationToken);
 #endif
 
             _consumers.Add(consumer);
@@ -484,12 +451,16 @@ consumer.ReceivedAsync += async (_, ea) =>
 
     private async Task<Dictionary<string, object?>> DeclareDeadLetter(string queueName, CancellationToken cancellationToken)
     {
-        var dlxExchange = $"{queueName}.dlx";
-        var dlqName = $"{queueName}.dlq";
+        try
+        {
+            var dlxExchange = $"{queueName}.dlx";
+            var dlqName = $"{queueName}.dlq";
 
 
-        // DLX (Dead Letter Exchange) declare
-#if NET6_0_OR_GREATER
+            // DLX (Dead Letter Exchange) declare
+#if NETSTANDARD2_0
+            _channel!.ExchangeDeclare(exchange: dlxExchange, type: ExchangeType.Direct, durable: true, autoDelete: false, arguments: null);
+#else
         await _channel!.ExchangeDeclareAsync(
             exchange: dlxExchange,
             type: ExchangeType.Direct,
@@ -497,17 +468,11 @@ consumer.ReceivedAsync += async (_, ea) =>
             autoDelete: false,
             arguments: null,
             cancellationToken: cancellationToken);
-#else
-        _channel!.ExchangeDeclare(
-            exchange: dlxExchange,
-            type: ExchangeType.Direct,
-            durable: true,
-            autoDelete: false,
-            arguments: null);
 #endif
-
-        // DLQ (Dead Letter Queue) declare
-#if NET6_0_OR_GREATER
+            // DLQ (Dead Letter Queue) declare
+#if NETSTANDARD2_0
+            _channel!.QueueDeclare(queue: dlqName, durable: true, exclusive: false, autoDelete: false, arguments: null);
+#else
         await _channel!.QueueDeclareAsync(
            queue: dlqName,
            durable: true,
@@ -515,36 +480,29 @@ consumer.ReceivedAsync += async (_, ea) =>
            autoDelete: false,
            arguments: null,
            cancellationToken: cancellationToken);
-#else
-        _channel!.QueueDeclare(
-           queue: dlqName,
-           durable: true,
-           exclusive: false,
-           autoDelete: false,
-           arguments: null);
 #endif
-
-        // DLQ binding
-#if NET6_0_OR_GREATER
+            // DLQ binding
+#if NETSTANDARD2_0
+            _channel!.QueueBind(queue: dlqName, exchange: dlxExchange, routingKey: dlqName, arguments: null);
+#else
         await _channel!.QueueBindAsync(
             queue: dlqName,
             exchange: dlxExchange,
             routingKey: dlqName,
             arguments: null,
             cancellationToken: cancellationToken);
-#else
-        _channel!.QueueBind(
-            queue: dlqName,
-            exchange: dlxExchange,
-            routingKey: dlqName,
-            arguments: null);
 #endif
-
-        return new Dictionary<string, object?>
+            return new Dictionary<string, object?>
+            {
+                ["x-dead-letter-exchange"] = dlxExchange,
+                ["x-dead-letter-routing-key"] = dlqName
+            };
+        }
+        catch (Exception ex)
         {
-            ["x-dead-letter-exchange"] = dlxExchange,
-            ["x-dead-letter-routing-key"] = dlqName
-        };
+
+            throw;
+        }
     }
 
     public IAsyncEnumerable<(byte[] Body, Type MessageType)> ConsumeAsync(bool autoAck = true, CancellationToken cancellationToken = default)
@@ -554,7 +512,7 @@ consumer.ReceivedAsync += async (_, ea) =>
                 "Queue/message type map is not configured for this event bus instance.");
         return ConsumeAsync(_queueTypeMap, autoAck, cancellationToken);
     }
-    
+
     /// <summary>
     /// Returns the queue name for the specified command message type.
     /// This assumes only one queue (one consumer) exists per command type.
@@ -583,10 +541,10 @@ consumer.ReceivedAsync += async (_, ea) =>
                 {
                     try
                     {
-#if NET6_0_OR_GREATER
-                        await _channel.BasicCancelAsync(consumerTag: tag).ConfigureAwait(false); 
-#else
+#if NETSTANDARD2_0
                         _channel.BasicCancel(consumerTag: tag);
+#else
+                        await _channel.BasicCancelAsync(consumerTag: tag).ConfigureAwait(false);
 #endif
                     }
                     catch (Exception ex)
@@ -622,10 +580,10 @@ consumer.ReceivedAsync += async (_, ea) =>
     {
         try
         {
-#if NET6_0_OR_GREATER
-            await _connection!.CloseAsync().ConfigureAwait(false); 
-#else
+#if NETSTANDARD2_0
             _connection!.Close();
+#else
+            await _connection!.CloseAsync().ConfigureAwait(false);
 #endif
         }
         catch (Exception ex)
@@ -635,10 +593,10 @@ consumer.ReceivedAsync += async (_, ea) =>
 
         try
         {
-#if NET6_0_OR_GREATER
-            await _connection!.DisposeAsync().ConfigureAwait(false); 
-#else
+#if NETSTANDARD2_0
             _connection!.Dispose();
+#else
+            await _connection!.DisposeAsync().ConfigureAwait(false);
 #endif
         }
         catch (Exception ex)
@@ -651,10 +609,10 @@ consumer.ReceivedAsync += async (_, ea) =>
     {
         try
         {
-#if NET6_0_OR_GREATER
-            await _channel!.CloseAsync().ConfigureAwait(false); 
-#else
+#if NETSTANDARD2_0
             _channel!.Close();
+#else
+            await _channel!.CloseAsync().ConfigureAwait(false);
 #endif
         }
         catch (Exception ex)
@@ -664,10 +622,10 @@ consumer.ReceivedAsync += async (_, ea) =>
 
         try
         {
-#if NET6_0_OR_GREATER
-            await _channel!.DisposeAsync().ConfigureAwait(false); 
-#else
+#if NETSTANDARD2_0
             _channel!.Dispose();
+#else
+            await _channel!.DisposeAsync().ConfigureAwait(false);
 #endif
         }
         catch (Exception ex)

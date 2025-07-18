@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-		<TargetFrameworks>net48;netstandard2.0;net6.0;net7.0;net8.0;net9.0</TargetFrameworks>
+		<TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
 		<GenerateReferenceAssembly>false</GenerateReferenceAssembly>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
@@ -9,23 +9,8 @@
 		<LangVersion>preview</LangVersion>
     </PropertyGroup>
 
-	<!-- net48 -->
-	<ItemGroup Condition="'$(TargetFramework)' == 'net48'">
-		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-	</ItemGroup>
-
 	<!-- netstandard2.0 -->
 	<ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
-		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-	</ItemGroup>
-
-	<!-- net6.0 -->
-	<ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
-		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-	</ItemGroup>
-
-	<!-- net7.0 -->
-	<ItemGroup Condition="'$(TargetFramework)' == 'net7.0'">
 		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
 	</ItemGroup>
 
@@ -38,8 +23,8 @@
 	<ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
 		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
 	</ItemGroup>
-    
-<!--    <PropertyGroup Condition="'$(BuildingTests)' == 'true'">-->
-<!--        <DefineConstants>$(DefineConstants);UNIT_TESTING</DefineConstants>-->
-<!--    </PropertyGroup>-->
+
+	<!--    <PropertyGroup Condition="'$(BuildingTests)' == 'true'">-->
+	<!--        <DefineConstants>$(DefineConstants);UNIT_TESTING</DefineConstants>-->
+	<!--    </PropertyGroup>-->
 </Project>

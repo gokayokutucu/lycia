@@ -13,7 +13,7 @@ public class CommandBase : ICommand
 #if NET9_0_OR_GREATER
         MessageId = Guid.CreateVersion7(); 
 #else
-        MessageId = GuidExtensions.CreateVersion7();
+        MessageId = GuidV7.NewGuidV7();
 #endif
         ParentMessageId = Guid.Empty; // CausationId
         CorrelationId = MessageId;
@@ -27,7 +27,7 @@ public class CommandBase : ICommand
 #if NET9_0_OR_GREATER
         MessageId = Guid.CreateVersion7(); 
 #else
-        MessageId = GuidExtensions.CreateVersion7();
+        MessageId = GuidV7.NewGuidV7();
 #endif
         ParentMessageId = Guid.Empty; // CausationId
         CorrelationId = MessageId;
@@ -42,7 +42,7 @@ public class CommandBase : ICommand
 #if NET9_0_OR_GREATER
         MessageId = Guid.CreateVersion7(); 
 #else
-        MessageId = GuidExtensions.CreateVersion7();
+        MessageId = GuidV7.NewGuidV7();
 #endif
         ParentMessageId = parentMessageId ?? Guid.Empty; // CausationId
         CorrelationId = correlationId ?? MessageId;
@@ -50,18 +50,18 @@ public class CommandBase : ICommand
         ApplicationId = EventMetadata.ApplicationId;
     }
 
-#if NET5_0_OR_GREATER
-    public Guid MessageId { get; init; }
-    public Guid ParentMessageId { get; init; } // CausationId
-    public Guid CorrelationId { get; init; }
-    public DateTime Timestamp { get; init; }
-    public string ApplicationId { get; init; } 
-#else
+#if NETSTANDARD2_0
     public Guid MessageId { get; set; }
     public Guid ParentMessageId { get; set; } // CausationId
     public Guid CorrelationId { get; set; }
     public DateTime Timestamp { get; set; }
     public string ApplicationId { get; set; }
+#else
+    public Guid MessageId { get; init; }
+    public Guid ParentMessageId { get; init; } // CausationId
+    public Guid CorrelationId { get; init; }
+    public DateTime Timestamp { get; init; }
+    public string ApplicationId { get; init; } 
 #endif
     public Guid? SagaId { get; set; }
 #if UNIT_TESTING

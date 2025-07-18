@@ -1,4 +1,5 @@
 using Lycia.Messaging.Extensions;
+using Lycia.Messaging.Utility;
 
 namespace Lycia.Saga.Extensions;
 
@@ -13,6 +14,6 @@ public class DefaultSagaIdGenerator : ISagaIdGenerator
 #if NET9__OR_GREATER
         Guid.CreateVersion7(); 
 #else
-        GuidExtensions.CreateVersion7();
+        GuidV7.NewGuidV7();
 #endif
 }

@@ -7,6 +7,7 @@ using Lycia.Saga.Extensions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Configuration;
 using System.Linq;
 using System.Reflection;
 using System.Web.Http;
@@ -23,37 +24,21 @@ namespace Sample_Net48.Order.Choreography.Api
         protected void Application_Start()
         {
             var services = new ServiceCollection();
-            services.AddLogging();
+            services.AddLogging(b => b.AddDebug().SetMinimumLevel(LogLevel.Debug));
 
-            var configBuilder = new ConfigurationBuilder()
-                .AddInMemoryCollection(
-                    ConfigurationManager.AppSettings.AllKeys
-                        .ToDictionary(k => k, k => ConfigurationManager.AppSettings[k])
-                );
-            var configuration = configBuilder.Build();
-
-            var lyciaServices = services.AddLycia(configuration);
-            lyciaServices.AddSagasFromCurrentAssembly();
-
-            // Build ServiceProvider
             var serviceProvider = services.BuildServiceProvider();
 
-            // Autofac container builder
-            var builder = new Autofac.ContainerBuilder();
-
-            // Web API controllerlarını kaydet
+            var builder = new ContainerBuilder();
             builder.RegisterApiControllers(Assembly.GetExecutingAssembly());
-
-            // Microsoft.Extensions.DependencyInjection servislerini Autofac'e taşı
             builder.Populate(services);
 
-            // Lycia'dan gelen singletonları birebir kaydetmek için serviceProvider üzerinden resolve et
-            var eventBus = serviceProvider.GetRequiredService<IEventBus>();
-            builder.RegisterInstance(eventBus).As<IEventBus>().SingleInstance();
+            var config = System.Web.Configuration.WebConfigurationManager.OpenWebConfiguration("~");
+
+            builder.AddLycia(config);
+            builder.AddSagasFromCurrentAssembly();
 
             var container = builder.Build();
 
-            // Autofac'i Web API'ye bağla
             var resolver = new AutofacWebApiDependencyResolver(container);
             GlobalConfiguration.Configuration.DependencyResolver = resolver;
 
@@ -64,6 +49,5 @@ namespace Sample_Net48.Order.Choreography.Api
             RouteConfig.RegisterRoutes(RouteTable.Routes);
             BundleConfig.RegisterBundles(BundleTable.Bundles);
         }
-
     }
 }

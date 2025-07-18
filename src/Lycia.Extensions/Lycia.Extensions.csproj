@@ -1,26 +1,12 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-		<TargetFrameworks>net48;netstandard2.0;net6.0;net7.0;net8.0;net9.0</TargetFrameworks>
+		<TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
 		<GenerateReferenceAssembly>false</GenerateReferenceAssembly>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<LangVersion>preview</LangVersion>
 	</PropertyGroup>
-
-	<!-- net48 -->
-	<ItemGroup Condition="'$(TargetFramework)' == 'net48'">
-		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-		<PackageReference Include="RabbitMQ.Client" Version="6.2.1" />
-		<PackageReference Include="StackExchange.Redis" Version="2.0.601" />
-		<PackageReference Include="Pipelines.Sockets.Unofficial" Version="2.2.8" />
-		<PackageReference Include="System.IO.Pipelines" Version="5.0.1" />
-		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="6.0.0" />
-		<PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="6.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Primitives" Version="6.0.0" />
-		<PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.0.0" />
-
-	</ItemGroup>
 
 	<!-- netstandard2.0 -->
 	<ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
@@ -29,34 +15,11 @@
 		<PackageReference Include="StackExchange.Redis" Version="2.0.601" />
 		<PackageReference Include="Pipelines.Sockets.Unofficial" Version="2.2.8" />
 		<PackageReference Include="System.IO.Pipelines" Version="5.0.1" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="6.0.0" />
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="6.0.0" />
 		<PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="6.0.0" />
 		<PackageReference Include="Microsoft.Extensions.Primitives" Version="6.0.0" />
 		<PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.0.0" />
-
-	</ItemGroup>
-
-
-	<!-- net6.0 -->
-	<ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
-		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-		<PackageReference Include="RabbitMQ.Client" Version="7.1.2" />
-		<PackageReference Include="StackExchange.Redis" Version="2.8.41" />
-		<PackageReference Include="Pipelines.Sockets.Unofficial" Version="2.2.8" />
-		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
-		<PackageReference Include="System.IO.Pipelines" Version="8.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Primitives" Version="8.0.0" />
-	</ItemGroup>
-
-	<!-- net7.0 -->
-	<ItemGroup Condition="'$(TargetFramework)' == 'net7.0'">
-		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-		<PackageReference Include="RabbitMQ.Client" Version="7.1.2" />
-		<PackageReference Include="StackExchange.Redis" Version="2.8.41" />
-		<PackageReference Include="Pipelines.Sockets.Unofficial" Version="2.2.8" />
-		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
-		<PackageReference Include="System.IO.Pipelines" Version="8.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Primitives" Version="8.0.0" />
 	</ItemGroup>
 
 	<!-- net8.0 -->
@@ -79,6 +42,11 @@
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
 		<PackageReference Include="System.IO.Pipelines" Version="8.0.0" />
 		<PackageReference Include="Microsoft.Extensions.Primitives" Version="8.0.0" />
+	</ItemGroup>
+	<ItemGroup>
+	  <PackageReference Include="Autofac" Version="7.1.0" />
+	  <PackageReference Include="Autofac.Extensions.DependencyInjection" Version="8.0.0" />
+	  <PackageReference Include="Autofac.WebApi2" Version="6.1.1" />
 	</ItemGroup>
 
 	<ItemGroup>
