@@ -42,6 +42,10 @@ public class ChildCompensationSagaHandler : ReactiveSagaHandler<DummyChildEvent>
 
     public override Task HandleAsync(DummyChildEvent message)
     {
+        if (message.IsFailed)
+        {
+            Context.MarkAsFailed<DummyChildEvent>();
+        }
         return Task.CompletedTask;
     }
 

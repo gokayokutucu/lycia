@@ -21,7 +21,7 @@ public class SagaSagaStoreTests
         var sagaIdGenerator = new TestSagaIdGenerator();
 
         var serviceProvider = new ServiceCollection().BuildServiceProvider();
-        var compensationCoordinator = new SagaCompensationCoordinator(serviceProvider);
+        var compensationCoordinator = new SagaCompensationCoordinator(serviceProvider, sagaIdGenerator);
 
         var store = new InMemorySagaStore(eventBus, sagaIdGenerator, compensationCoordinator);
         var stepType = typeof(DummyEvent);
@@ -42,7 +42,7 @@ public class SagaSagaStoreTests
         var sagaIdGenerator = new TestSagaIdGenerator();
 
         var serviceProvider = new ServiceCollection().BuildServiceProvider();
-        var compensationCoordinator = new SagaCompensationCoordinator(serviceProvider);
+        var compensationCoordinator = new SagaCompensationCoordinator(serviceProvider, sagaIdGenerator);
 
         var store = new InMemorySagaStore(eventBus, sagaIdGenerator, compensationCoordinator);
         var stepType = typeof(DummyEvent);
@@ -65,7 +65,7 @@ public class SagaSagaStoreTests
         var sagaIdGenerator = new TestSagaIdGenerator();
 
         var serviceProvider = new ServiceCollection().BuildServiceProvider();
-        var compensationCoordinator = new SagaCompensationCoordinator(serviceProvider);
+        var compensationCoordinator = new SagaCompensationCoordinator(serviceProvider, sagaIdGenerator);
 
         var store = new InMemorySagaStore(eventBus, sagaIdGenerator, compensationCoordinator);
         var stepType = typeof(DummyEvent);
@@ -88,7 +88,7 @@ public class SagaSagaStoreTests
         var sagaIdGenerator = new TestSagaIdGenerator();
 
         var serviceProvider = new ServiceCollection().BuildServiceProvider();
-        var compensationCoordinator = new SagaCompensationCoordinator(serviceProvider);
+        var compensationCoordinator = new SagaCompensationCoordinator(serviceProvider, sagaIdGenerator);
 
         var store = new InMemorySagaStore(eventBus, sagaIdGenerator, compensationCoordinator);
         var stepType = typeof(DummyEvent);
@@ -111,7 +111,7 @@ public class SagaSagaStoreTests
         var sagaIdGenerator = new TestSagaIdGenerator();
 
         var serviceProvider = new ServiceCollection().BuildServiceProvider();
-        var compensationCoordinator = new SagaCompensationCoordinator(serviceProvider);
+        var compensationCoordinator = new SagaCompensationCoordinator(serviceProvider, sagaIdGenerator);
 
         var store = new InMemorySagaStore(eventBus, sagaIdGenerator, compensationCoordinator);
         var stepType = typeof(DummyEvent);
@@ -134,7 +134,7 @@ public class SagaSagaStoreTests
         var sagaIdGenerator = new TestSagaIdGenerator();
 
         var serviceProvider = new ServiceCollection().BuildServiceProvider();
-        var compensationCoordinator = new SagaCompensationCoordinator(serviceProvider);
+        var compensationCoordinator = new SagaCompensationCoordinator(serviceProvider, sagaIdGenerator);
 
         var store = new InMemorySagaStore(eventBus, sagaIdGenerator, compensationCoordinator);
         var stepType = typeof(DummyEvent);
@@ -157,7 +157,7 @@ public class SagaSagaStoreTests
         var sagaIdGenerator = new TestSagaIdGenerator();
 
         var serviceProvider = new ServiceCollection().BuildServiceProvider();
-        var compensationCoordinator = new SagaCompensationCoordinator(serviceProvider);
+        var compensationCoordinator = new SagaCompensationCoordinator(serviceProvider, sagaIdGenerator);
 
         var store = new InMemorySagaStore(eventBus, sagaIdGenerator, compensationCoordinator);
         var stepType = typeof(DummyEvent);

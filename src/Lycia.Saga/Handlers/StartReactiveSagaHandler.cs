@@ -36,6 +36,7 @@ public abstract class StartReactiveSagaHandler<TMessage> :
     
     protected async Task CompensateAsyncInternal(TMessage message)
     {
+        Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
             await CompensateStartAsync(message);  // Actual business logic
