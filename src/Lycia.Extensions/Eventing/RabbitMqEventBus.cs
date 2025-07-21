@@ -32,7 +32,11 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
     private IChannel? _channel;
 #endif
     private readonly IDictionary<string, Type> _queueTypeMap;
+#if NETSTANDARD2_0
+    private readonly List<EventingBasicConsumer> _consumers = [];  
+#else
     private readonly List<AsyncEventingBasicConsumer> _consumers = [];
+#endif
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private readonly EventBusOptions _options;
 
@@ -383,7 +387,11 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                     arguments: null,
                     cancellationToken: cancellationToken);
 #endif
+#if NETSTANDARD2_0
+            var consumer = new EventingBasicConsumer(_channel);
+#else
             var consumer = new AsyncEventingBasicConsumer(_channel);
+#endif
 
             // This pattern ensures that message handling errors are caught and do not crash the consumer loop.
             // Instead, problematic messages are logged and can be dead-lettered for later analysis.
@@ -393,7 +401,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                 try
                 {
                     messageQueue.Enqueue((ea.Body.ToArray(), messageType));
-                    return Task.CompletedTask;
+                    //return Task.CompletedTask;
                 }
                 catch (Exception ex)
                 {
@@ -403,7 +411,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                     // DLQ logic:
                     PublishToDeadLetterQueueAsync(queueName + ".dlq", ea.Body.ToArray(), ea.BasicProperties,
                         cancellationToken).GetAwaiter().GetResult();
-                    return Task.CompletedTask;
+                    //return Task.CompletedTask;
                 }
             };
 # else

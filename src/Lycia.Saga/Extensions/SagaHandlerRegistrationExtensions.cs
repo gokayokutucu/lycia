@@ -4,6 +4,8 @@ using Lycia.Saga.Abstractions;
 using Lycia.Saga.Common;
 using Lycia.Saga.Handlers;
 using Lycia.Saga.Helpers;
+using System.Configuration;
+
 
 #if NETSTANDARD2_0
 using Autofac;
@@ -108,8 +110,11 @@ public static class SagaHandlerRegistrationExtensions
                 .InstancePerLifetimeScope()
                 .OnActivated(e =>
                 {
-                    var appId = e.Context.ResolveNamed<string>("ApplicationId");
-                    var queueTypeMap = e.Context.Resolve<Dictionary<string, Type>>();
+                    var appId = ConfigurationManager.AppSettings["ApplicationId"];
+                    var queueTypeMap = new Dictionary<string, Type>();
+                    builder.RegisterInstance(queueTypeMap)
+                           .As<Dictionary<string, Type>>()
+                           .SingleInstance();
 
                     var messageTypes = GetMessageTypesFromHandler(type!);
                     foreach (var messageType in messageTypes)
