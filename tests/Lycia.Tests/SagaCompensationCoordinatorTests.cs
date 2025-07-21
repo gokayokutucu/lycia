@@ -50,9 +50,9 @@ public class SagaCompensationCoordinatorTests
 
         services.AddSingleton<ISagaStore>(store);
         services.AddSingleton<ISagaCompensationHandler<DummyEvent>>(handler);
-
+        services.AddSingleton<IEventBus>(eventBusMock);
         var provider = services.BuildServiceProvider();
-        var coordinator = new SagaCompensationCoordinator(provider);
+        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
 
         // Act
         await coordinator.CompensateAsync(sagaId, stepType);
@@ -119,10 +119,10 @@ public class SagaCompensationCoordinatorTests
         CircularHandler.Invocations.Clear();
 
         var services = new ServiceCollection();
-        var eventBus = Mock.Of<IEventBus>();
+        var eventBusMock = Mock.Of<IEventBus>();
         var sagaIdGen = new TestSagaIdGenerator(sagaId);
         var dummyCoordinator = Mock.Of<ISagaCompensationCoordinator>();
-        var store = new InMemorySagaStore(eventBus, sagaIdGen, dummyCoordinator);
+        var store = new InMemorySagaStore(eventBusMock, sagaIdGen, dummyCoordinator);
 
         // Log both steps with compensation failed status to trigger parent chain
         await store.LogStepAsync(sagaId, messageId1, messageId2, stepType, StepStatus.CompensationFailed,
@@ -131,10 +131,11 @@ public class SagaCompensationCoordinatorTests
             typeof(CircularHandler), msg2);
 
         services.AddSingleton<ISagaStore>(store);
+        services.AddSingleton<IEventBus>(eventBusMock);
         services.AddSingleton<ISagaCompensationHandler<DummyEvent>, CircularHandler>();
 
         var provider = services.BuildServiceProvider();
-        var coordinator = new SagaCompensationCoordinator(provider);
+        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
 
         // Act + Assert: Should NOT throw or enter infinite loop
         var exception = await Record.ExceptionAsync(() =>
@@ -196,10 +197,11 @@ public class SagaCompensationCoordinatorTests
         // Register two different handlers for the same message type
         services.AddSingleton<ISagaCompensationHandler<DummyEvent>>(handler1);
         services.AddSingleton<ISagaCompensationHandler<DummyEvent>>(handler2);
+        services.AddSingleton<IEventBus>(eventBusMock);
         services.AddSingleton<ISagaStore>(store);
 
         var provider = services.BuildServiceProvider();
-        var coordinator = new SagaCompensationCoordinator(provider);
+        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
 
         MultiHandler1.Called = false;
         MultiHandler2.Called = false;
@@ -256,10 +258,10 @@ public class SagaCompensationCoordinatorTests
 
         // Register service provider with handlers
         var services = new ServiceCollection();
-        var eventBus = Mock.Of<IEventBus>();
+        var eventBusMock = Mock.Of<IEventBus>();
         var sagaIdGen = new TestSagaIdGenerator(sagaId);
         var dummyCoordinator = Mock.Of<ISagaCompensationCoordinator>();
-        var store = new InMemorySagaStore(eventBus, sagaIdGen, dummyCoordinator);
+        var store = new InMemorySagaStore(eventBusMock, sagaIdGen, dummyCoordinator);
 
         // Log steps to set up the chain:
         var stepType = typeof(DummyEvent);
@@ -277,12 +279,13 @@ public class SagaCompensationCoordinatorTests
             typeof(ChildCompensationHandler), child);
 
         services.AddSingleton<ISagaStore>(store);
+        services.AddSingleton<IEventBus>(eventBusMock);
         services.AddSingleton<ISagaCompensationHandler<DummyEvent>, GrandparentCompensationHandler>();
         services.AddSingleton<ISagaCompensationHandler<DummyEvent>, ParentCompensationHandler>();
         services.AddSingleton<ISagaCompensationHandler<DummyEvent>, ChildCompensationHandler>();
 
         var provider = services.BuildServiceProvider();
-        var coordinator = new SagaCompensationCoordinator(provider);
+        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
 
         // Act
         await coordinator.CompensateAsync(sagaId, stepType);
@@ -335,10 +338,11 @@ public class SagaCompensationCoordinatorTests
             payload);
 
         services.AddSingleton<ISagaStore>(store);
+        services.AddSingleton<IEventBus>(eventBusMock);
         services.AddSingleton(handlerMock.Object);
 
         var provider = services.BuildServiceProvider();
-        var coordinator = new SagaCompensationCoordinator(provider);
+        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
 
         // Act
         await coordinator.CompensateAsync(sagaId, stepType);
@@ -390,10 +394,10 @@ public class SagaCompensationCoordinatorTests
         ChildCompensationHandler.Invocations.Clear();
 
         var services = new ServiceCollection();
-        var eventBus = Mock.Of<IEventBus>();
+        var eventBusMock = Mock.Of<IEventBus>();
         var sagaIdGen = new TestSagaIdGenerator(fixedSagaId);
         var dummyCoordinator = Mock.Of<ISagaCompensationCoordinator>();
-        var store = new InMemorySagaStore(eventBus, sagaIdGen, dummyCoordinator);
+        var store = new InMemorySagaStore(eventBusMock, sagaIdGen, dummyCoordinator);
 
         // Step record(for chain)
         var stepType = typeof(DummyEvent);
@@ -410,12 +414,13 @@ public class SagaCompensationCoordinatorTests
             typeof(ChildCompensationHandler), child);
 
         services.AddSingleton<ISagaStore>(store);
+        services.AddSingleton<IEventBus>(eventBusMock);
         services.AddSingleton<ISagaCompensationHandler<DummyEvent>, GrandparentCompensationHandler>();
         services.AddSingleton<ISagaCompensationHandler<DummyEvent>, ParentCompensationHandler>();
         services.AddSingleton<ISagaCompensationHandler<DummyEvent>, ChildCompensationHandler>();
 
         var provider = services.BuildServiceProvider();
-        var coordinator = new SagaCompensationCoordinator(provider);
+        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
 
         // Act
         await coordinator.CompensateParentAsync(fixedSagaId, stepType, parent);
@@ -433,9 +438,9 @@ public class SagaCompensationCoordinatorTests
         var sagaId = Guid.NewGuid();
         var messageId = Guid.NewGuid();
         var dummyCoordinator = Mock.Of<ISagaCompensationCoordinator>();
-        var eventBus = Mock.Of<IEventBus>();
+        var eventBusMock = Mock.Of<IEventBus>();
         var sagaIdGen = Mock.Of<ISagaIdGenerator>();
-        var store = new InMemorySagaStore(eventBus, sagaIdGen, dummyCoordinator);
+        var store = new InMemorySagaStore(eventBusMock, sagaIdGen, dummyCoordinator);
 
         var stepType = typeof(DummyEvent);
         var payload = new DummyEvent()
@@ -450,10 +455,11 @@ public class SagaCompensationCoordinatorTests
         await store.LogStepAsync(sagaId, messageId, Guid.Empty, stepType, StepStatus.Failed, typeof(object), payload);
 
         var services = new ServiceCollection();
+        services.AddSingleton<IEventBus>(eventBusMock);
         services.AddSingleton<ISagaStore>(store);
 
         var provider = services.BuildServiceProvider();
-        var coordinator = new SagaCompensationCoordinator(provider);
+        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
 
         // Act + Assert
         await coordinator.CompensateAsync(sagaId, stepType);
@@ -478,10 +484,10 @@ public class SagaCompensationCoordinatorTests
 
         ParentCompensationHandler.Invocations.Clear();
         var services = new ServiceCollection();
-        var eventBus = Mock.Of<IEventBus>();
+        var eventBusMock = Mock.Of<IEventBus>();
         var sagaIdGen = new TestSagaIdGenerator(sagaId);
         var dummyCoordinator = Mock.Of<ISagaCompensationCoordinator>();
-        var store = new InMemorySagaStore(eventBus, sagaIdGen, dummyCoordinator);
+        var store = new InMemorySagaStore(eventBusMock, sagaIdGen, dummyCoordinator);
 
         // Save step log for root message
         await store.LogStepAsync(
@@ -490,9 +496,10 @@ public class SagaCompensationCoordinatorTests
 
         services.AddSingleton<ISagaStore>(store);
         services.AddSingleton<ISagaCompensationHandler<DummyEvent>, ParentCompensationHandler>();
+        services.AddSingleton<IEventBus>(eventBusMock);
 
         var provider = services.BuildServiceProvider();
-        var coordinator = new SagaCompensationCoordinator(provider);
+        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
 
         // Act
         await coordinator.CompensateParentAsync(sagaId, typeof(DummyEvent), root);

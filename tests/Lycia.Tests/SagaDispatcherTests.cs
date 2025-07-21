@@ -44,8 +44,6 @@ public class SagaDispatcherTests
         var dispatcherMock = new Mock<SagaDispatcher>(
             provider.GetRequiredService<ISagaStore>(),
             provider.GetRequiredService<ISagaIdGenerator>(),
-            provider.GetRequiredService<IEventBus>(),
-            provider.GetRequiredService<ISagaCompensationCoordinator>(),
             provider
         ) { CallBase = true };
 

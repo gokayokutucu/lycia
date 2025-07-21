@@ -23,6 +23,7 @@ public class DummyEvent : IMessage
     }
     
     public bool IsCompensationFailed { get; set; } = false;
+    public bool IsFailed { get; set; } = false;
 
     public string Message { get; set; }
 
