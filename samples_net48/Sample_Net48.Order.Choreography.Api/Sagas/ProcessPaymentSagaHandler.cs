@@ -18,7 +18,6 @@ namespace Sample_Net48.Order.Choreography.Api.Sagas
 
         public override async Task HandleAsync(StockReservedEvent stockReservedEvent)
         {
-            throw new Exception("No Money!!!!");
             if (stockReservedEvent == null)
             {
                 logger.LogError("StockReservedEvent is null.");
