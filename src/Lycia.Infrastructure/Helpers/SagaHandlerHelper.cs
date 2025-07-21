@@ -99,7 +99,8 @@ public static class SagaHandlerHelper
             typeof(ISagaStartHandler<>)
         };
 
-        var filtered = handlers.Where(h => IsCandidateHandler(h, messageType, knownBaseTypes, knownInterfaces)).DistinctByKey(h => h.GetType());
+        var filtered = handlers.Where(h => 
+            IsCandidateHandler(h, messageType, knownBaseTypes, knownInterfaces)).DistinctByKey(h => h.GetType());
         return filtered;
     }
 
