@@ -313,6 +313,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                     messageQueue.Enqueue((ea.Body.ToArray()
                         , messageType));
                     //return Task.CompletedTask;
+                    Task.Yield();
                 }
                 catch (Exception ex)
                 {
@@ -320,6 +321,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                         , "Failed to process message from queue '{QueueName}' of type '{MessageType}'. Dead-lettering the message"
                         , queueName
                         , messageType.FullName);
+
                     // DLQ logic:
                     PublishToDeadLetterQueueAsync(queueName + ".dlq"
                         , ea.Body.ToArray()
@@ -327,6 +329,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                         cancellationToken)
                     .GetAwaiter().GetResult();
                     //return Task.CompletedTask;
+                    Task.Yield();
                 }
             };
             _channel.BasicConsume(queue: queueName
