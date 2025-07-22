@@ -46,7 +46,7 @@ public static class LyciaRegistrationExtension
         {
             var conn = configuration?.AppSettings.Settings["Lycia:EventStore:ConnectionString"]?.Value
                        ?? throw new InvalidOperationException("Lycia:EventStore:ConnectionString is not configured.");
-            builder.RegisterInstance(StackExchange.Redis.ConnectionMultiplexer.Connect(conn)).As<IConnectionMultiplexer>().SingleInstance();
+            builder.RegisterInstance(ConnectionMultiplexer.Connect(conn)).As<IConnectionMultiplexer>().SingleInstance();
             builder.Register(ctx => ctx.Resolve<IConnectionMultiplexer>().GetDatabase()).As<IDatabase>().InstancePerLifetimeScope();
         }
 
