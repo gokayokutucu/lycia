@@ -1,6 +1,6 @@
 using Newtonsoft.Json;
 
-namespace Lycia.Infrastructure.Helpers;
+namespace Lycia.Saga.Helpers;
 
 public static class JsonHelper
 {

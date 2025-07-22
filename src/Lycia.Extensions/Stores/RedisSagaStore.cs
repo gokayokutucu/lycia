@@ -1,5 +1,4 @@
-﻿using Lycia.Infrastructure.Helpers;
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
 using Lycia.Messaging;
 using Lycia.Messaging.Enums;
 using Lycia.Saga;
@@ -8,6 +7,8 @@ using Lycia.Saga.Extensions;
 using Lycia.Saga.Helpers;
 using StackExchange.Redis;
 using Lycia.Extensions.Configurations;
+using Lycia.Extensions.Helpers;
+using Lycia.Saga.Exceptions;
 
 namespace Lycia.Extensions.Stores;
 
@@ -38,8 +39,7 @@ public class RedisSagaStore(
         var redisStepLogKey = StepLogKey(sagaId);
 
         // Atomic update retry config
-        const int maxRetry = 5;
-        int attempt = 0;
+        var attempt = 0;
 
         while (true)
         {
@@ -48,81 +48,91 @@ public class RedisSagaStore(
             // 1. Read current value (if exists)
             var existingMetaJson = await redisDb.HashGetAsync(redisStepLogKey, stepKey);
 
-            var metadata = new SagaStepMetadata
-            {
-                Status = status,
-                MessageId = messageId,
-                ParentMessageId = parentMessageId,
-                MessageTypeName = messageTypeName,
-                ApplicationId = applicationId,
-                MessagePayload = JsonHelper.SerializeSafe(payload)
-            };
+            var metadata = SagaStepMetadata.Build(status, messageId, parentMessageId, messageTypeName, applicationId, payload);
 
-            if (existingMetaJson.HasValue)
-            {
-                var existingMeta = JsonConvert.DeserializeObject<SagaStepMetadata>(existingMetaJson!);
-                var previousStatus = existingMeta?.Status ?? StepStatus.None;
-
-                if (!SagaStepHelper.IsValidStepTransition(previousStatus, status))
-                {
-                    // Additional idempotency check: if status is the same
-                    if (previousStatus == status && !existingMeta!.IsIdempotentWith(metadata))
-                    {
-                        var msg = $"Illegal idempotent update with differing metadata for {stepKey}";
-                        throw new InvalidOperationException(msg);
-                    }
-                    else
-                    {
-                        var msg = $"Illegal StepStatus transition: {previousStatus} -> {status} for {stepKey}";
-                        throw new InvalidOperationException(msg);
-                    }
-                }
-            }
+            ValidateTransitionOrIdempotency(existingMetaJson, metadata, status, stepKey);
 
             var newMetaJson = JsonHelper.SerializeSafe(metadata);
 
             // 2. Try atomic update (CAS: Compare-And-Set)
-            bool updated;
-            if (existingMetaJson.HasValue)
-            {
-                // Only update if old value matches (atomic)
-                updated = await HashSetFieldIfEqualAsync(
-                    redisDb,
-                    redisStepLogKey,
-                    field: stepKey,
-                    expectedOldValue: existingMetaJson.ToString(),
-                    newValue: newMetaJson);
-            }
-            else
-            {
-                // Create new if not exists (atomic)
-                updated = await HashSetFieldIfEqualAsync(
-                    redisDb,
-                    redisStepLogKey,
-                    field: stepKey,
-                    expectedOldValue: "",
-                    newValue: newMetaJson);
-            }
+            var updated = await TryAtomicUpdate(redisStepLogKey, stepKey, existingMetaJson, newMetaJson);
 
             if (updated)
             {
-                // Set expiry/TTL
-                await redisDb.KeyExpireAsync(redisStepLogKey, _options.StepLogTtl ?? TimeSpan.FromHours(1));
+                await SetExpiryAsync(redisStepLogKey);
                 break; // Success
             }
-            else
-            {
-                // CAS failed: another process/thread modified! Try again up to maxRetry
-                if (attempt >= maxRetry)
-                {
-                    throw new InvalidOperationException(
-                        $"Concurrent update conflict on saga step after {maxRetry} attempts: {stepKey}");
-                }
 
-                // Optionally: add Task.Delay(10 * attempt) for backoff
-                await Task.Delay(5 * attempt);
+            // CAS failed: another process/thread modified! Try again up to maxRetry
+            if (attempt >= _options.LogMaxRetryCount)
+            {
+                throw new InvalidOperationException(
+                    $"Concurrent update conflict on saga step after {_options.LogMaxRetryCount} attempts: {stepKey}");
             }
+
+            // Optionally: add Task.Delay(10 * attempt) for backoff
+            await Task.Delay(5 * attempt);
         }
+    }
+
+    /// <summary>
+    /// Validates status transition or idempotency for saga step metadata.
+    /// </summary>
+    private static void ValidateTransitionOrIdempotency(RedisValue existingMetaJson, SagaStepMetadata metadata, StepStatus status, string stepKey)
+    {
+        if (!existingMetaJson.HasValue) return;
+        var existingMeta = JsonConvert.DeserializeObject<SagaStepMetadata>(existingMetaJson!);
+        var previousStatus = existingMeta?.Status ?? StepStatus.None;
+
+        if (SagaStepHelper.IsValidStepTransition(previousStatus, status)) return;
+        // Additional idempotency check: if status is the same
+        if (previousStatus == status && !existingMeta!.IsIdempotentWith(metadata))
+        {
+            var msg = $"Illegal idempotent update with differing metadata for {stepKey}";
+            throw new SagaStepIdempotencyException(msg);
+        }
+        else
+        {
+            var msg = $"Illegal StepStatus transition: {previousStatus} -> {status} for {stepKey}";
+            throw new SagaStepTransitionException(msg);
+        }
+    }
+
+    /// <summary>
+    /// Attempts an atomic update on the saga step log field.
+    /// </summary>
+    private async Task<bool> TryAtomicUpdate(
+        string redisStepLogKey,
+        string stepKey,
+        RedisValue existingMetaJson,
+        string newMetaJson)
+    {
+        if (existingMetaJson.HasValue)
+        {
+            // Only update if old value matches (atomic)
+            return await RedisHelper.HashSetFieldIfEqualAsync(
+                redisDb,
+                redisStepLogKey,
+                field: stepKey,
+                expectedOldValue: existingMetaJson.ToString(),
+                newValue: newMetaJson);
+        }
+
+        // Create new if not exists (atomic)
+        return await RedisHelper.HashSetFieldIfEqualAsync(
+            redisDb,
+            redisStepLogKey,
+            field: stepKey,
+            expectedOldValue: "",
+            newValue: newMetaJson);
+    }
+
+    /// <summary>
+    /// Sets expiry/TTL for the saga step log key.
+    /// </summary>
+    private async Task SetExpiryAsync(string redisStepLogKey)
+    {
+        await redisDb.KeyExpireAsync(redisStepLogKey, _options.StepLogTtl ?? TimeSpan.FromHours(1));
     }
 
     public async Task<bool> IsStepCompletedAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType)
@@ -229,31 +239,7 @@ public class RedisSagaStore(
         return context;
     }
 
-    private static readonly string AtomicHashSetIfEqualScript = @"
-local current = redis.call('hget', KEYS[1], ARGV[1])
-if (not current and ARGV[2] == '') or (current == ARGV[2]) then
-  redis.call('hset', KEYS[1], ARGV[1], ARGV[3])
-  return 1
-else
-  return 0
-end";
 
-    public async Task<bool> HashSetFieldIfEqualAsync(
-        IDatabase redisDb,
-        string hashKey,
-        string field,
-        string? expectedOldValue,
-        string newValue)
-    {
-        // Empty string is special marker for non-existing
-        var oldVal = expectedOldValue ?? "";
-        var result = (int)(await redisDb.ScriptEvaluateAsync(
-            AtomicHashSetIfEqualScript,
-            [hashKey],
-            [field, oldVal, newValue]
-        ));
-        return result == 1;
-    }
 
     private static string GetMessageTypeName(Type stepType)
     {

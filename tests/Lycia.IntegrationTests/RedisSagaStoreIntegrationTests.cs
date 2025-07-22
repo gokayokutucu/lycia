@@ -20,9 +20,9 @@ public class RedisSagaStoreIntegrationTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
+        await _redisContainer.StartAsync();
         var connectionString = _redisContainer.GetConnectionString();
         //var connectionString = "127.0.0.1:6379";
-        await _redisContainer.StartAsync();
         var redis = await ConnectionMultiplexer.ConnectAsync(connectionString);
         _db = redis.GetDatabase();
     }
