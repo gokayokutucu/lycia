@@ -42,6 +42,11 @@ public static class SagaStepHelper
     
     public static bool IsValidStepTransition(StepStatus previous, StepStatus next)
     {
+        // Allow idempotent transitions (same status, regardless of payload)
+        if (previous == next)
+            return true;
+
+        // Only allow state progressions, not regressions (except idempotent/same)
         return previous switch
         {
             StepStatus.None => next == StepStatus.Started,
