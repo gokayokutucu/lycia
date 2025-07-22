@@ -36,6 +36,10 @@ public static class LyciaRegistrationExtension
             ? parsedTtl
             : Constants.Ttl;
         
+        var logMaxRetryCount = int.TryParse(configuration["Lycia:EventStore:LogMaxRetryCount"], out var parsedLogRetryMaxCount) && parsedLogRetryMaxCount > 0
+            ? parsedLogRetryMaxCount
+            : Constants.LogMaxRetryCount;
+        
         // Production default registration for ISagaIdGenerator
         services.TryAddScoped<ISagaIdGenerator, DefaultSagaIdGenerator>();
         // Production default registration for ISagaDispatcher
@@ -90,7 +94,8 @@ public static class LyciaRegistrationExtension
                 var options = new SagaStoreOptions
                 {
                     ApplicationId = appId,
-                    StepLogTtl = TimeSpan.FromSeconds(ttlSeconds)
+                    StepLogTtl = TimeSpan.FromSeconds(ttlSeconds),
+                    LogMaxRetryCount = logMaxRetryCount,
                 };
                 return new RedisSagaStore(redisDb, eventBus, sagaIdGen, sagaCompensationCoordinator, options);
             });
