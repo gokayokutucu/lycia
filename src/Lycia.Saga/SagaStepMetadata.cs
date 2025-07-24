@@ -9,7 +9,7 @@ public class SagaStepMetadata
     public Guid? ParentMessageId { get; set; }
     public StepStatus Status { get; set; }
     public string MessageTypeName { get; set; } = null!;
-    public string ApplicationId { get; set; } = null!; // Optional but useful
+    public string? ApplicationId { get; set; } = null!; // Optional but useful
     public string MessagePayload { get; set; } = null!;
     public DateTime RecordedAt { get; private set; } = DateTime.UtcNow;
     
@@ -21,7 +21,7 @@ public class SagaStepMetadata
         Guid messageId,
         Guid? parentMessageId,
         string messageTypeName,
-        string applicationId,
+        string? applicationId,
         object? payload)
     {
         return new SagaStepMetadata

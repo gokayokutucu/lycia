@@ -6,6 +6,7 @@ using Lycia.Extensions.Stores;
 using Lycia.Messaging;
 using Lycia.Messaging.Enums;
 using Lycia.Saga;
+using Lycia.Saga.Exceptions;
 
 namespace Lycia.IntegrationTests;
 
@@ -68,7 +69,7 @@ public class RedisSagaStoreIntegrationTests : IAsyncLifetime
             store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Started, handlerType,
                 new { Value = 3 });
 
-        await invalidTransition.Should().ThrowAsync<InvalidOperationException>();
+        await invalidTransition.Should().ThrowAsync<SagaStepTransitionException>();
 
         // Update again with the correct status (idempotency test)
         await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType,
