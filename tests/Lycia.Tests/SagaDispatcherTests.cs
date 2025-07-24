@@ -7,6 +7,7 @@ using Lycia.Messaging;
 using Lycia.Messaging.Enums;
 using Lycia.Saga;
 using Lycia.Saga.Abstractions;
+using Lycia.Saga.Exceptions;
 using Lycia.Saga.Extensions;
 using Lycia.Saga.Handlers;
 using Lycia.Tests.Helpers;
@@ -22,7 +23,6 @@ namespace Lycia.Tests;
 
 public class SagaDispatcherTests
 {
-    
     [Fact]
     public async Task DispatchAsync_Should_Not_Invoke_Handler_On_MessageType_Mismatch()
     {
@@ -61,7 +61,7 @@ public class SagaDispatcherTests
             ItExpr.IsAny<FailResponse>()
         );
     }
-    
+
     [Fact]
     public async Task DispatchAsync_Should_Detect_And_Stop_On_CircularParentChain()
     {
@@ -92,17 +92,17 @@ public class SagaDispatcherTests
         var failingEvent = new FailingEvent
             { SagaId = fixedSagaId, MessageId = failingEventId, ParentMessageId = parentEventId };
 
+
         // Log both steps to simulate the circular chain
         await store.LogStepAsync(fixedSagaId, parentEventId, failingEventId, typeof(ParentEvent), StepStatus.Completed,
             typeof(ParentCompensationSagaHandler), parentEvent);
-        await store.LogStepAsync(fixedSagaId, failingEventId, parentEventId, typeof(FailingEvent), StepStatus.Failed,
-            typeof(FailingCompensationSagaHandler), failingEvent);
+
 
         // Act & Assert: Expect an InvalidOperationException due to the circular parent chain
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            dispatcher.DispatchAsync(parentEvent)
+        await Assert.ThrowsAsync<SagaStepCircularChainException>(() =>
+            store.LogStepAsync(fixedSagaId, failingEventId, parentEventId, typeof(FailingEvent), StepStatus.Failed,
+                typeof(FailingCompensationSagaHandler), failingEvent)
         );
-        Assert.Contains("Illegal StepStatus transition", ex.Message);
     }
 
     [Fact]
@@ -566,8 +566,17 @@ public class SagaDispatcherTests
         // Act
         await dispatcher.DispatchAsync(command);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(async () => { await dispatcher.DispatchAsync(command); });
+        //await Assert.ThrowsAsync<InvalidOperationException>(async () => { await dispatcher.DispatchAsync(command); });
 
+        try
+        {
+            await dispatcher.DispatchAsync(command);
+        }
+        catch (Exception e)
+        {
+            throw;
+        }
+        
         // Assert: The same step should only be processed once per handler.
         var steps = await store.GetSagaHandlerStepsAsync(fixedSagaId);
         var handlerCount = steps.Count(x => x.Key.stepType.Contains(nameof(CreateOrderCommand)));

@@ -8,6 +8,7 @@ using Lycia.Saga.Helpers;
 using StackExchange.Redis;
 using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Helpers;
+using Lycia.Saga.Enums;
 using Lycia.Saga.Exceptions;
 
 namespace Lycia.Extensions.Stores;
@@ -32,36 +33,54 @@ public class RedisSagaStore(
         Type handlerType, object? payload = null)
     {
         var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
-        var applicationId = !string.IsNullOrWhiteSpace(_options.ApplicationId)
-            ? _options.ApplicationId
-            : throw new InvalidOperationException("ApplicationId is required");
+        var applicationId = ApplicationId();
         var messageTypeName = GetMessageTypeName(stepType);
         var redisStepLogKey = StepLogKey(sagaId);
+        
+        var existingSteps = await GetSagaHandlerStepsAsync(sagaId);
 
         // Atomic update retry config
         var attempt = 0;
-
         while (true)
         {
             attempt++;
-
             // 1. Read current value (if exists)
             var existingMetaJson = await redisDb.HashGetAsync(redisStepLogKey, stepKey);
-
-            var metadata = SagaStepMetadata.Build(status, messageId, parentMessageId, messageTypeName, applicationId, payload);
-
-            ValidateTransitionOrIdempotency(existingMetaJson, metadata, status, stepKey);
-
-            var newMetaJson = JsonHelper.SerializeSafe(metadata);
-
-            // 2. Try atomic update (CAS: Compare-And-Set)
-            var updated = await TryAtomicUpdate(redisStepLogKey, stepKey, existingMetaJson, newMetaJson);
-
-            if (updated)
+            
+            var existingMeta = existingMetaJson.HasValue
+                ? JsonConvert.DeserializeObject<SagaStepMetadata>(existingMetaJson!)
+                : null;
+            
+            var metadata = SagaStepMetadata.Build(status, messageId, parentMessageId, messageTypeName, applicationId,
+                payload);
+            
+            var result = SagaStepHelper.ValidateSagaStepTransition(messageId, parentMessageId, status, existingSteps.Values, stepKey, metadata, existingMeta);
+            
+            var updated = false;
+            var shouldBreak = false;
+            switch (result.ValidationResult)
             {
-                await SetExpiryAsync(redisStepLogKey);
-                break; // Success
+                case SagaStepValidationResult.ValidTransition:
+                    var newMetaJson = JsonHelper.SerializeSafe(metadata);
+                    // 2. Try atomic update (CAS: Compare-And-Set)
+                    updated = await TryAtomicUpdate(redisStepLogKey, stepKey, existingMetaJson, newMetaJson);
+                    if (updated)  await SetExpiryAsync(redisStepLogKey);
+                    break;
+                case SagaStepValidationResult.Idempotent:
+                    // Silently ignore idempotent updates
+                    shouldBreak = true;
+                    break;
+                case SagaStepValidationResult.DuplicateWithDifferentPayload:
+                    throw new SagaStepIdempotencyException(result.Message);
+                case SagaStepValidationResult.InvalidTransition:
+                    throw new SagaStepTransitionException(result.Message);
+                case SagaStepValidationResult.CircularChain:
+                    throw new SagaStepCircularChainException(result.Message);
+                default:
+                    throw new InvalidOperationException("Unexpected validation result: " + result.ValidationResult);
             }
+
+            if (shouldBreak || updated) break; // Successfully updated or idempotent
 
             // CAS failed: another process/thread modified! Try again up to maxRetry
             if (attempt >= _options.LogMaxRetryCount)
@@ -75,28 +94,7 @@ public class RedisSagaStore(
         }
     }
 
-    /// <summary>
-    /// Validates status transition or idempotency for saga step metadata.
-    /// </summary>
-    private static void ValidateTransitionOrIdempotency(RedisValue existingMetaJson, SagaStepMetadata metadata, StepStatus status, string stepKey)
-    {
-        if (!existingMetaJson.HasValue) return;
-        var existingMeta = JsonConvert.DeserializeObject<SagaStepMetadata>(existingMetaJson!);
-        var previousStatus = existingMeta?.Status ?? StepStatus.None;
 
-        if (SagaStepHelper.IsValidStepTransition(previousStatus, status)) return;
-        // Additional idempotency check: if status is the same
-        if (previousStatus == status && !existingMeta!.IsIdempotentWith(metadata))
-        {
-            var msg = $"Illegal idempotent update with differing metadata for {stepKey}";
-            throw new SagaStepIdempotencyException(msg);
-        }
-        else
-        {
-            var msg = $"Illegal StepStatus transition: {previousStatus} -> {status} for {stepKey}";
-            throw new SagaStepTransitionException(msg);
-        }
-    }
 
     /// <summary>
     /// Attempts an atomic update on the saga step log field.
@@ -199,7 +197,9 @@ public class RedisSagaStore(
     {
         var dataJson = await redisDb.StringGetAsync(SagaDataKey(sagaId));
         if (!dataJson.HasValue)
+        {
             return null;
+        }
 
         return JsonConvert.DeserializeObject<SagaData>(dataJson!);
     }
@@ -238,8 +238,11 @@ public class RedisSagaStore(
         );
         return context;
     }
-
-
+    
+    private string? ApplicationId()
+    => !string.IsNullOrWhiteSpace(_options.ApplicationId)
+            ? _options.ApplicationId
+            : throw new InvalidOperationException("ApplicationId is required");
 
     private static string GetMessageTypeName(Type stepType)
     {

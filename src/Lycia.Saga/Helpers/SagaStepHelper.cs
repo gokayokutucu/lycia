@@ -1,61 +1,103 @@
+using System.Collections.Concurrent;
 using Lycia.Messaging.Enums;
+using Lycia.Saga.Enums;
+using Lycia.Saga.Exceptions;
 
 namespace Lycia.Saga.Helpers;
 
 public static class SagaStepHelper
 {
-    // --------------------------------------------------------------
-    // Parent/Child Chain Traversal (Context Chain) Note
-    // --------------------------------------------------------------
-    // This Coordinator implementation relies on traversing the parent/child
-    // step chain by following ParentMessageId and MessageId links in each step.
-    // To ensure the context chain works correctly:
-    //
-    // - The ParentMessageId must be set accurately in SagaStepMetadata.
-    // - The parent information must be maintained whenever logging a saga step.
-    // - The helper SagaStepHelper.GetParentChain() is used to retrieve the parent lineage.
-    //
-    // This enables compensation and stack tracing/debugging scenarios to
-    // reliably reconstruct the sequence of parent steps.
-    //
-    // Note: In multi-branch or concurrent saga scenarios, the parent-child
-    // chain is uniquely maintained using MessageId (no risk of collision or
-    // circular references). Each step always points to its parent,
-    // and compensation traverses the chain upward as needed.
-    //
-    // (For implementation details, see: SagaStepHelper.GetParentChain())
-    // --------------------------------------------------------------
-    public static List<SagaStepMetadata> GetParentChain(IEnumerable<SagaStepMetadata> steps, Guid messageId)
+    public static SagaStepValidationInfo ValidateSagaStepTransition(Guid messageId,
+        Guid? parentMessageId,
+        StepStatus currentStatus,
+        IEnumerable<SagaStepMetadata> steps,
+        string stepKey,
+        SagaStepMetadata newMeta,
+        SagaStepMetadata? existingMeta)
     {
-        var all = steps.ToList();
-        var chain = new List<SagaStepMetadata>();
-        var current = all.FirstOrDefault(x => x.MessageId == messageId);
-        while (current != null)
-        {
-            chain.Add(current);
-            if (current.ParentMessageId == Guid.Empty)
-                break;
-            current = all.FirstOrDefault(x => x.MessageId == current.ParentMessageId);
-        }
-        return chain;
-    }
-    
-    public static bool IsValidStepTransition(StepStatus previous, StepStatus next)
-    {
-        // Allow idempotent transitions (same status, regardless of payload)
-        if (previous == next)
-            return true;
+        // 1. Transition and idempotency
 
-        // Only allow state progressions, not regressions (except idempotent/same)
-        return previous switch
+        var previousStatus = existingMeta?.Status ?? StepStatus.None;
+
+        if (previousStatus == currentStatus)
         {
-            StepStatus.None => next == StepStatus.Started,
+            // Same status and same payload
+            if (existingMeta != null && existingMeta.IsIdempotentWith(newMeta))
+                return new SagaStepValidationInfo(SagaStepValidationResult.Idempotent);
+
+            // Same status but different payload
+            return new SagaStepValidationInfo(
+                SagaStepValidationResult.DuplicateWithDifferentPayload,
+                $"Duplicate update with differing payload for stepKey: {stepKey}");
+        }
+
+        // Normal state machine check
+        if (!IsValidStepTransition(previousStatus, currentStatus))
+            return new SagaStepValidationInfo(
+                SagaStepValidationResult.InvalidTransition,
+                $"Illegal StepStatus transition: {previousStatus} -> {currentStatus} for {stepKey}");
+
+
+        // 2. Chain loop check
+        if (HasCircularChain(steps, messageId, parentMessageId))
+        {
+            return new SagaStepValidationInfo(
+                SagaStepValidationResult.CircularChain,
+                "Circular parent-child chain detected in saga steps.");
+        }
+
+        // 3. If we reach here, it's a valid transition
+        return new SagaStepValidationInfo(SagaStepValidationResult.ValidTransition);
+    }
+
+    private static bool HasCircularChain(IEnumerable<SagaStepMetadata> steps, Guid currentMessageId,
+        Guid? parentMessageId)
+    {
+        var seen = new HashSet<Guid>();
+        var parentId = parentMessageId ?? Guid.Empty; //1
+        seen.Add(currentMessageId); // 2
+
+        var allSteps = steps.ToDictionary(s => s.MessageId);
+
+        if (!allSteps.ContainsKey(currentMessageId))
+        {
+            allSteps.Add(currentMessageId, SagaStepMetadata.Build(
+                StepStatus.None,
+                currentMessageId,
+                parentMessageId,
+                string.Empty,
+                string.Empty,
+                null));
+        }
+
+        while (parentId != Guid.Empty) // 1
+        {
+            if (!allSteps.TryGetValue(parentId,
+                    out var parentStep)) // If the step id number 1 which not found in the steps break
+                break;
+
+            if (!seen.Add(parentId))
+            {
+                return true;
+            }
+
+            parentId = parentStep.ParentMessageId ?? Guid.Empty;
+        }
+
+        return false; // No circular references found
+    }
+
+    private static bool IsValidStepTransition(
+        StepStatus previous,
+        StepStatus next)
+        => previous switch
+        {
+            StepStatus.None => true,
             StepStatus.Started => next is StepStatus.Completed or StepStatus.Failed,
             StepStatus.Completed => next is StepStatus.Compensated or StepStatus.CompensationFailed,
             StepStatus.Failed => next is StepStatus.Compensated or StepStatus.CompensationFailed,
-            StepStatus.Compensated => false, // final
-            StepStatus.CompensationFailed => false, // final
+            StepStatus.Compensated => false,
+            StepStatus.CompensationFailed => false,
             _ => false
         };
-    }
 }

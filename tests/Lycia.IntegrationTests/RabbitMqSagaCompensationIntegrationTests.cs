@@ -11,13 +11,11 @@ using Lycia.Infrastructure.Compensating;
 using Lycia.Infrastructure.Dispatching;
 using Lycia.Messaging.Enums;
 using Lycia.Saga.Abstractions;
-using Lycia.Saga.Extensions;
 using Lycia.Saga.Handlers;
 using Lycia.Tests.Helpers;
 using Lycia.Tests.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
 
 namespace Lycia.IntegrationTests;
 
@@ -37,12 +35,12 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         .Build();
 
     private string RabbitMqConnectionString =>
-     //   "amqp://guest:guest@127.0.0.1:5672/"; 
-     _rabbitMqContainer.GetConnectionString();
+           "amqp://guest:guest@127.0.0.1:5672/"; 
+        //_rabbitMqContainer.GetConnectionString();
 
     private string RedisEndpoint =>
-    //    "127.0.0.1:6379"; 
-    $"{_redisContainer.Hostname}:{_redisContainer.GetMappedPublicPort(6379)}";
+            "127.0.0.1:6379"; 
+        //$"{_redisContainer.Hostname}:{_redisContainer.GetMappedPublicPort(6379)}";
 
     public async Task InitializeAsync()
     {
@@ -54,6 +52,126 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
     {
         await _rabbitMqContainer.DisposeAsync();
         await _redisContainer.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task CompensationChain_Should_Be_Idempotent_For_Multiple_Compensation_Attempts()
+    {
+        // Arrange: Setup saga chain handlers (grandparent -> parent -> child)
+        var applicationId = "TestApp";
+        var handlerTypeGrandparent = typeof(GrandparentCompensationSagaHandler);
+        var handlerTypeParent = typeof(ParentCompensationSagaHandler);
+        var handlerTypeChild = typeof(ChildCompensationSagaHandler);
+
+        // Unique IDs for saga and each step
+        var sagaId = Guid.NewGuid();
+        var grandparentId = Guid.NewGuid();
+        var parentId = Guid.NewGuid();
+        var childId = Guid.NewGuid();
+
+        // Prepare dummy messages
+        var grandparentMsg = new DummyGrandparentEvent
+            { SagaId = sagaId, MessageId = grandparentId, Message = "grandparent" };
+        var parentMsg = new DummyParentEvent
+            { SagaId = sagaId, MessageId = parentId, ParentMessageId = grandparentId, Message = "parent" };
+        var childMsg = new DummyChildEvent
+            { SagaId = sagaId, MessageId = childId, ParentMessageId = parentId, Message = "trigger-failure" };
+
+        // EventBus and Redis-backed SagaStore setup
+        var grandParentQueueName = Saga.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyGrandparentEvent),
+            handlerTypeGrandparent, applicationId);
+        var parentQueueName =
+            Saga.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyParentEvent), handlerTypeParent,
+                applicationId);
+        var childQueueName =
+            Saga.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyChildEvent), handlerTypeChild, applicationId);
+        var queueTypeMap = new Dictionary<string, Type>
+        {
+            { grandParentQueueName, typeof(DummyGrandparentEvent) },
+            { parentQueueName, typeof(DummyParentEvent) },
+            { childQueueName, typeof(DummyChildEvent) },
+        };
+        var eventBusOptions = new EventBusOptions
+            { ApplicationId = applicationId, MessageTTL = TimeSpan.FromSeconds(10) };
+        var eventBus = await RabbitMqEventBus.CreateAsync(RabbitMqConnectionString,
+            NullLogger<RabbitMqEventBus>.Instance, queueTypeMap, eventBusOptions);
+
+        var redis = await ConnectionMultiplexer.ConnectAsync(RedisEndpoint);
+        var redisDb = redis.GetDatabase();
+        var sagaStoreOptions = new SagaStoreOptions
+            { ApplicationId = applicationId, StepLogTtl = TimeSpan.FromMinutes(5) };
+        var dummySagaIdGenerator = new TestSagaIdGenerator(sagaId);
+
+        // Register compensation handlers (clear static invocation logs)
+        GrandparentCompensationSagaHandler.Invocations.Clear();
+        ParentCompensationSagaHandler.Invocations.Clear();
+        ChildCompensationSagaHandler.Invocations.Clear();
+
+        var services = new ServiceCollection();
+        services.AddSingleton<StartReactiveSagaHandler<DummyGrandparentEvent>, GrandparentCompensationSagaHandler>();
+        services.AddSingleton<ReactiveSagaHandler<DummyParentEvent>, ParentCompensationSagaHandler>();
+        services.AddSingleton<ReactiveSagaHandler<DummyChildEvent>, ChildCompensationSagaHandler>();
+
+        services.AddSingleton<IEventBus>(eventBus);
+        services.AddSingleton<ISagaCompensationCoordinator>(sp =>
+            new SagaCompensationCoordinator(sp, dummySagaIdGenerator));
+        services.AddSingleton<ISagaStore>(sp =>
+            new RedisSagaStore(redisDb, eventBus, dummySagaIdGenerator,
+                sp.GetRequiredService<ISagaCompensationCoordinator>(), sagaStoreOptions));
+        services.AddSingleton<ISagaDispatcher>(sp =>
+            new SagaDispatcher(sp.GetRequiredService<ISagaStore>(), dummySagaIdGenerator, sp));
+
+        var serviceProvider = services.BuildServiceProvider();
+
+        var sagaStore = serviceProvider.GetRequiredService<ISagaStore>();
+        var coordinator = serviceProvider.GetRequiredService<ISagaCompensationCoordinator>();
+
+        // Pre-populate saga steps: grandparent and parent as Completed, child as Compensated
+        await sagaStore.LogStepAsync(sagaId, grandparentId, null, typeof(DummyGrandparentEvent), StepStatus.Completed,
+            handlerTypeGrandparent, grandparentMsg);
+        await sagaStore.LogStepAsync(sagaId, parentId, grandparentId, typeof(DummyParentEvent), StepStatus.Completed,
+            handlerTypeParent, parentMsg);
+        await sagaStore.LogStepAsync(sagaId, childId, parentId, typeof(DummyChildEvent), StepStatus.Compensated,
+            handlerTypeChild, childMsg);
+
+        // Act 1: Compensate child, parent and grandparent (normal compensation flow)
+        await coordinator.CompensateParentAsync(sagaId, typeof(DummyChildEvent), childMsg); 
+        
+        await WaitForInvocationsAsync(expectedParentCount: 1, expectedGrandparentCount: 1);
+
+        // Save initial invocation counts for later assertions
+        var parentInitialCount = ParentCompensationSagaHandler.Invocations.Count;
+        var grandparentInitialCount = GrandparentCompensationSagaHandler.Invocations.Count;
+
+        // Act 2: Try to compensate parent and grandparent again (should be idempotent)
+        await coordinator.CompensateParentAsync(sagaId, typeof(DummyChildEvent), childMsg); 
+        
+        await WaitForInvocationsAsync(expectedParentCount: 2, expectedGrandparentCount: 2);
+
+        // Assert: No new invocations should be added
+        ParentCompensationSagaHandler.Invocations.Count.Should().Be(parentInitialCount  + 1);
+        GrandparentCompensationSagaHandler.Invocations.Count.Should().Be(grandparentInitialCount + 1);
+
+        // Assert: Step status in Redis should still be single compensated per step
+        var steps = await sagaStore.GetSagaHandlerStepsAsync(sagaId);
+        steps.Values.Count(x => x.Status == StepStatus.Compensated).Should().Be(3); // parent and grandparent and child should be compensated only once
+
+        await eventBus.DisposeAsync();
+    }
+    
+    private static async Task WaitForInvocationsAsync(
+        int expectedParentCount,
+        int expectedGrandparentCount,
+        int timeoutMs = 60000)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (ParentCompensationSagaHandler.Invocations.Count < expectedParentCount ||
+               GrandparentCompensationSagaHandler.Invocations.Count < expectedGrandparentCount)
+        {
+            if (sw.ElapsedMilliseconds > timeoutMs)
+                throw new TimeoutException("Handler invocations not completed in expected time!");
+            await Task.Delay(25); // Short poll
+        }
     }
 
     [Fact]
@@ -72,7 +190,8 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         var childId = Guid.NewGuid();
 
         // Prepare dummy messages
-        var grandparentMsg = new DummyGrandparentEvent { SagaId = sagaId, MessageId = grandparentId, Message = "grandparent" };
+        var grandparentMsg = new DummyGrandparentEvent
+            { SagaId = sagaId, MessageId = grandparentId, Message = "grandparent" };
         var parentMsg = new DummyParentEvent
             { SagaId = sagaId, MessageId = parentId, ParentMessageId = grandparentId, Message = "parent" };
         var childMsg = new DummyChildEvent
@@ -83,15 +202,18 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         };
 
         // EventBus and Redis-backed SagaStore setup
-        var grandParentQueueName = Saga.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyGrandparentEvent), handlerTypeGrandparent, applicationId);
-        var parentQueueName = Saga.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyParentEvent), handlerTypeParent, applicationId);
-        var childQueueName = Saga.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyChildEvent), handlerTypeChild, applicationId);
+        var grandParentQueueName = Saga.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyGrandparentEvent),
+            handlerTypeGrandparent, applicationId);
+        var parentQueueName =
+            Saga.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyParentEvent), handlerTypeParent,
+                applicationId);
+        var childQueueName =
+            Saga.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyChildEvent), handlerTypeChild, applicationId);
         var queueTypeMap = new Dictionary<string, Type>
         {
             { grandParentQueueName, typeof(DummyGrandparentEvent) },
             { parentQueueName, typeof(DummyParentEvent) },
             { childQueueName, typeof(DummyChildEvent) },
-            
         };
         var eventBusOptions = new EventBusOptions
             { ApplicationId = applicationId, MessageTTL = TimeSpan.FromSeconds(10) };
@@ -118,14 +240,15 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         services.AddSingleton<ISagaCompensationCoordinator>(sp =>
             new SagaCompensationCoordinator(sp, dummySagaIdGenerator));
         services.AddSingleton<ISagaStore>(sp =>
-            new RedisSagaStore(redisDb, eventBus, dummySagaIdGenerator, sp.GetRequiredService<ISagaCompensationCoordinator>(), sagaStoreOptions));
-        
+            new RedisSagaStore(redisDb, eventBus, dummySagaIdGenerator,
+                sp.GetRequiredService<ISagaCompensationCoordinator>(), sagaStoreOptions));
+
         services.AddSingleton<ISagaDispatcher>(sp =>
             new SagaDispatcher(sp.GetRequiredService<ISagaStore>(), dummySagaIdGenerator, sp));
 
-        
+
         var serviceProvider = services.BuildServiceProvider();
-        
+
         var sagaStore = serviceProvider.GetRequiredService<ISagaStore>();
         var sagaDispatcher = serviceProvider.GetRequiredService<ISagaDispatcher>();
 
@@ -137,13 +260,13 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
 
         // Act 1: Call the protected DispatchCompensationHandlersAsync method using reflection (simulate compensation chain)
         await sagaDispatcher.DispatchAsync(childMsg);
-        
+
         await WaitForConditionAsync(() =>
                 GrandparentCompensationSagaHandler.Invocations.Count > 0 ||
                 ParentCompensationSagaHandler.Invocations.Count > 0 ||
                 ChildCompensationSagaHandler.Invocations.Count > 0
             , timeoutMs: 20000);
-        
+
         // Assert: Chain should not proceed if child is CompensationFailed
         GrandparentCompensationSagaHandler.Invocations.Should()
             .BeEmpty("Grandparent compensation should not be invoked if child compensation failed");
@@ -160,7 +283,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
 
         await eventBus.DisposeAsync();
     }
-    
+
     [Fact]
     public async Task CompensationChain_Should_Recursively_Compensate_Parent_And_Grandparent_When_Child_Is_Compensated()
     {
@@ -177,7 +300,8 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         var childId = Guid.NewGuid();
 
         // Prepare dummy messages
-        var grandparentMsg = new DummyGrandparentEvent { SagaId = sagaId, MessageId = grandparentId, Message = "grandparent" };
+        var grandparentMsg = new DummyGrandparentEvent
+            { SagaId = sagaId, MessageId = grandparentId, Message = "grandparent" };
         var parentMsg = new DummyParentEvent
             { SagaId = sagaId, MessageId = parentId, ParentMessageId = grandparentId, Message = "parent" };
         var childMsg = new DummyChildEvent
@@ -188,15 +312,18 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         };
 
         // EventBus and Redis-backed SagaStore setup
-        var grandParentQueueName = Saga.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyGrandparentEvent), handlerTypeGrandparent, applicationId);
-        var parentQueueName = Saga.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyParentEvent), handlerTypeParent, applicationId);
-        var childQueueName = Saga.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyChildEvent), handlerTypeChild, applicationId);
+        var grandParentQueueName = Saga.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyGrandparentEvent),
+            handlerTypeGrandparent, applicationId);
+        var parentQueueName =
+            Saga.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyParentEvent), handlerTypeParent,
+                applicationId);
+        var childQueueName =
+            Saga.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyChildEvent), handlerTypeChild, applicationId);
         var queueTypeMap = new Dictionary<string, Type>
         {
             { grandParentQueueName, typeof(DummyGrandparentEvent) },
             { parentQueueName, typeof(DummyParentEvent) },
             { childQueueName, typeof(DummyChildEvent) },
-            
         };
         var eventBusOptions = new EventBusOptions
             { ApplicationId = applicationId, MessageTTL = TimeSpan.FromSeconds(10) };
@@ -218,18 +345,19 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         services.AddSingleton<StartReactiveSagaHandler<DummyGrandparentEvent>, GrandparentCompensationSagaHandler>();
         services.AddSingleton<ReactiveSagaHandler<DummyParentEvent>, ParentCompensationSagaHandler>();
         services.AddSingleton<ReactiveSagaHandler<DummyChildEvent>, ChildCompensationSagaHandler>();
-        
+
         services.AddSingleton<IEventBus>(eventBus);
         services.AddSingleton<ISagaCompensationCoordinator>(sp =>
             new SagaCompensationCoordinator(sp, dummySagaIdGenerator));
         services.AddSingleton<ISagaStore>(sp =>
-            new RedisSagaStore(redisDb, eventBus, dummySagaIdGenerator, sp.GetRequiredService<ISagaCompensationCoordinator>(), sagaStoreOptions));
-        
+            new RedisSagaStore(redisDb, eventBus, dummySagaIdGenerator,
+                sp.GetRequiredService<ISagaCompensationCoordinator>(), sagaStoreOptions));
+
         services.AddSingleton<ISagaDispatcher>(sp =>
             new SagaDispatcher(sp.GetRequiredService<ISagaStore>(), dummySagaIdGenerator, sp));
-        
+
         var serviceProvider = services.BuildServiceProvider();
-        
+
         var sagaStore = serviceProvider.GetRequiredService<ISagaStore>();
         var sagaDispatcher = serviceProvider.GetRequiredService<ISagaDispatcher>();
 
@@ -241,13 +369,13 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
 
         // Act 1: Call the protected DispatchCompensationHandlersAsync method using reflection (simulate compensation chain)
         await sagaDispatcher.DispatchAsync(childMsg);
-        
+
         await WaitForConditionAsync(() =>
                 GrandparentCompensationSagaHandler.Invocations.Count == 1 &&
-                ParentCompensationSagaHandler.Invocations.Count == 1 && 
+                ParentCompensationSagaHandler.Invocations.Count == 1 &&
                 ChildCompensationSagaHandler.Invocations.Count == 1
             , timeoutMs: 3000);
-        
+
         // Assert: Chain should not proceed if child is CompensationFailed
         GrandparentCompensationSagaHandler.Invocations.Should().ContainSingle().And
             .Contain("GrandparentCompensationSagaHandler");
@@ -261,7 +389,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
 
         await eventBus.DisposeAsync();
     }
-    
+
     private static async Task WaitForConditionAsync(Func<bool> condition, int timeoutMs = 3000, int pollMs = 50)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -272,7 +400,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
             await Task.Delay(pollMs);
         }
     }
-    
+
 
     [Fact]
     public async Task
@@ -321,15 +449,16 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         services.AddSingleton<ISagaCompensationHandler<DummyEvent>, GrandparentCompensationHandler>();
         services.AddSingleton<ISagaCompensationHandler<DummyEvent>, ParentCompensationHandler>();
         services.AddSingleton<ISagaCompensationHandler<DummyEvent>, ChildCompensationHandler>();
-        
+
         services.AddSingleton<IEventBus>(eventBus);
         services.AddSingleton<ISagaCompensationCoordinator>(sp =>
             new SagaCompensationCoordinator(sp, dummySagaIdGenerator));
         services.AddSingleton<ISagaStore>(sp =>
-            new RedisSagaStore(redisDb, eventBus, dummySagaIdGenerator, sp.GetRequiredService<ISagaCompensationCoordinator>(), sagaStoreOptions));
-        
+            new RedisSagaStore(redisDb, eventBus, dummySagaIdGenerator,
+                sp.GetRequiredService<ISagaCompensationCoordinator>(), sagaStoreOptions));
+
         var provider = services.BuildServiceProvider();
-        
+
         var sagaStore = provider.GetRequiredService<ISagaStore>();
         var coordinator = provider.GetRequiredService<ISagaCompensationCoordinator>();
 

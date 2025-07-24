@@ -37,15 +37,11 @@ public class CommandBase: ICommand
         ApplicationId  = EventMetadata.ApplicationId;
     }
 
-    public Guid MessageId { get; private set; }
-    public Guid ParentMessageId { get; private set; } // CausationId
-#if NET9_0_OR_GREATER
-   public  Guid CorrelationId { get; init; }
-#else
+    public Guid MessageId { get; set; }
+    public Guid ParentMessageId { get; set; } // CausationId
     public Guid CorrelationId { get; set; }
-#endif
     public DateTime Timestamp { get; set; }
-    public string ApplicationId { get; private set; } 
+    public string ApplicationId { get; set; }
     public Guid? SagaId { get; set; }
 #if UNIT_TESTING
     [JsonIgnore]

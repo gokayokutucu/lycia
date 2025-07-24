@@ -5,6 +5,7 @@ using Lycia.Infrastructure.Stores;
 using Lycia.Messaging;
 using Lycia.Saga.Abstractions;
 using Lycia.Messaging.Enums;
+using Lycia.Saga.Exceptions;
 using Lycia.Saga.Extensions;
 using Lycia.Tests.Helpers;
 using Lycia.Tests.Messages;
@@ -127,25 +128,8 @@ public class SagaCompensationCoordinatorTests
         // Log both steps with compensation failed status to trigger parent chain
         await store.LogStepAsync(sagaId, messageId1, messageId2, stepType, StepStatus.CompensationFailed,
             typeof(CircularHandler), msg1);
-        await store.LogStepAsync(sagaId, messageId2, messageId1, stepType, StepStatus.CompensationFailed,
-            typeof(CircularHandler), msg2);
-
-        services.AddSingleton<ISagaStore>(store);
-        services.AddSingleton<IEventBus>(eventBusMock);
-        services.AddSingleton<ISagaCompensationHandler<DummyEvent>, CircularHandler>();
-
-        var provider = services.BuildServiceProvider();
-        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
-
-        // Act + Assert: Should NOT throw or enter infinite loop
-        var exception = await Record.ExceptionAsync(() =>
-            coordinator.CompensateParentAsync(sagaId, stepType, msg1)
-        );
-
-        // Assert
-        Assert.Null(exception);
-        // Only one invocation expected, because chain breaks at cycle detection.
-        Assert.Single(CircularHandler.Invocations);
+        await Assert.ThrowsAsync<SagaStepCircularChainException>(()=> store.LogStepAsync(sagaId, messageId2, messageId1, stepType, StepStatus.CompensationFailed,
+            typeof(CircularHandler), msg2));
     }
 
     private class CircularHandler : ISagaCompensationHandler<DummyEvent>
@@ -219,15 +203,15 @@ public class SagaCompensationCoordinatorTests
     {
         // Arrange
         var sagaId = Guid.NewGuid();
-        var grandparentId = Guid.NewGuid();
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var messageIdOfGrandParent = Guid.NewGuid();
+        var messageIdOfParent = Guid.NewGuid();
+        var messageIdOfChild = Guid.NewGuid();
 
         // Create dummy messages for each step in the chain.
         var grandparent = new DummyEvent
         {
             SagaId = sagaId,
-            MessageId = grandparentId,
+            MessageId = messageIdOfGrandParent,
             ParentMessageId = Guid.Empty,
             CorrelationId = Guid.NewGuid(),
             Timestamp = DateTime.UtcNow,
@@ -236,8 +220,8 @@ public class SagaCompensationCoordinatorTests
         var parent = new DummyEvent
         {
             SagaId = sagaId,
-            MessageId = parentId,
-            ParentMessageId = grandparentId,
+            MessageId = messageIdOfParent,
+            ParentMessageId = messageIdOfGrandParent,
             CorrelationId = grandparent.CorrelationId,
             Timestamp = DateTime.UtcNow,
             ApplicationId = "Test"
@@ -245,8 +229,8 @@ public class SagaCompensationCoordinatorTests
         var child = new DummyEvent
         {
             SagaId = sagaId,
-            MessageId = childId,
-            ParentMessageId = parentId,
+            MessageId = messageIdOfChild,
+            ParentMessageId = messageIdOfParent,
             CorrelationId = parent.CorrelationId,
             Timestamp = DateTime.UtcNow,
             ApplicationId = "Test"
@@ -267,15 +251,15 @@ public class SagaCompensationCoordinatorTests
         var stepType = typeof(DummyEvent);
 
         // Grandparent is completed
-        await store.LogStepAsync(sagaId, grandparentId, grandparentId, stepType, StepStatus.Completed,
+        await store.LogStepAsync(sagaId, messageIdOfGrandParent, Guid.Empty, stepType, StepStatus.Completed,
             typeof(GrandparentCompensationHandler), grandparent);
 
         // Parent step is completed
-        await store.LogStepAsync(sagaId, parentId, parentId, stepType, StepStatus.Completed,
+        await store.LogStepAsync(sagaId, messageIdOfParent, messageIdOfGrandParent, stepType, StepStatus.Completed,
             typeof(ParentCompensationHandler), parent);
 
         // Child step is CompensationFailed to simulate failure and trigger parent chain
-        await store.LogStepAsync(sagaId, childId, childId, stepType, StepStatus.CompensationFailed,
+        await store.LogStepAsync(sagaId, messageIdOfChild, messageIdOfParent, stepType, StepStatus.CompensationFailed,
             typeof(ChildCompensationHandler), child);
 
         services.AddSingleton<ISagaStore>(store);
@@ -357,14 +341,14 @@ public class SagaCompensationCoordinatorTests
         // Arrange
         var fixedSagaId = Guid.NewGuid();
 
-        var grandparentId = Guid.NewGuid();
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var messageIdOfGrandParent = Guid.NewGuid();
+        var messageIdOfParent = Guid.NewGuid();
+        var messageIdOfChild = Guid.NewGuid();
 
         var grandparent = new DummyEvent
         {
             SagaId = fixedSagaId,
-            MessageId = grandparentId,
+            MessageId = messageIdOfGrandParent,
             ParentMessageId = Guid.Empty,
             CorrelationId = Guid.NewGuid(),
             Timestamp = DateTime.UtcNow,
@@ -373,8 +357,8 @@ public class SagaCompensationCoordinatorTests
         var parent = new DummyEvent
         {
             SagaId = fixedSagaId,
-            MessageId = parentId,
-            ParentMessageId = grandparentId,
+            MessageId = messageIdOfParent,
+            ParentMessageId = messageIdOfGrandParent,
             CorrelationId = grandparent.CorrelationId,
             Timestamp = DateTime.UtcNow,
             ApplicationId = "Test"
@@ -382,8 +366,8 @@ public class SagaCompensationCoordinatorTests
         var child = new DummyEvent
         {
             SagaId = fixedSagaId,
-            MessageId = childId,
-            ParentMessageId = parentId,
+            MessageId = messageIdOfChild,
+            ParentMessageId = messageIdOfParent,
             CorrelationId = parent.CorrelationId,
             Timestamp = DateTime.UtcNow,
             ApplicationId = "Test"
@@ -403,14 +387,14 @@ public class SagaCompensationCoordinatorTests
         var stepType = typeof(DummyEvent);
 
         // Grandparent
-        await store.LogStepAsync(fixedSagaId, grandparentId, grandparentId, stepType, StepStatus.Compensated,
+        await store.LogStepAsync(fixedSagaId, messageIdOfGrandParent, Guid.Empty, stepType, StepStatus.Compensated,
             typeof(GrandparentCompensationHandler), grandparent);
         // Parent
-        await store.LogStepAsync(fixedSagaId, parentId, parentId, stepType, StepStatus.Compensated,
+        await store.LogStepAsync(fixedSagaId, messageIdOfParent, messageIdOfGrandParent, stepType, StepStatus.Compensated,
             typeof(ParentCompensationHandler),
             parent);
         // Child (last step failed)
-        await store.LogStepAsync(fixedSagaId, childId, childId, stepType, StepStatus.CompensationFailed,
+        await store.LogStepAsync(fixedSagaId, messageIdOfChild, messageIdOfParent, stepType, StepStatus.CompensationFailed,
             typeof(ChildCompensationHandler), child);
 
         services.AddSingleton<ISagaStore>(store);
@@ -471,6 +455,7 @@ public class SagaCompensationCoordinatorTests
         // Arrange
         var sagaId = Guid.NewGuid();
         var rootMessageId = Guid.NewGuid();
+        var rootParentMessageId = Guid.Empty;
 
         var root = new DummyEvent
         {
@@ -491,7 +476,7 @@ public class SagaCompensationCoordinatorTests
 
         // Save step log for root message
         await store.LogStepAsync(
-            sagaId, rootMessageId, rootMessageId, typeof(DummyEvent), StepStatus.CompensationFailed,
+            sagaId, rootMessageId, rootParentMessageId, typeof(DummyEvent), StepStatus.CompensationFailed,
             typeof(ParentCompensationHandler), root);
 
         services.AddSingleton<ISagaStore>(store);
