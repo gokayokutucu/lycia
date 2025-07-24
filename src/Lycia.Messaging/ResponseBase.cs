@@ -19,15 +19,11 @@ public abstract class ResponseBase<TPrevious> :
         ApplicationId  = EventMetadata.ApplicationId;
     }
     
-    public Guid MessageId { get; private set; }
-    public Guid ParentMessageId { get; private set; }
-    public DateTime Timestamp { get; private set; } 
-    public string ApplicationId { get; private set; }
-#if NET9_0_OR_GREATER
-    public  Guid CorrelationId { get; init; }
-#else
+    public Guid MessageId { get; set; }
+    public Guid ParentMessageId { get; set; }
+    public DateTime Timestamp { get; set; } 
+    public string ApplicationId { get; set; }
     public Guid CorrelationId { get; set; }
-#endif
     public Guid? SagaId { get; set; }
 #if UNIT_TESTING
     [JsonIgnore]

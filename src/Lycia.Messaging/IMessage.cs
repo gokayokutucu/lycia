@@ -18,11 +18,7 @@ public interface IMessage
     /// Correlates this message with a logical operation, transaction, or saga flow.
     /// All messages within the same workflow should have the same CorrelationId.
     /// </summary>
-#if NET9_0_OR_GREATER
-    Guid CorrelationId { get; init; }
-#else
     Guid CorrelationId { get; set; }
-#endif
 
     /// <summary>
     /// Creation or dispatch time (for ordering, debugging).
