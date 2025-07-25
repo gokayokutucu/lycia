@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+	<PropertyGroup>
+		<TargetFramework>netcoreapp3.1</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>disable</ImplicitUsings>
+		<LangVersion>preview</LangVersion>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\..\src\Lycia.Extensions\Lycia.Extensions.csproj" />
+		<ProjectReference Include="..\..\src\Lycia.Infrastructure\Lycia.Infrastructure.csproj" />
+		<ProjectReference Include="..\..\src\Lycia.Messaging\Lycia.Messaging.csproj" />
+		<ProjectReference Include="..\..\src\Lycia.Saga\Lycia.Saga.csproj" />
+		<ProjectReference Include="..\Sample_Net21.Shared\Sample_Net21.Shared.csproj" />
+	</ItemGroup>
+
+</Project>

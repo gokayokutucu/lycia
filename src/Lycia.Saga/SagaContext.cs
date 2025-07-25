@@ -21,6 +21,16 @@ public class SagaContext<TMessage>(
     public TMessage CurrentContextMessage { get; } = currentContextMessage;
     public Guid SagaId { get; } = sagaId == Guid.Empty ? sagaIdGenerator.Generate() : sagaId;
     public Type HandlerType { get; } = handlerType;
+    
+    /// <summary>
+    /// Registers a step message by storing it in the internal step messages dictionary keyed by its type.
+    /// </summary>
+    /// <typeparam name="TMessage1">The type of the step message.</typeparam>
+    /// <param name="message">The step message instance to register.</param>
+    public void RegisterStepMessage<TMessage1>(TMessage1 message) where TMessage1 : IMessage
+    {
+        StepMessages[(typeof(TMessage1), message.MessageId)] = message;
+    }
 
     public Task Send<T>(T command) where T : ICommand
     {
@@ -100,17 +110,6 @@ public class SagaContext<TMessage>(
         StepMessages.TryGetValue((typeof(T), CurrentContextMessage.MessageId), out var stepMessage);
         if (stepMessage == null) throw new InvalidOperationException();
         return SagaStore.IsStepCompletedAsync(SagaId, stepMessage.MessageId, typeof(T), HandlerType);
-    }
-
-
-    /// <summary>
-    /// Registers a step message by storing it in the internal step messages dictionary keyed by its type.
-    /// </summary>
-    /// <typeparam name="TMessage1">The type of the step message.</typeparam>
-    /// <param name="message">The step message instance to register.</param>
-    public void RegisterStepMessage<TMessage1>(TMessage1 message) where TMessage1 : IMessage
-    {
-        StepMessages[(typeof(TMessage1), message.MessageId)] = message;
     }
 }
 

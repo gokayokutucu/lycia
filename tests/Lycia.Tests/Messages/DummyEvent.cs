@@ -23,16 +23,13 @@ public class DummyEvent : IMessage
     }
     
     public bool IsCompensationFailed { get; set; } = false;
+    public bool IsFailed { get; set; } = false;
 
     public string Message { get; set; }
 
     public Guid MessageId { get; set; }
     public Guid ParentMessageId { get; set; }
-#if NET5_0_OR_GREATER
-    public Guid CorrelationId { get; init; }
-#else
     public Guid CorrelationId { get; set; }
-#endif
     public DateTime Timestamp { get; set; }
     public string ApplicationId { get; set; }
     public Guid? SagaId { get; set; }

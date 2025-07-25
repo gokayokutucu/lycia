@@ -1,5 +1,4 @@
-﻿using Lycia.Infrastructure.Helpers;
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
 using Lycia.Messaging;
 using Lycia.Messaging.Enums;
 using Lycia.Saga;
@@ -8,6 +7,9 @@ using Lycia.Saga.Extensions;
 using Lycia.Saga.Helpers;
 using StackExchange.Redis;
 using Lycia.Extensions.Configurations;
+using Lycia.Extensions.Helpers;
+using Lycia.Saga.Enums;
+using Lycia.Saga.Exceptions;
 
 namespace Lycia.Extensions.Stores;
 
@@ -27,43 +29,108 @@ public class RedisSagaStore(
     private static string SagaDataKey(Guid sagaId) => $"saga:data:{sagaId}";
     private static string StepLogKey(Guid sagaId) => $"saga:steps:{sagaId}";
 
-    public async Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status, Type handlerType, object? payload = null)
+    public async Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
+        Type handlerType, object? payload = null)
     {
         var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
-        var applicationId = !string.IsNullOrWhiteSpace(_options.ApplicationId)
-            ? _options.ApplicationId
-            : throw new InvalidOperationException("ApplicationId is required");
+        var applicationId = ApplicationId();
         var messageTypeName = GetMessageTypeName(stepType);
         var redisStepLogKey = StepLogKey(sagaId);
+        
+        var existingSteps = await GetSagaHandlerStepsAsync(sagaId);
 
-        // State transition validation
-        var existingMetaJson = await redisDb.HashGetAsync(redisStepLogKey, stepKey);
+        // Atomic update retry config
+        var attempt = 0;
+        while (true)
+        {
+            attempt++;
+            // 1. Read current value (if exists)
+            var existingMetaJson = await redisDb.HashGetAsync(redisStepLogKey, stepKey);
+            
+            var existingMeta = existingMetaJson.HasValue
+                ? JsonConvert.DeserializeObject<SagaStepMetadata>(existingMetaJson!)
+                : null;
+            
+            var metadata = SagaStepMetadata.Build(status, messageId, parentMessageId, messageTypeName, applicationId,
+                payload);
+            
+            var result = SagaStepHelper.ValidateSagaStepTransition(messageId, parentMessageId, status, existingSteps.Values, stepKey, metadata, existingMeta);
+            
+            var updated = false;
+            var shouldBreak = false;
+            switch (result.ValidationResult)
+            {
+                case SagaStepValidationResult.ValidTransition:
+                    var newMetaJson = JsonHelper.SerializeSafe(metadata);
+                    // 2. Try atomic update (CAS: Compare-And-Set)
+                    updated = await TryAtomicUpdate(redisStepLogKey, stepKey, existingMetaJson, newMetaJson);
+                    if (updated)  await SetExpiryAsync(redisStepLogKey);
+                    break;
+                case SagaStepValidationResult.Idempotent:
+                    // Silently ignore idempotent updates
+                    shouldBreak = true;
+                    break;
+                case SagaStepValidationResult.DuplicateWithDifferentPayload:
+                    throw new SagaStepIdempotencyException(result.Message);
+                case SagaStepValidationResult.InvalidTransition:
+                    throw new SagaStepTransitionException(result.Message);
+                case SagaStepValidationResult.CircularChain:
+                    throw new SagaStepCircularChainException(result.Message);
+                default:
+                    throw new InvalidOperationException("Unexpected validation result: " + result.ValidationResult);
+            }
+
+            if (shouldBreak || updated) break; // Successfully updated or idempotent
+
+            // CAS failed: another process/thread modified! Try again up to maxRetry
+            if (attempt >= _options.LogMaxRetryCount)
+            {
+                throw new InvalidOperationException(
+                    $"Concurrent update conflict on saga step after {_options.LogMaxRetryCount} attempts: {stepKey}");
+            }
+
+            // Optionally: add Task.Delay(10 * attempt) for backoff
+            await Task.Delay(5 * attempt);
+        }
+    }
+
+
+
+    /// <summary>
+    /// Attempts an atomic update on the saga step log field.
+    /// </summary>
+    private async Task<bool> TryAtomicUpdate(
+        string redisStepLogKey,
+        string stepKey,
+        RedisValue existingMetaJson,
+        string newMetaJson)
+    {
         if (existingMetaJson.HasValue)
         {
-            var existingMeta = JsonConvert.DeserializeObject<SagaStepMetadata>(existingMetaJson!);
-            var previousStatus = existingMeta?.Status ?? StepStatus.None;
-            if (!SagaStepHelper.IsValidStepTransition(previousStatus, status))
-            {
-                var msg = $"Illegal StepStatus transition: {previousStatus} -> {status} for {stepKey}";
-                Console.WriteLine(msg);
-                throw new InvalidOperationException(msg);
-            }
+            // Only update if old value matches (atomic)
+            return await RedisHelper.HashSetFieldIfEqualAsync(
+                redisDb,
+                redisStepLogKey,
+                field: stepKey,
+                expectedOldValue: existingMetaJson.ToString(),
+                newValue: newMetaJson);
         }
 
-        var metadata = new SagaStepMetadata
-        {
-            Status = status,
-            MessageId = messageId,
-            ParentMessageId = parentMessageId,
-            MessageTypeName = messageTypeName,
-            ApplicationId = applicationId,
-            MessagePayload = JsonHelper.SerializeSafe(payload)
-        };
+        // Create new if not exists (atomic)
+        return await RedisHelper.HashSetFieldIfEqualAsync(
+            redisDb,
+            redisStepLogKey,
+            field: stepKey,
+            expectedOldValue: "",
+            newValue: newMetaJson);
+    }
 
-        await redisDb.HashSetAsync(redisStepLogKey, stepKey, JsonHelper.SerializeSafe(metadata));
-        // Ensure the step log key has an expiry (TTL) set to avoid memory bloat.
-        // Expiry is updated on each log call (idempotent).
-        await redisDb.KeyExpireAsync(redisStepLogKey, _options.StepLogTtl != default ? _options.StepLogTtl : TimeSpan.FromHours(1));
+    /// <summary>
+    /// Sets expiry/TTL for the saga step log key.
+    /// </summary>
+    private async Task SetExpiryAsync(string redisStepLogKey)
+    {
+        await redisDb.KeyExpireAsync(redisStepLogKey, _options.StepLogTtl ?? TimeSpan.FromHours(1));
     }
 
     public async Task<bool> IsStepCompletedAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType)
@@ -92,7 +159,8 @@ public class RedisSagaStore(
         return metadata?.Status ?? StepStatus.None;
     }
 
-    public async Task<IReadOnlyDictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>> GetSagaHandlerStepsAsync(Guid sagaId)
+    public async Task<IReadOnlyDictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>>
+        GetSagaHandlerStepsAsync(Guid sagaId)
     {
         var redisStepLogKey = StepLogKey(sagaId);
         var entries = await redisDb.HashGetAllAsync(redisStepLogKey);
@@ -113,8 +181,8 @@ public class RedisSagaStore(
                 var stepTypeName = $"{parts[1]}, {parts[3]}"; // Combine step type and assembly
                 var handlerTypeName = parts[5];
                 var messageId = parts[7];
-                
-                result[(stepTypeName, handlerTypeName, messageId )] = metadata;
+
+                result[(stepTypeName, handlerTypeName, messageId)] = metadata;
             }
             else
             {
@@ -129,7 +197,9 @@ public class RedisSagaStore(
     {
         var dataJson = await redisDb.StringGetAsync(SagaDataKey(sagaId));
         if (!dataJson.HasValue)
+        {
             return null;
+        }
 
         return JsonConvert.DeserializeObject<SagaData>(dataJson!);
     }
@@ -139,7 +209,8 @@ public class RedisSagaStore(
         await redisDb.StringSetAsync(SagaDataKey(sagaId), JsonHelper.SerializeSafe(data));
     }
 
-    public async Task<ISagaContext<TStep, TSagaData>> LoadContextAsync<TStep, TSagaData>(Guid sagaId, TStep message, Type handlerType)
+    public async Task<ISagaContext<TStep, TSagaData>> LoadContextAsync<TStep, TSagaData>(Guid sagaId, TStep message,
+        Type handlerType)
         where TSagaData : SagaData, new()
         where TStep : IMessage
     {
@@ -163,11 +234,16 @@ public class RedisSagaStore(
             eventBus: eventBus,
             sagaStore: this,
             sagaIdGenerator: sagaIdGenerator,
-            compensationCoordinator:sagaCompensationCoordinator
+            compensationCoordinator: sagaCompensationCoordinator
         );
         return context;
     }
     
+    private string? ApplicationId()
+    => !string.IsNullOrWhiteSpace(_options.ApplicationId)
+            ? _options.ApplicationId
+            : throw new InvalidOperationException("ApplicationId is required");
+
     private static string GetMessageTypeName(Type stepType)
     {
         return stepType.AssemblyQualifiedName ?? throw new InvalidOperationException(
