@@ -12,6 +12,8 @@ using Lycia.Saga.Common;
 using Lycia.Saga.Extensions;
 using StackExchange.Redis;
 using Microsoft.Extensions.Logging;
+using Lycia.Saga.Configurations;
+
 
 
 #if NETSTANDARD2_0
@@ -29,7 +31,6 @@ public static class LyciaRegistrationExtension
 #if NETSTANDARD2_0
     public static void AddLycia(this ContainerBuilder builder, System.Configuration.Configuration configuration = null, Type sagaType = null)
     {
-        // Config'den okuma işlemlerini kendin uyarlayabilirsin!
         var eventBusProvider = configuration?.AppSettings.Settings["Lycia:EventBus:Provider"]?.Value ?? "RabbitMQ";
         var eventStoreProvider = configuration?.AppSettings.Settings["Lycia:EventStore:Provider"]?.Value ?? "Redis";
         var appId = configuration?.AppSettings.Settings["ApplicationId"]?.Value
@@ -37,6 +38,9 @@ public static class LyciaRegistrationExtension
         var ttlSeconds = int.TryParse(configuration?.AppSettings.Settings["Lycia:CommonTTL"]?.Value, out var parsedTtl) && parsedTtl > 0
             ? parsedTtl
             : Constants.Ttl;
+        var logMaxRetryCount = int.TryParse(configuration?.AppSettings.Settings["Lycia:EventStore:LogMaxRetryCount"]?.Value, out var parsedLogRetryMaxCount) && parsedLogRetryMaxCount > 0
+            ? parsedLogRetryMaxCount
+            : Constants.LogMaxRetryCount;
 
         builder.RegisterType<DefaultSagaIdGenerator>().As<ISagaIdGenerator>().InstancePerLifetimeScope();
         builder.RegisterType<SagaDispatcher>().As<ISagaDispatcher>().InstancePerLifetimeScope();
@@ -84,7 +88,67 @@ public static class LyciaRegistrationExtension
                 var options = new SagaStoreOptions
                 {
                     ApplicationId = appId,
-                    StepLogTtl = TimeSpan.FromSeconds(ttlSeconds)
+                    StepLogTtl = TimeSpan.FromSeconds(ttlSeconds),
+                    LogMaxRetryCount = logMaxRetryCount,
+                };
+                return new RedisSagaStore(redisDb, eventBus, sagaIdGen, sagaCompensationCoordinator, options);
+            }).As<ISagaStore>().InstancePerLifetimeScope();
+        }
+    }
+    public static void AddLycia(this ContainerBuilder builder, LyciaOptions options = null, Type sagaType = null)
+    {
+        var eventBusProvider = options?.EventBusProvider ?? "RabbitMQ";
+        var eventStoreProvider = options?.EventStoreProvider ?? "Redis";
+        var appId = options?.ApplicationId ?? throw new InvalidOperationException("ApplicationId is not configured.");
+        var ttlSeconds = options?.CommonTtlSeconds > 0 ? options.CommonTtlSeconds : Constants.Ttl;
+        var logMaxRetryCount = options?.LogMaxRetryCount > 0 ? options.LogMaxRetryCount : Constants.LogMaxRetryCount;
+
+        builder.RegisterType<DefaultSagaIdGenerator>().As<ISagaIdGenerator>().InstancePerLifetimeScope();
+        builder.RegisterType<SagaDispatcher>().As<ISagaDispatcher>().InstancePerLifetimeScope();
+        builder.RegisterType<SagaCompensationCoordinator>().As<ISagaCompensationCoordinator>().InstancePerLifetimeScope();
+
+        if (eventStoreProvider == "Redis")
+        {
+            var conn = options?.EventStoreConnectionString ?? throw new InvalidOperationException("Lycia:EventStore:ConnectionString is not configured.");
+            builder.RegisterInstance(ConnectionMultiplexer.Connect(conn)).As<IConnectionMultiplexer>().SingleInstance();
+            builder.Register(ctx => ctx.Resolve<IConnectionMultiplexer>().GetDatabase()).As<IDatabase>().InstancePerLifetimeScope();
+        }
+
+        var queueTypeMap = SagaHandlerRegistrationExtensions.DiscoverQueueTypeMap(appId, sagaType?.Assembly ?? Assembly.GetCallingAssembly());
+
+        if (eventBusProvider == "RabbitMQ")
+        {
+            builder.Register(ctx =>
+            {
+                var conn = options?.EventBusConnectionString ?? throw new InvalidOperationException("Lycia:EventBus:ConnectionString is not configured.");
+                // Logger implementation? (Autofac ile resolve edeceğin logger ekle!)
+                var logger = ctx.ResolveOptional<ILogger<RabbitMqEventBus>>();
+                var eventBusOptions = new EventBusOptions
+                {
+                    ApplicationId = appId,
+                    MessageTTL = TimeSpan.FromSeconds(ttlSeconds)
+                };
+                return RabbitMqEventBus.CreateAsync(conn, logger, queueTypeMap, eventBusOptions).GetAwaiter().GetResult();
+            }).As<IEventBus>().SingleInstance();
+
+            builder.RegisterGeneric(typeof(Logger<>)).As(typeof(ILogger<>)).SingleInstance();
+            builder.RegisterType<RabbitMqListenerWorker>().AsSelf().SingleInstance().AutoActivate();
+        }
+
+        if (eventStoreProvider == "Redis")
+        {
+            builder.Register(ctx =>
+            {
+                var redisDb = ctx.Resolve<IDatabase>();
+                var eventBus = ctx.Resolve<IEventBus>();
+                var sagaIdGen = ctx.Resolve<ISagaIdGenerator>();
+                var sagaCompensationCoordinator = ctx.Resolve<ISagaCompensationCoordinator>();
+
+                var options = new SagaStoreOptions
+                {
+                    ApplicationId = appId,
+                    StepLogTtl = TimeSpan.FromSeconds(ttlSeconds),
+                    LogMaxRetryCount = logMaxRetryCount,
                 };
                 return new RedisSagaStore(redisDb, eventBus, sagaIdGen, sagaCompensationCoordinator, options);
             }).As<ISagaStore>().InstancePerLifetimeScope();
@@ -113,6 +177,10 @@ public static class LyciaRegistrationExtension
         var ttlSeconds = int.TryParse(configuration["Lycia:CommonTTL"], out var parsedTtl) && parsedTtl > 0
             ? parsedTtl
             : Constants.Ttl;
+
+        var logMaxRetryCount = int.TryParse(configuration["Lycia:EventStore:LogMaxRetryCount"], out var parsedLogRetryMaxCount) && parsedLogRetryMaxCount > 0
+            ? parsedLogRetryMaxCount
+            : Constants.LogMaxRetryCount;
 
         // Production default registration for ISagaIdGenerator
         services.TryAddScoped<ISagaIdGenerator, DefaultSagaIdGenerator>();
@@ -165,7 +233,8 @@ public static class LyciaRegistrationExtension
                 var options = new SagaStoreOptions
                 {
                     ApplicationId = appId,
-                    StepLogTtl = TimeSpan.FromSeconds(ttlSeconds)
+                    StepLogTtl = TimeSpan.FromSeconds(ttlSeconds),
+                    LogMaxRetryCount = logMaxRetryCount,
                 };
                 return new RedisSagaStore(redisDb, eventBus, sagaIdGen, sagaCompensationCoordinator, options);
             });

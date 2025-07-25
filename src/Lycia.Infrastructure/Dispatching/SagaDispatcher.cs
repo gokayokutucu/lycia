@@ -16,8 +16,6 @@ namespace Lycia.Infrastructure.Dispatching;
 public class SagaDispatcher(
     ISagaStore sagaStore,
     ISagaIdGenerator sagaIdGenerator,
-    IEventBus eventBus,
-    ISagaCompensationCoordinator sagaCompensationCoordinator,
     IServiceProvider serviceProvider)
     : ISagaDispatcher
 {
@@ -86,6 +84,13 @@ public class SagaDispatcher(
         IMessage message,
         FailResponse? fail = null)
     {
+        if (serviceProvider.GetService(typeof(IEventBus)) is not IEventBus eventBus)
+            throw new InvalidOperationException("IEventBus not resolved.");
+
+        if (serviceProvider.GetService(typeof(ISagaCompensationCoordinator)) is not ISagaCompensationCoordinator
+            compensationCoordinator)
+            throw new InvalidOperationException("ISagaCompensationCoordinator not resolved.");
+
         foreach (var handler in handlers)
         {
             // SagaId resolution logic
@@ -134,7 +139,7 @@ public class SagaDispatcher(
                     eventBus,
                     sagaStore,
                     sagaIdGenerator,
-                    sagaCompensationCoordinator);
+                    compensationCoordinator);
                 var initializeMethod = handlerType.GetMethod("Initialize");
                 initializeMethod?.Invoke(handler, [contextInstance]);
 
@@ -158,7 +163,7 @@ public class SagaDispatcher(
                         eventBus,
                         sagaStore,
                         sagaIdGenerator,
-                        sagaCompensationCoordinator);
+                        compensationCoordinator);
                 var initializeMethod = handlerType.GetMethod("Initialize");
                 initializeMethod?.Invoke(handler, [contextInstance]);
 
@@ -170,45 +175,21 @@ public class SagaDispatcher(
         {
             if (handler == null) return;
 
-            // if the handler is a StartCoordinatedSagaHandler or StartReactiveSagaHandler, call HandleStartAsync
-            if (handlerType.IsSubclassOfRawGenericBase(typeof(StartReactiveSagaHandler<>))
-                || handlerType.IsSubclassOfRawGenericBase(typeof(StartCoordinatedSagaHandler<,,>)))
+            // Call HandleStartAsync
+            try
             {
-                // Call HandleStartAsync
-                try
-                {
-                    var sagaId = GetSagaId(message);
+                var sagaId = GetSagaId(message);
 
-                    var delegateMethod =
-                        HandlerDelegateHelper.GetHandlerDelegate(handlerType, "HandleAsyncInternal", message.GetType());
-                    await delegateMethod(handler, message);
+                var delegateMethod =
+                    HandlerDelegateHelper.GetHandlerDelegate(handlerType, "HandleAsyncInternal", message.GetType());
+                await delegateMethod(handler, message);
 
-                    await ValidateSagaStepCompletionAsync(message, handlerType, sagaId);
-                }
-                catch (Exception ex)
-                {
-                    // Optionally log or throw a descriptive error
-                    throw new InvalidOperationException($"Failed to invoke HandleAsync dynamically: {ex.Message}", ex);
-                }
+                await ValidateSagaStepCompletionAsync(message, handlerType, sagaId);
             }
-            else
+            catch (Exception ex)
             {
-                // Call HandleAsync for other handlers
-                try
-                {
-                    var sagaId = GetSagaId(message);
-
-                    var delegateMethod =
-                        HandlerDelegateHelper.GetHandlerDelegate(handlerType, "HandleAsyncInternal", message.GetType());
-                    await delegateMethod(handler, message);
-
-                    await ValidateSagaStepCompletionAsync(message, handlerType, sagaId);
-                }
-                catch (Exception ex)
-                {
-                    // Optionally log or throw a descriptive error
-                    throw new InvalidOperationException($"Failed to invoke HandleAsync dynamically: {ex.Message}", ex);
-                }
+                // Optionally log or throw a descriptive error
+                throw new InvalidOperationException($"Failed to invoke HandleAsync dynamically: {ex.Message}", ex);
             }
         }
     }

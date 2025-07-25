@@ -1,212 +1,266 @@
+using Lycia.Extensions.Configurations;
+using Lycia.Extensions.Stores;
 using Lycia.Infrastructure.Stores;
-using Lycia.Messaging;
 using Lycia.Messaging.Enums;
 using Lycia.Saga.Abstractions;
-using Microsoft.Extensions.DependencyInjection;
-using Lycia.Infrastructure.Compensating;
-using Lycia.Messaging.Utility;
-using Lycia.Tests.Helpers;
+using Lycia.Saga.Exceptions;
 using Lycia.Tests.Messages;
+using StackExchange.Redis;
+using Testcontainers.Redis;
 
 namespace Lycia.Tests;
 
-public class SagaSagaStoreTests
+public class SagaSagaStoreTests : IAsyncLifetime
 {
-    [Fact]
-    public async Task LogStepAsync_Should_Not_Throw_For_Valid_Transitions()
+    private readonly RedisContainer _redisContainer = new RedisBuilder()
+        .WithImage("redis:7-alpine")
+        .WithCleanUp(true)
+        .Build();
+
+    private IDatabase _db = null!;
+
+    public async Task InitializeAsync()
+    {
+        await _redisContainer.StartAsync();
+        var connectionString = _redisContainer.GetConnectionString();
+        //var connectionString = "127.0.0.1:6379";
+        var redis = await ConnectionMultiplexer.ConnectAsync(connectionString);
+        _db = redis.GetDatabase();
+    }
+
+    public async Task DisposeAsync()
+    {
+        await _redisContainer.DisposeAsync();
+    }
+
+    [Theory]
+    [InlineData("InMemory")]
+    [InlineData("Redis")]
+    public async Task LogStepAsync_Should_Not_Throw_For_Valid_Transitions(string storeType)
     {
         var sagaId = Guid.NewGuid();
         var messageId = Guid.NewGuid();
-        var eventBus = new DummyEventBus();
-        var sagaIdGenerator = new TestSagaIdGenerator();
+        var parentMessageId = Guid.Empty;
 
-        var serviceProvider = new ServiceCollection().BuildServiceProvider();
-        var compensationCoordinator = new SagaCompensationCoordinator(serviceProvider);
+        var sagaStoreOptions = new SagaStoreOptions
+        {
+            ApplicationId = "TestApp",
+            StepLogTtl = TimeSpan.FromMinutes(5)
+        };
 
-        var store = new InMemorySagaStore(eventBus, sagaIdGenerator, compensationCoordinator);
+        ISagaStore store = storeType switch
+        {
+            "Redis" => new RedisSagaStore(_db, null!, null!, null!, sagaStoreOptions),
+            "InMemory" => new InMemorySagaStore(null!, null!, null!),
+            _ => throw new ArgumentOutOfRangeException()
+        };
         var stepType = typeof(DummyEvent);
         var handlerType = typeof(DummySagaHandler);
 
-        await store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Started, handlerType);
-        await store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Failed, handlerType);
-        await store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Compensated, handlerType);
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Started, handlerType);
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Failed, handlerType);
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Compensated, handlerType);
     }
 
-    [Fact]
-    public async Task LogStepAsync_Should_Throw_When_CompensationFailed_To_Compensated_Transition()
+    [Theory]
+    [InlineData("InMemory")]
+    [InlineData("Redis")]
+    public async Task LogStepAsync_Should_Throw_When_CompensationFailed_To_Compensated_Transition(string storeType)
     {
         // Arrange
         var sagaId = Guid.NewGuid();
         var messageId = Guid.NewGuid();
-        var eventBus = new DummyEventBus();
-        var sagaIdGenerator = new TestSagaIdGenerator();
+        var parentMessageId = Guid.Empty;
 
-        var serviceProvider = new ServiceCollection().BuildServiceProvider();
-        var compensationCoordinator = new SagaCompensationCoordinator(serviceProvider);
+        var sagaStoreOptions = new SagaStoreOptions
+        {
+            ApplicationId = "TestApp",
+            StepLogTtl = TimeSpan.FromMinutes(5)
+        };
 
-        var store = new InMemorySagaStore(eventBus, sagaIdGenerator, compensationCoordinator);
+
+        ISagaStore store = storeType switch
+        {
+            "Redis" => new RedisSagaStore(_db, null!, null!, null!, sagaStoreOptions),
+            "InMemory" => new InMemorySagaStore(null!, null!, null!),
+            _ => throw new ArgumentOutOfRangeException()
+        };
+
         var stepType = typeof(DummyEvent);
         var handlerType = typeof(DummySagaHandler);
 
-        await store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.CompensationFailed, handlerType);
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.CompensationFailed,
+            handlerType);
 
         // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Compensated, handlerType));
+        await Assert.ThrowsAsync<SagaStepTransitionException>(() =>
+            store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Compensated, handlerType));
     }
 
-    [Fact]
-    public async Task LogStepAsync_Should_Throw_When_Failed_To_Completed_Transition()
+    [Theory]
+    [InlineData("InMemory")]
+    [InlineData("Redis")]
+    public async Task LogStepAsync_Should_Throw_When_Failed_To_Completed_Transition(string storeType)
     {
         // Arrange
         var sagaId = Guid.NewGuid();
         var messageId = Guid.NewGuid();
-        var eventBus = new DummyEventBus();
-        var sagaIdGenerator = new TestSagaIdGenerator();
+        var parentMessageId = Guid.Empty;
 
-        var serviceProvider = new ServiceCollection().BuildServiceProvider();
-        var compensationCoordinator = new SagaCompensationCoordinator(serviceProvider);
+        var sagaStoreOptions = new SagaStoreOptions
+        {
+            ApplicationId = "TestApp",
+            StepLogTtl = TimeSpan.FromMinutes(5)
+        };
 
-        var store = new InMemorySagaStore(eventBus, sagaIdGenerator, compensationCoordinator);
+        ISagaStore store = storeType switch
+        {
+            "Redis" => new RedisSagaStore(_db, null!, null!, null!, sagaStoreOptions),
+            "InMemory" => new InMemorySagaStore(null!, null!, null!),
+            _ => throw new ArgumentOutOfRangeException()
+        };
+
         var stepType = typeof(DummyEvent);
         var handlerType = typeof(DummySagaHandler);
 
-        await store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Failed, handlerType);
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Failed, handlerType);
 
         // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Completed, handlerType));
+        await Assert.ThrowsAsync<SagaStepTransitionException>(() =>
+            store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType));
     }
 
-    [Fact]
-    public async Task LogStepAsync_Should_Throw_When_Started_To_CompensationFailed_Transition()
+    [Theory]
+    [InlineData("InMemory")]
+    [InlineData("Redis")]
+    public async Task LogStepAsync_Should_Throw_When_Started_To_CompensationFailed_Transition(string storeType)
     {
         // Arrange
         var sagaId = Guid.NewGuid();
         var messageId = Guid.NewGuid();
-        var eventBus = new DummyEventBus();
-        var sagaIdGenerator = new TestSagaIdGenerator();
+        var parentMessageId = Guid.Empty;
 
-        var serviceProvider = new ServiceCollection().BuildServiceProvider();
-        var compensationCoordinator = new SagaCompensationCoordinator(serviceProvider);
+        var sagaStoreOptions = new SagaStoreOptions
+        {
+            ApplicationId = "TestApp",
+            StepLogTtl = TimeSpan.FromMinutes(5)
+        };
 
-        var store = new InMemorySagaStore(eventBus, sagaIdGenerator, compensationCoordinator);
+        ISagaStore store = storeType switch
+        {
+            "Redis" => new RedisSagaStore(_db, null!, null!, null!, sagaStoreOptions),
+            "InMemory" => new InMemorySagaStore(null!, null!, null!),
+            _ => throw new ArgumentOutOfRangeException()
+        };
         var stepType = typeof(DummyEvent);
         var handlerType = typeof(DummySagaHandler);
 
-        await store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Started, handlerType);
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Started, handlerType);
 
         // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.CompensationFailed, handlerType));
+        await Assert.ThrowsAsync<SagaStepTransitionException>(() =>
+            store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.CompensationFailed,
+                handlerType));
     }
 
-    [Fact]
-    public async Task LogStepAsync_Should_Throw_When_Compensated_To_Completed_Transition()
+    [Theory]
+    [InlineData("InMemory")]
+    [InlineData("Redis")]
+    public async Task LogStepAsync_Should_Throw_When_Compensated_To_Completed_Transition(string storeType)
     {
         // Arrange
         var sagaId = Guid.NewGuid();
         var messageId = Guid.NewGuid();
-        var eventBus = new DummyEventBus();
-        var sagaIdGenerator = new TestSagaIdGenerator();
+        var parentMessageId = Guid.Empty;
 
-        var serviceProvider = new ServiceCollection().BuildServiceProvider();
-        var compensationCoordinator = new SagaCompensationCoordinator(serviceProvider);
+        var sagaStoreOptions = new SagaStoreOptions
+        {
+            ApplicationId = "TestApp",
+            StepLogTtl = TimeSpan.FromMinutes(5)
+        };
 
-        var store = new InMemorySagaStore(eventBus, sagaIdGenerator, compensationCoordinator);
+        ISagaStore store = storeType switch
+        {
+            "Redis" => new RedisSagaStore(_db, null!, null!, null!, sagaStoreOptions),
+            "InMemory" => new InMemorySagaStore(null!, null!, null!),
+            _ => throw new ArgumentOutOfRangeException()
+        };
         var stepType = typeof(DummyEvent);
         var handlerType = typeof(DummySagaHandler);
 
-        await store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Compensated, handlerType);
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Compensated, handlerType);
 
         // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Completed, handlerType));
+        await Assert.ThrowsAsync<SagaStepTransitionException>(() =>
+            store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType));
     }
 
-    [Fact]
-    public async Task LogStepAsync_Should_Throw_When_Repeating_Completed_Transition()
+    [Theory]
+    [InlineData("InMemory")]
+    [InlineData("Redis")]
+    public async Task LogStepAsync_Should_Allow_Idempotent_Repeating_Completed_Transition(string storeType)
     {
         // Arrange
         var sagaId = Guid.NewGuid();
         var messageId = Guid.NewGuid();
-        var eventBus = new DummyEventBus();
-        var sagaIdGenerator = new TestSagaIdGenerator();
+        var parentMessageId = Guid.Empty;
 
-        var serviceProvider = new ServiceCollection().BuildServiceProvider();
-        var compensationCoordinator = new SagaCompensationCoordinator(serviceProvider);
+        var sagaStoreOptions = new SagaStoreOptions
+        {
+            ApplicationId = "TestApp",
+            StepLogTtl = TimeSpan.FromMinutes(5)
+        };
 
-        var store = new InMemorySagaStore(eventBus, sagaIdGenerator, compensationCoordinator);
+        ISagaStore store = storeType switch
+        {
+            "Redis" => new RedisSagaStore(_db, null!, null!, null!, sagaStoreOptions),
+            "InMemory" => new InMemorySagaStore(null!, null!, null!),
+            _ => throw new ArgumentOutOfRangeException()
+        };
         var stepType = typeof(DummyEvent);
         var handlerType = typeof(DummySagaHandler);
 
-        await store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Completed, handlerType);
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType);
 
         // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Completed, handlerType));
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType);
     }
 
-    [Fact]
-    public async Task LogStepAsync_Should_Prevent_Duplicate_Transitions_When_Concurrent()
+    [Theory]
+    [InlineData("InMemory")]
+    [InlineData("Redis")]
+    public async Task LogStepAsync_Should_Prevent_Duplicate_Transitions_When_Concurrent(string storeType)
     {
         // Arrange
         var sagaId = Guid.NewGuid();
         var messageId = Guid.NewGuid();
-        var eventBus = new DummyEventBus();
-        var sagaIdGenerator = new TestSagaIdGenerator();
+        var parentMessageId = Guid.Empty;
 
-        var serviceProvider = new ServiceCollection().BuildServiceProvider();
-        var compensationCoordinator = new SagaCompensationCoordinator(serviceProvider);
+        var sagaStoreOptions = new SagaStoreOptions
+        {
+            ApplicationId = "TestApp",
+            StepLogTtl = TimeSpan.FromMinutes(5)
+        };
 
-        var store = new InMemorySagaStore(eventBus, sagaIdGenerator, compensationCoordinator);
+        ISagaStore store = storeType switch
+        {
+            "Redis" => new RedisSagaStore(_db, null!, null!, null!, sagaStoreOptions),
+            "InMemory" => new InMemorySagaStore(null!, null!, null!),
+            _ => throw new ArgumentOutOfRangeException()
+        };
         var stepType = typeof(DummyEvent);
         var handlerType = typeof(DummySagaHandler);
 
         // Act
-        await store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Started, handlerType);
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Started, handlerType);
 
-        InvalidOperationException? expected = null;
-        Task? t1 = null, t2 = null;
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType);
+        
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType);
 
-        try
-        {
-            t1 = store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Completed, handlerType);
-        }
-        catch (InvalidOperationException ex)
-        {
-            expected = ex;
-        }
-
-        try
-        {
-            t2 = store.LogStepAsync(sagaId, messageId, messageId, stepType, StepStatus.Completed, handlerType);
-        }
-        catch (InvalidOperationException ex)
-        {
-            expected = ex;
-        }
-
-        Assert.NotNull(expected);
-
-        if (t1 != null) await t1;
-        if (t2 != null) await t2;
 
         var steps = await store.GetSagaHandlerStepsAsync(sagaId);
         var completedCount = steps.Values.Count(meta => meta.Status == StepStatus.Completed);
         Assert.Equal(1, completedCount);
-    }
-
-    private class DummyEventBus : IEventBus
-    {
-        public Task Send<TCommand>(TCommand command, Type handlerType, Guid? sagaId = null, CancellationToken cancellationToken = default) where TCommand : ICommand =>
-            Task.CompletedTask;
-
-        public Task Publish<TEvent>(TEvent @event, Type handlerType, Guid? sagaId = null, CancellationToken cancellationToken = default) where TEvent : IEvent => Task.CompletedTask;
-
-        public IAsyncEnumerable<(byte[] Body, Type MessageType)> ConsumeAsync(bool autoAck = true, CancellationToken cancellationToken = default)
-        {
-            return default;
-        }
     }
 }

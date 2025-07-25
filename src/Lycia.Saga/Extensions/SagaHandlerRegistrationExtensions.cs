@@ -5,6 +5,8 @@ using Lycia.Saga.Common;
 using Lycia.Saga.Handlers;
 using Lycia.Saga.Helpers;
 using System.Configuration;
+using Lycia.Saga.Configurations;
+
 
 
 #if NETSTANDARD2_0
@@ -48,25 +50,25 @@ public static class SagaHandlerRegistrationExtensions
     /// <summary>
     /// Scans the current assembly and automatically registers all detected Saga handler types. No extra parameters.
     /// </summary>
-    public static void AddSagasFromCurrentAssembly(this ContainerBuilder builder)
+    public static void AddSagasFromCurrentAssembly(this ContainerBuilder builder, LyciaOptions options = null)
     {
         var callingAssembly = Assembly.GetCallingAssembly();
-        builder.AddSagasFromAssemblies(callingAssembly);
+        builder.AddSagasFromAssemblies(options, callingAssembly);
     }
 
     /// <summary>
     /// Scans the assemblies of the marker types and registers detected Saga handler types. No extra parameters.
     /// </summary>
-    public static void AddSagasFromAssembliesOf(this ContainerBuilder builder, params Type[] markerTypes)
+    public static void AddSagasFromAssembliesOf(this ContainerBuilder builder, LyciaOptions options = null, params Type[] markerTypes)
     {
         var assemblies = markerTypes.Select(t => t.Assembly).Distinct().ToArray();
-        builder.AddSagasFromAssemblies(assemblies);
+        builder.AddSagasFromAssemblies(options, assemblies);
     }
 
     /// <summary>
     /// Scans the provided assemblies and registers detected Saga handler types. No extra parameters.
     /// </summary>
-    public static void AddSagasFromAssemblies(this ContainerBuilder builder, params Assembly[] assemblies)
+    public static void AddSagasFromAssemblies(this ContainerBuilder builder, LyciaOptions options = null, params Assembly[] assemblies)
     {
         foreach (var assembly in assemblies)
         {
@@ -76,7 +78,7 @@ public static class SagaHandlerRegistrationExtensions
             );
             foreach (var handlerType in handlerTypes)
             {
-                RegisterSagaHandler(builder, handlerType);
+                RegisterSagaHandler(builder, handlerType, options);
             }
         }
     }
@@ -85,7 +87,7 @@ public static class SagaHandlerRegistrationExtensions
     /// Registers the handler and its matching interfaces with InstancePerLifetimeScope,
     /// and updates the shared queueTypeMap (and reads appId) from the container at runtime.
     /// </summary>
-    private static void RegisterSagaHandler(ContainerBuilder builder, Type? type)
+    private static void RegisterSagaHandler(ContainerBuilder builder, Type? type, LyciaOptions options = null)
     {
         if (type == null)
             return;
@@ -110,7 +112,7 @@ public static class SagaHandlerRegistrationExtensions
                 .InstancePerLifetimeScope()
                 .OnActivated(e =>
                 {
-                    var appId = ConfigurationManager.AppSettings["ApplicationId"];
+                    var appId = options?.ApplicationId ?? throw new InvalidOperationException("ApplicationId is not configured.");
                     var queueTypeMap = new Dictionary<string, Type>();
                     builder.RegisterInstance(queueTypeMap)
                            .As<Dictionary<string, Type>>()

@@ -4,6 +4,8 @@ using Lycia.Messaging;
 using Lycia.Messaging.Enums;
 using Lycia.Saga;
 using Lycia.Saga.Abstractions;
+using Lycia.Saga.Enums;
+using Lycia.Saga.Exceptions;
 using Lycia.Saga.Extensions;
 using Lycia.Saga.Helpers;
 
@@ -24,52 +26,55 @@ public class InMemorySagaStore(
     // Stores step logs per sagaId with composite key "stepTypeName_handlerTypeFullName"
     private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<string, SagaStepMetadata>> _stepLogs = new();
 
-    public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status, Type handlerType, object? payload = null)
+    public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
+        Type handlerType, object? payload = null)
     {
-        try
+        var stepDict = _stepLogs.GetOrAdd(sagaId, _ => new ConcurrentDictionary<string, SagaStepMetadata>());
+        var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
+
+        stepDict.TryGetValue(stepKey, out var existingMeta);
+        
+        var messageTypeName = GetMessageTypeName(stepType);
+            
+        var metadata = SagaStepMetadata.Build(
+            status: status,
+            messageId: messageId,
+            parentMessageId: parentMessageId,
+            messageTypeName: messageTypeName,
+            applicationId: "InMemory",
+            payload: payload);
+            
+        // State transition validation
+        var result = SagaStepHelper.ValidateSagaStepTransition(messageId, parentMessageId, status, stepDict.Values, stepKey, metadata, existingMeta);
+
+        switch (result.ValidationResult)
         {
-            var stepDict = _stepLogs.GetOrAdd(sagaId, _ => new ConcurrentDictionary<string, SagaStepMetadata>());
-            var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
-
-            var messageTypeName = GetMessageTypeName(stepType);
-
-            // State transition validation
-            if (stepDict.TryGetValue(stepKey, out var existingMeta))
-            {
-                var previousStatus = existingMeta?.Status ?? StepStatus.None;
-                if (!SagaStepHelper.IsValidStepTransition(previousStatus, status))
-                {
-                    var msg = $"Illegal StepStatus transition: {previousStatus} -> {status} for {stepKey}";
-                    Console.WriteLine(msg);
-                    throw new InvalidOperationException(msg);
-                }
-            }
-
-            var metadata = new SagaStepMetadata
-            {
-                Status = status,
-                MessageId = messageId,
-                ParentMessageId =  parentMessageId,
-                MessageTypeName = messageTypeName,
-                ApplicationId = "InMemory", // Replace with dynamic value if available
-                MessagePayload = JsonHelper.SerializeSafe(payload, payload?.GetType() ?? typeof(object))
-            };
-            stepDict[stepKey] = metadata;
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error logging step: {ex}");
-            throw;
+            case SagaStepValidationResult.ValidTransition:
+                stepDict[stepKey] = metadata;
+                break;
+            case SagaStepValidationResult.Idempotent:
+                // Silently ignore idempotent updates
+                break;
+            case SagaStepValidationResult.DuplicateWithDifferentPayload:
+                throw new SagaStepIdempotencyException(result.Message);
+            case SagaStepValidationResult.InvalidTransition:
+                throw new SagaStepTransitionException(result.Message);
+            case SagaStepValidationResult.CircularChain:
+                throw new SagaStepCircularChainException(result.Message);
+            default:
+                throw new InvalidOperationException("Unexpected validation result: " + result.ValidationResult);
         }
 
         return Task.CompletedTask;
     }
 
+    
+
     /// <summary>
     /// Checks if the step with specified stepType and handlerType is completed.
     /// Uses the composite key for lookup.
     /// </summary>
-    public Task<bool> IsStepCompletedAsync(Guid sagaId,  Guid messageId, Type stepType, Type handlerType)
+    public Task<bool> IsStepCompletedAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType)
     {
         if (_stepLogs.TryGetValue(sagaId, out var steps))
         {
@@ -129,7 +134,7 @@ public class InMemorySagaStore(
                         var stepTypeName = $"{parts[1]}, {parts[3]}"; // Combine step type and assembly
                         var handlerTypeName = parts[5];
                         var messageId = parts[7];
-                        
+
                         result[(stepTypeName, handlerTypeName, messageId)] = metadata;
                     }
                     else
@@ -145,11 +150,13 @@ public class InMemorySagaStore(
             }
 
             return Task
-                .FromResult<IReadOnlyDictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>>(result);
+                .FromResult<IReadOnlyDictionary<(string stepType, string handlerType, string messageId),
+                    SagaStepMetadata>>(result);
         }
 
-        return Task.FromResult<IReadOnlyDictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>>(
-            new Dictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>());
+        return Task
+            .FromResult<IReadOnlyDictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>>(
+                new Dictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>());
     }
 
     public Task<SagaData?> LoadSagaDataAsync(Guid sagaId)
@@ -164,7 +171,8 @@ public class InMemorySagaStore(
         return Task.CompletedTask;
     }
 
-    public Task<ISagaContext<TStep, TSagaData>> LoadContextAsync<TStep, TSagaData>(Guid sagaId, TStep message, Type handlerType)
+    public Task<ISagaContext<TStep, TSagaData>> LoadContextAsync<TStep, TSagaData>(Guid sagaId, TStep message,
+        Type handlerType)
         where TSagaData : SagaData, new()
         where TStep : IMessage
     {
@@ -187,7 +195,7 @@ public class InMemorySagaStore(
 
         return Task.FromResult(context);
     }
-    
+
     private static string GetMessageTypeName(Type stepType)
     {
         return stepType.AssemblyQualifiedName ?? throw new InvalidOperationException(
