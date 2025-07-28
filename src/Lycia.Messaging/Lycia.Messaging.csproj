@@ -5,7 +5,7 @@
         <LangVersion>preview</LangVersion>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
-        <DefineConstants>$(DefineConstants);UNIT_TESTING</DefineConstants>
+<!--        <DefineConstants>$(DefineConstants);UNIT_TESTING</DefineConstants>-->
     </PropertyGroup>
 
     <ItemGroup>

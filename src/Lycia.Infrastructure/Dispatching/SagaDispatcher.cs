@@ -18,7 +18,8 @@ public class SagaDispatcher(
     IServiceProvider serviceProvider)
     : ISagaDispatcher
 {
-    private async Task DispatchByMessageTypeAsync<TMessage>(TMessage message) where TMessage : IMessage
+    private async Task DispatchByMessageTypeAsync<TMessage>(TMessage message, Guid? sagaId,
+        CancellationToken cancellationToken) where TMessage : IMessage
     {
         var messageType = message.GetType();
 
@@ -26,23 +27,24 @@ public class SagaDispatcher(
         var startHandlersList = startHandlers.ToList();
         if (startHandlersList.Count != 0)
         {
-            await InvokeHandlerAsync(startHandlersList, message);
+            await InvokeHandlerAsync(startHandlersList, message, cancellationToken: cancellationToken);
         }
 
         var stepHandlers = SagaHandlerHelper.FindSagaHandlers(serviceProvider, messageType);
         var stepHandlersList = stepHandlers.ToList();
         if (stepHandlersList.Count != 0)
         {
-            await InvokeHandlerAsync(stepHandlersList, message);
+            await InvokeHandlerAsync(stepHandlersList, message, sagaId, cancellationToken: cancellationToken);
         }
     }
 
-    public async Task DispatchAsync<TMessage>(TMessage message) where TMessage : IMessage
+    public async Task DispatchAsync<TMessage>(TMessage message, Guid? sagaId,
+        CancellationToken cancellationToken) where TMessage : IMessage
     {
-        await DispatchByMessageTypeAsync(message);
+        await DispatchByMessageTypeAsync(message, sagaId, cancellationToken);
     }
 
-    public async Task DispatchAsync<TMessage, TResponse>(TResponse message)
+    public async Task DispatchAsync<TMessage, TResponse>(TResponse message, Guid? sagaId, CancellationToken cancellationToken)
         where TMessage : IMessage
         where TResponse : IResponse<TMessage>
     {
@@ -58,10 +60,10 @@ public class SagaDispatcher(
         {
             var handlerType = typeof(ISuccessResponseHandler<>).MakeGenericType(messageType);
             Console.WriteLine($"[Dispatch] Dispatching {messageType.Name} to {handlerType.Name}");
-            await InvokeHandlerAsync(serviceProvider.GetServices(handlerType), message);
+            await InvokeHandlerAsync(serviceProvider.GetServices(handlerType), message, cancellationToken: cancellationToken);
         }
         else if (IsFailResponse(messageType))
-        {
+        { 
             var handlerType = typeof(IFailResponseHandler<>).MakeGenericType(messageType);
             var fail = new FailResponse
             {
@@ -70,18 +72,19 @@ public class SagaDispatcher(
                 OccurredAt = DateTime.UtcNow
             };
             Console.WriteLine($"[Dispatch] Dispatching {messageType.Name} to {handlerType.Name}");
-            await InvokeHandlerAsync(serviceProvider.GetServices(handlerType), message, fail);
+            await InvokeHandlerAsync(serviceProvider.GetServices(handlerType), message, sagaId, fail, cancellationToken);
         }
         else
         {
-            await DispatchByMessageTypeAsync(message);
+            await DispatchByMessageTypeAsync(message, sagaId, cancellationToken);
         }
     }
 
     protected virtual async Task InvokeHandlerAsync(
         IEnumerable<object?> handlers,
         IMessage message,
-        FailResponse? fail = null)
+        Guid? sagaId = null,
+        FailResponse? fail = null, CancellationToken cancellationToken = default)
     {
         if (serviceProvider.GetService(typeof(IEventBus)) is not IEventBus eventBus)
             throw new InvalidOperationException("IEventBus not resolved.");
@@ -95,7 +98,6 @@ public class SagaDispatcher(
             // SagaId resolution logic
             var messageType = message.GetType();
             var sagaIdProp = messageType.GetProperty("SagaId");
-            Guid sagaId;
 
             // Only ISagaStartHandler gets a new SagaId if needed
             var handlerType = handler!.GetType();
@@ -112,7 +114,7 @@ public class SagaDispatcher(
                 if (sagaIdProp != null && sagaIdProp.CanWrite)
                     sagaIdProp.SetValue(message, sagaId);
             }
-            else
+            else if (sagaId is null && sagaIdProp is null)
             {
                 // Not a start handler and SagaId missing: throw!
                 throw new InvalidOperationException("Missing SagaId on a non-starting message.");
