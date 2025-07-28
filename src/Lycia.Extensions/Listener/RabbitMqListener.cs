@@ -21,7 +21,7 @@ public class RabbitMqListener(
 
         var sagaDispatcher = scope.ServiceProvider.GetRequiredService<ISagaDispatcher>();
         
-        await foreach (var (body, messageType) in eventBus.ConsumeAsync(cancellationToken:stoppingToken))
+        await foreach (var (body, messageType) in eventBus.ConsumeAsync(autoAck: true, cancellationToken:stoppingToken))
         {
             if (stoppingToken.IsCancellationRequested)
                 break;
@@ -38,31 +38,35 @@ public class RabbitMqListener(
                 }
 
                 logger.LogInformation("Dispatching {MessageType} to SagaDispatcher", messageType.Name);
-                // Find the generic DispatchAsync<TMessage> method definition
-                var genericMethod = typeof(ISagaDispatcher)
+                // Find the generic DispatchAsync<TMessage>(TMessage message, Type? handlerType, Guid? sagaId, CancellationToken cancellationToken) method
+                var dispatchMethod = typeof(ISagaDispatcher)
                     .GetMethods()
                     .FirstOrDefault(m =>
                         m is { Name: nameof(ISagaDispatcher.DispatchAsync), IsGenericMethodDefinition: true }
-                        && m.GetParameters().Length == 1);
+                        && m.GetParameters().Length == 3);
 
-                // Fallback if not found
-                if (genericMethod == null)
+                if (dispatchMethod == null)
                 {
                     logger.LogWarning("No suitable DispatchAsync<TMessage> found for message type {MessageType}", messageType.Name);
                     continue;
                 }
+                
+                var sagaIdProp = deserialized.GetType().GetProperty("SagaId");
+                Guid? sagaId = null;
+                if (sagaIdProp != null && sagaIdProp.GetValue(deserialized) is Guid id && id != Guid.Empty)
+                    sagaId = id;
 
-                // Construct generic method for actual message type
-                var dispatchMethod = genericMethod.MakeGenericMethod(deserialized.GetType());
+                // Make the method generic for the runtime type
+                var constructed = dispatchMethod.MakeGenericMethod(deserialized.GetType());
 
-                if (dispatchMethod.Invoke(sagaDispatcher, [deserialized]) is not Task dispatchTask)
+                // Call with all parameters; null for handlerType/sagaId, stoppingToken
+                if (constructed.Invoke(sagaDispatcher, [deserialized, sagaId, stoppingToken]) is not Task dispatchTask)
                 {
                     logger.LogError(
                         "DispatchAsync invocation for message type {MessageType} did not return a Task instance",
                         messageType.Name);
                     continue;
                 }
-
                 await dispatchTask;
             }
             catch (Exception ex)

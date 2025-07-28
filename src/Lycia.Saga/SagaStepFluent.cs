@@ -8,12 +8,15 @@ namespace Lycia.Saga;
 public class ReactiveSagaStepFluent<TStep, TInitialMessage>(
     ISagaContext<TInitialMessage> context,
     Func<Task> operation,
-    TInitialMessage message)
+    TInitialMessage currentStep,
+    TStep initialMessage)
     where TStep : IMessage
     where TInitialMessage : IMessage
 {
+#if UNIT_TESTING
     private TInitialMessage _message = message;
-
+#endif
+    
     public async Task ThenMarkAsComplete()
     {
 #if UNIT_TESTING
@@ -82,8 +85,9 @@ public class CoordinatedSagaStepFluent<TStep, TSagaData>(
     where TStep : IMessage
     where TSagaData : SagaData
 {
+#if UNIT_TESTING
     private TStep _message = @event;
-
+#endif
     public async Task ThenMarkAsComplete()
     {
 #if UNIT_TESTING

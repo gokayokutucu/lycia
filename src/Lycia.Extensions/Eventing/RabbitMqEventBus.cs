@@ -106,9 +106,6 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                 "Channel is not initialized. Ensure RabbitMqEventBus is properly created.");
         }
 
-        // Declare DLX and DLQ for this exchange (producer-side responsibility)
-        await DeclareDeadLetter(exchangeName, cancellationToken);
-
         // Declare the exchange (topic) and publish to it. No queue or binding logic here.
         await _channel.ExchangeDeclareAsync(
             exchange: exchangeName,
@@ -142,29 +139,21 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
     {
         await EnsureChannelAsync(cancellationToken).ConfigureAwait(false);
 
-        var queueName = handlerType is not null ? MessagingNamingHelper.GetRoutingKey(typeof(TCommand), handlerType, _options.ApplicationId) : // command.CreateOrderCommand.CreateOrderSagaHandler.OrderService
-            GetCommandQueueName(typeof(TCommand));
+        var exchangeName = MessagingNamingHelper.GetExchangeName(typeof(TCommand)); // command.CreateOrderCommand
+        var routingKey = MessagingNamingHelper.GetTopicRoutingKey(typeof(TCommand)); // e.g., "command.CreateOrderCommand.#"
 
         if (_channel == null)
         {
             throw new InvalidOperationException(
                 "Channel is not initialized. Ensure RabbitMqEventBus is properly created.");
         }
-
-        // Producer-side: declare DLX and DLQ for this queue
-        var queueArgs = await DeclareDeadLetter(queueName, cancellationToken);
-        // Add TTL if configured
-        if (_options.MessageTTL is { TotalMilliseconds: > 0 } ttl)
-        {
-            queueArgs[XMesssageTtl] = (int)ttl.TotalMilliseconds;
-        }
-        // Ensure queue is declared with DLQ/DLX and TTL args (idempotent)
-        await _channel.QueueDeclareAsync(
-            queue: queueName,
+        
+        await _channel.ExchangeDeclareAsync(
+            exchange: exchangeName,
+            type: ExchangeType.Direct,
             durable: true,
-            exclusive: false,
             autoDelete: false,
-            arguments: queueArgs.Count > 0 ? queueArgs : null,
+            arguments: null, 
             cancellationToken: cancellationToken);
 
         var headers = RabbitMqEventBusHelper.BuildMessageHeaders(command, sagaId, typeof(TCommand), Constants.CommandTypeHeader);
@@ -178,8 +167,8 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         var body = Encoding.UTF8.GetBytes(json);
 
         await _channel.BasicPublishAsync(
-            exchange: string.Empty, // Default exchange
-            routingKey: queueName,
+            exchange: exchangeName,
+            routingKey: routingKey,
             mandatory: false,
             basicProperties: properties,
             body: body, cancellationToken: cancellationToken);
@@ -266,9 +255,13 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             var exchangeName = MessagingNamingHelper.GetExchangeName(messageType); // e.g., "event.OrderCreatedEvent"
             var routingKey = MessagingNamingHelper.GetTopicRoutingKey(messageType); // e.g., "event.OrderCreatedEvent.#"
 
+            var exchangeType = messageType.IsSubclassOf(typeof(EventBase))
+                ? ExchangeType.Topic
+                : ExchangeType.Direct;
+            
             await _channel.ExchangeDeclareAsync(
                 exchange: exchangeName,
-                type: ExchangeType.Topic,
+                type: exchangeType,
                 durable: true,
                 autoDelete: false,
                 arguments: null, cancellationToken: cancellationToken);
@@ -380,17 +373,6 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             throw new InvalidOperationException(
                 "Queue/message type map is not configured for this event bus instance.");
         return ConsumeAsync(_queueTypeMap, autoAck, cancellationToken);
-    }
-    
-    /// <summary>
-    /// Returns the queue name for the specified command message type.
-    /// This assumes only one queue (one consumer) exists per command type.
-    /// For event message types, multiple queues may exist, so this should not be used for events.
-    /// </summary>
-    private string GetCommandQueueName(Type messageType)
-    {
-        return _queueTypeMap.FirstOrDefault(kvp => kvp.Value == messageType).Key
-               ?? throw new InvalidOperationException($"No handler type found for message type {messageType.FullName}");
     }
 
     /// <summary>
