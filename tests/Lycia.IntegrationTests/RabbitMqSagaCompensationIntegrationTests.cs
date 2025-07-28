@@ -259,7 +259,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
             handlerTypeParent, parentMsg);
 
         // Act 1: Call the protected DispatchCompensationHandlersAsync method using reflection (simulate compensation chain)
-        await sagaDispatcher.DispatchAsync(childMsg);
+        await sagaDispatcher.DispatchAsync(childMsg, sagaId: sagaId, CancellationToken.None);
 
         await WaitForConditionAsync(() =>
                 GrandparentCompensationSagaHandler.Invocations.Count > 0 ||
@@ -368,7 +368,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
             handlerTypeParent, parentMsg);
 
         // Act 1: Call the protected DispatchCompensationHandlersAsync method using reflection (simulate compensation chain)
-        await sagaDispatcher.DispatchAsync(childMsg);
+        await sagaDispatcher.DispatchAsync(childMsg, sagaId: sagaId, CancellationToken.None);
 
         await WaitForConditionAsync(() =>
                 GrandparentCompensationSagaHandler.Invocations.Count == 1 &&

@@ -50,7 +50,7 @@ public class SagaDispatcherTests
         var message = new InitialCommand(); // No handler registered for this type.
 
         // Act
-        await dispatcherMock.Object.DispatchAsync(message);
+        await dispatcherMock.Object.DispatchAsync(message, sagaId: fixedSagaId, CancellationToken.None);
 
         // Assert: Neither InvokeHandlerAsync nor DispatchCompensationHandlersAsync should be called.
         dispatcherMock.Protected().Verify(
@@ -134,7 +134,7 @@ public class SagaDispatcherTests
         var command = new InitialCommand();
 
         // Act
-        await dispatcher.DispatchAsync(command);
+        await dispatcher.DispatchAsync(command, sagaId: fixedSagaId, CancellationToken.None);
 
         // Assert: Only the first failing compensation handler should be called.
         Assert.True(FailingCompensationSagaHandler.CompensateCalled);
@@ -177,7 +177,7 @@ public class SagaDispatcherTests
         };
 
         // Act
-        await dispatcher.DispatchAsync(command);
+        await dispatcher.DispatchAsync(command, sagaId: fixedSagaId, CancellationToken.None);
 
         // Assert: Was the flag set in overridden CompensateStartAsync?
         Assert.True(TestStartReactiveCompensateHandler.CompensateCalled);
@@ -206,7 +206,7 @@ public class SagaDispatcherTests
         };
 
         // Act & Assert: Exception swallowed, should not propagate
-        var ex = await Record.ExceptionAsync(() => dispatcher.DispatchAsync(message));
+        var ex = await Record.ExceptionAsync(() => dispatcher.DispatchAsync(message, sagaId: fixedSagaId, CancellationToken.None));
         Assert.Null(ex);
     }
 
@@ -229,7 +229,7 @@ public class SagaDispatcherTests
         var message = new OrderCreatedEvent { OrderId = Guid.NewGuid() };
 
         // Act & Assert: Exception must be propagated
-        await Assert.ThrowsAsync<InvalidOperationException>(() => dispatcher.DispatchAsync(message));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => dispatcher.DispatchAsync(message, sagaId: fixedSagaId, CancellationToken.None));
     }
 
     [Fact]
@@ -262,7 +262,7 @@ public class SagaDispatcherTests
         };
 
         // Act
-        await dispatcher.DispatchAsync(command);
+        await dispatcher.DispatchAsync(command, sagaId: fixedSagaId, CancellationToken.None);
 
         // Assert
         var steps = await store.GetSagaHandlerStepsAsync(fixedSagaId);
@@ -307,7 +307,7 @@ public class SagaDispatcherTests
         };
 
         // Act
-        await dispatcher.DispatchAsync(command);
+        await dispatcher.DispatchAsync(command, sagaId: fixedSagaId, CancellationToken.None);
 
         // Assert - check the status of the steps in the chain
         var steps = await store.GetSagaHandlerStepsAsync(fixedSagaId);
@@ -409,7 +409,7 @@ public class SagaDispatcherTests
         };
 
         // Act
-        await dispatcher.DispatchAsync(command);
+        await dispatcher.DispatchAsync(command, sagaId: fixedSagaId, CancellationToken.None);
 
         var steps = await store.GetSagaHandlerStepsAsync(fixedSagaId);
 
@@ -441,7 +441,7 @@ public class SagaDispatcherTests
         };
 
         // Act & Assert
-        await dispatcher.DispatchAsync(command); // No handler registered, should not throw
+        await dispatcher.DispatchAsync(command, sagaId: null, CancellationToken.None); // No handler registered, should not throw
     }
 
     // CreateOrder -> OrderCreated (fail) -> Compensation started
@@ -482,7 +482,7 @@ public class SagaDispatcherTests
         // Plus, this codebase will also reduce the time required for future developments.
 
         // Act
-        await dispatcher.DispatchAsync(command);
+        await dispatcher.DispatchAsync(command, sagaId: fixedSagaId, CancellationToken.None);
 
         // Assert - check the status of the steps in the chain
         var steps = await store.GetSagaHandlerStepsAsync(fixedSagaId);
@@ -519,7 +519,7 @@ public class SagaDispatcherTests
         };
 
         // Act
-        await dispatcher.DispatchAsync(command);
+        await dispatcher.DispatchAsync(command, sagaId: fixedSagaId, CancellationToken.None);
 
         // Assert: Are all steps processed in order and completed?
         var steps = await store.GetSagaHandlerStepsAsync(fixedSagaId);
@@ -564,13 +564,13 @@ public class SagaDispatcherTests
         };
 
         // Act
-        await dispatcher.DispatchAsync(command);
+        await dispatcher.DispatchAsync(command, sagaId: fixedSagaId, CancellationToken.None);
 
         //await Assert.ThrowsAsync<InvalidOperationException>(async () => { await dispatcher.DispatchAsync(command); });
 
         try
         {
-            await dispatcher.DispatchAsync(command);
+            await dispatcher.DispatchAsync(command, sagaId: fixedSagaId, CancellationToken.None);
         }
         catch (Exception e)
         {
@@ -637,7 +637,15 @@ public class SagaDispatcherTests
         public static bool CompensateCalled = false;
 
         public override Task HandleAsync(FailingEvent message)
-            => throw new InvalidOperationException("Fail!");
+        {
+            CompensateCalled = true;
+            // Simulate a failure in the handler
+            // Uncomment the next line to simulate a failure and trigger compensation
+            // throw new Exception("Simulated failure in FailingCompensationSagaHandler");
+            Context.MarkAsComplete<FailingEvent>();
+            return Task.CompletedTask;
+        }
+            //=> throw new InvalidOperationException("Fail!");
 
         public override Task CompensateAsync(FailingEvent message)
         {

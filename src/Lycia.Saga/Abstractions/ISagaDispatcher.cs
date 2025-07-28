@@ -4,9 +4,9 @@ namespace Lycia.Saga.Abstractions;
 
 public interface ISagaDispatcher
 {
-    Task DispatchAsync<TMessage>(TMessage message) where TMessage : IMessage;
+    Task DispatchAsync<TMessage>(TMessage message, Guid? sagaId, CancellationToken cancellationToken) where TMessage : IMessage;
 
-    Task DispatchAsync<TCommand, TResponse>(TResponse message)
-        where TCommand : IMessage
-        where TResponse : IResponse<TCommand>;
+    Task DispatchAsync<TMessage, TResponse>(TResponse message, Guid? sagaId, CancellationToken cancellationToken)
+        where TMessage : IMessage
+        where TResponse : IResponse<TMessage>;
 }
