@@ -1,5 +1,6 @@
 using Lycia.Saga.Handlers;
 using Sample.Shared.Messages.Commands;
+using Sample.Shared.Messages.Events;
 
 namespace Sample.Order.Consumer.Sagas;
 
@@ -16,7 +17,11 @@ public class CreateOrderSagaHandler :
     
     public override async Task HandleStartAsync(CreateOrderCommand command)
     {
-        await Context.MarkAsComplete<CreateOrderCommand>();
+        await Context.PublishWithTracking(new OrderCreatedEvent
+        {
+            OrderId = command.OrderId,
+        }).ThenMarkAsComplete();
+        //await Context.MarkAsComplete<CreateOrderCommand>();
     }
 
     public override async Task CompensateStartAsync(CreateOrderCommand message)
