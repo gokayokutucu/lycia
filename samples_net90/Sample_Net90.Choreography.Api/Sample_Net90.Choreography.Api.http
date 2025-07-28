@@ -1,0 +1,6 @@
+@Sample_Net90.Choreography.Api_HostAddress = http://localhost:5050
+
+GET {{Sample_Net90.Choreography.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
