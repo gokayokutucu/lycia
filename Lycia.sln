@@ -41,7 +41,9 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample_Net21.Shared", "samp
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample_Core31.Order.Choreography.Api", "samples_net21\Sample_Core31.Order.Choreography.Api\Sample_Core31.Order.Choreography.Api.csproj", "{1D6A4E18-FC9D-16EC-78D5-4549A6F480FE}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "sample_net21", "sample_net21", "{21F8DB30-C4D7-405F-AAE6-E94ABF17D75F}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "samples_net21", "samples_net21", "{21F8DB30-C4D7-405F-AAE6-E94ABF17D75F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.ServiceDefaults", "Lycia.ServiceDefaults\Lycia.ServiceDefaults.csproj", "{2537F0AE-0318-56A7-0B60-D5551EB06FDE}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -109,6 +111,10 @@ Global
 		{1D6A4E18-FC9D-16EC-78D5-4549A6F480FE}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1D6A4E18-FC9D-16EC-78D5-4549A6F480FE}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{1D6A4E18-FC9D-16EC-78D5-4549A6F480FE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2537F0AE-0318-56A7-0B60-D5551EB06FDE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2537F0AE-0318-56A7-0B60-D5551EB06FDE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2537F0AE-0318-56A7-0B60-D5551EB06FDE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2537F0AE-0318-56A7-0B60-D5551EB06FDE}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

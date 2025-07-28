@@ -63,11 +63,17 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         return bus;
     }
 
+
     private async Task ConnectAsync(CancellationToken cancellationToken = default)
     {
-        _connection = _factory.CreateConnection();
-        _channel = _connection.CreateModel();
+        _connection = _factory
+            .CreateConnection();
+
+        _channel = _connection
+            .CreateModel();
+
     }
+
 
     private async Task EnsureChannelAsync(CancellationToken cancellationToken = default)
     {
@@ -83,11 +89,14 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             if (_connection is null || !_connection.IsOpen)
             {
                 _logger.LogWarning("RabbitMQ connection lost. Reconnecting...");
-                await ConnectAsync(cancellationToken).ConfigureAwait(false);
+                await ConnectAsync(cancellationToken)
+                    .ConfigureAwait(false);
             }
             else
             {
-                _channel = _connection.CreateModel();
+                _channel = _connection
+                    .CreateModel();
+
             }
         }
         finally
@@ -102,8 +111,8 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         , CancellationToken cancellationToken = default)
         where TEvent : IEvent
     {
-        await EnsureChannelAsync(cancellationToken).ConfigureAwait(false);
-
+        await EnsureChannelAsync(cancellationToken)
+            .ConfigureAwait(false);
         // routingKey equivalent to the exchange name in RabbitMQ terminology
         var exchangeName = MessagingNamingHelper.GetExchangeName(typeof(TEvent)); // event.OrderCreatedEvent
 
@@ -112,17 +121,13 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             throw new InvalidOperationException(
                 "Channel is not initialized. Ensure RabbitMqEventBus is properly created.");
         }
-
-        // Declare DLX and DLQ for this exchange (producer-side responsibility)
-        await DeclareDeadLetter(exchangeName
-            , cancellationToken);
-
         // Declare the exchange (topic) and publish to it. No queue or binding logic here.
         _channel.ExchangeDeclare(exchange: exchangeName
             , type: ExchangeType.Topic
             , durable: true
             , autoDelete: false
             , arguments: null);
+
 
         sagaId ??= @event.SagaId; // Ensure sagaId is not null, use a new Guid if not provided
 
@@ -131,8 +136,10 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             , typeof(TEvent)
             , Constants.EventTypeHeader);
         var properties = _channel.CreateBasicProperties();
+
         properties.Persistent = true;
         properties.Headers = headers;
+
 
         var json = JsonHelper.SerializeSafe(@event);
         var body = Encoding.UTF8.GetBytes(json);
@@ -142,6 +149,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             , mandatory: false
             , basicProperties: properties
             , body: body);
+
     }
 
     public async Task Send<TCommand>(TCommand command
@@ -150,13 +158,11 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         , CancellationToken cancellationToken = default)
         where TCommand : ICommand
     {
-        await EnsureChannelAsync(cancellationToken).ConfigureAwait(false);
+        await EnsureChannelAsync(cancellationToken)
+            .ConfigureAwait(false);
 
-        var queueName = handlerType is not null
-            ? MessagingNamingHelper.GetRoutingKey(typeof(TCommand)
-                , handlerType
-                , _options.ApplicationId)
-            : GetCommandQueueName(typeof(TCommand));// command.CreateOrderCommand.CreateOrderSagaHandler.OrderService
+        var exchangeName = MessagingNamingHelper.GetExchangeName(typeof(TCommand)); // command.CreateOrderCommand
+        var routingKey = MessagingNamingHelper.GetTopicRoutingKey(typeof(TCommand)); // e.g., "command.CreateOrderCommand.#"
 
         if (_channel == null)
         {
@@ -164,37 +170,31 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                 "Channel is not initialized. Ensure RabbitMqEventBus is properly created.");
         }
 
-        // Producer-side: declare DLX and DLQ for this queue
-        var queueArgs = await DeclareDeadLetter(queueName
-            , cancellationToken);
+        _channel.ExchangeDeclare(
+            exchange: exchangeName,
+            type: ExchangeType.Direct,
+            durable: true,
+            autoDelete: false,
+            arguments: null);
 
-        // Add TTL if configured
-        if (_options.MessageTTL is { TotalMilliseconds: > 0 } ttl)
-        {
-            queueArgs[XMesssageTtl] = (int)ttl.TotalMilliseconds;
-        }
-        // Ensure queue is declared with DLQ/DLX and TTL args (idempotent)
-        _channel.QueueDeclare(queue: queueName
-            , durable: true
-            , exclusive: false
-            , autoDelete: false
-            , arguments: queueArgs.Count > 0 ? queueArgs : null);
-        var headers = RabbitMqEventBusHelper.BuildMessageHeaders(command
-            , sagaId
-            , typeof(TCommand)
-            , Constants.CommandTypeHeader);
+
+        var headers = RabbitMqEventBusHelper.BuildMessageHeaders(command, sagaId, typeof(TCommand), Constants.CommandTypeHeader);
         var properties = _channel.CreateBasicProperties();
+
         properties.Persistent = true;
         properties.Headers = headers;
+
 
         var json = JsonHelper.SerializeSafe(command);
         var body = Encoding.UTF8.GetBytes(json);
 
-        _channel.BasicPublish(exchange: string.Empty
-           , routingKey: queueName
-           , mandatory: false
-           , basicProperties: properties
-           , body: body);
+        _channel.BasicPublish(
+            exchange: exchangeName,
+            routingKey: routingKey,
+            mandatory: false,
+            basicProperties: properties,
+            body: body);
+
     }
 
     private async Task PublishToDeadLetterQueueAsync(string dlqName
@@ -213,11 +213,13 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             {
                 dlqArgs[XMesssageTtl] = (int)ttl.TotalMilliseconds;
             }
-            _channel.QueueDeclare(queue: dlqName
-                , durable: true
-                , exclusive: false
-                , autoDelete: false
-                , arguments: dlqArgs.Count > 0 ? dlqArgs : null);
+            _channel.QueueDeclare(
+                queue: dlqName,
+                durable: true,
+                exclusive: false,
+                autoDelete: false,
+                arguments: dlqArgs.Count > 0 ? dlqArgs : null);
+
 
             // For RabbitMQ.Client 7.x+ this is the only valid way:
             var basicProps = props as IBasicProperties ?? _channel.CreateBasicProperties();
@@ -241,11 +243,13 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                 basicProps.ReplyToAddress = props.ReplyToAddress;
             }
 
-            _channel.BasicPublish(exchange: string.Empty
-                    , routingKey: dlqName
-                    , mandatory: false
-                    , basicProps
-                    , body
+            _channel.BasicPublish(
+                exchange: string.Empty,
+                routingKey: dlqName,
+                mandatory: false,
+                basicProps,
+                body
+
                 );
 
             _logger.LogWarning("Dead-lettered message published to DLQ: {DlqName}", dlqName);
@@ -277,31 +281,39 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             var exchangeName = MessagingNamingHelper.GetExchangeName(messageType); // e.g., "event.OrderCreatedEvent"
             var routingKey = MessagingNamingHelper.GetTopicRoutingKey(messageType); // e.g., "event.OrderCreatedEvent.#"
 
-            // Declare exchange (topic)
-            _channel.ExchangeDeclare(exchange: exchangeName
-                , type: ExchangeType.Topic
-                , durable: true
-                , autoDelete: false
-                , arguments: null);
+            var exchangeType = messageType.IsSubclassOf(typeof(EventBase))
+                ? ExchangeType.Topic
+                : ExchangeType.Direct;
 
-            // Declare queue
-            var queueArgs = await DeclareDeadLetter(queueName
-                , cancellationToken);
+            _channel.ExchangeDeclare(
+                exchange: exchangeName,
+                type: exchangeType,
+                durable: true,
+                autoDelete: false,
+                arguments: null);
+
+
+            // Declare the queue with DLX and DLQ arguments
+            var queueArgs = await DeclareDeadLetter(queueName, cancellationToken);
             if (_options?.MessageTTL is { TotalMilliseconds: > 0 } ttl)
             {
                 queueArgs[XMesssageTtl] = (int)ttl.TotalMilliseconds;
             }
-            _channel.QueueDeclare(queue: queueName
-                , durable: true
-                , exclusive: false
-                , autoDelete: false
-                , arguments: queueArgs.Count > 0 ? queueArgs : null);
+            _channel.QueueDeclare(
+                queue: queueName,
+                durable: true,
+                exclusive: false,
+                autoDelete: false,
+                arguments: queueArgs.Count > 0 ? queueArgs : null);
+
 
             // Bind queue to exchange with queue name as a routing key
-            _channel.QueueBind(queue: queueName
-                , exchange: exchangeName
-                , routingKey: routingKey
-                , arguments: null);
+            _channel.QueueBind(
+                queue: queueName,
+                exchange: exchangeName,
+                routingKey: routingKey,
+                arguments: null);
+
             var consumer = new EventingBasicConsumer(_channel);
 
             // This pattern ensures that message handling errors are caught and do not crash the consumer loop.
@@ -310,9 +322,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             {
                 try
                 {
-                    messageQueue.Enqueue((ea.Body.ToArray()
-                        , messageType));
-                    //return Task.CompletedTask;
+                    messageQueue.Enqueue((ea.Body.ToArray(), messageType));
                     Task.Yield();
                 }
                 catch (Exception ex)
@@ -323,18 +333,20 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                         , messageType.FullName);
 
                     // DLQ logic:
-                    PublishToDeadLetterQueueAsync(queueName + ".dlq"
-                        , ea.Body.ToArray()
-                        , ea.BasicProperties,
+                    PublishToDeadLetterQueueAsync(
+                        queueName + ".dlq",
+                        ea.Body.ToArray(),
+                        ea.BasicProperties,
                         cancellationToken)
                     .GetAwaiter().GetResult();
-                    //return Task.CompletedTask;
                     Task.Yield();
                 }
             };
-            _channel.BasicConsume(queue: queueName
-                    ,autoAck: autoAck
-                    ,consumer: consumer);
+            _channel.BasicConsume(
+                queue: queueName,
+                autoAck: true,
+                consumer: consumer);
+
 
             _consumers.Add(consumer);
         }
@@ -348,13 +360,13 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         }
     }
 
-    private async Task<Dictionary<string, object?>> DeclareDeadLetter(string queueName
-        , CancellationToken cancellationToken)
+    private async Task<Dictionary<string, object?>> DeclareDeadLetter(string queueName, CancellationToken cancellationToken)
     {
         try
         {
             var dlxExchange = $"{queueName}.dlx";
             var dlqName = $"{queueName}.dlq";
+
 
             // DLX (Dead Letter Exchange) declare
             _channel!.ExchangeDeclare(exchange: dlxExchange
@@ -363,6 +375,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                 , autoDelete: false
                 , arguments: null);
 
+
             // DLQ (Dead Letter Queue) declare
             _channel!.QueueDeclare(queue: dlqName
                 , durable: true
@@ -370,11 +383,13 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                 , autoDelete: false
                 , arguments: null);
 
+
             // DLQ binding
             _channel!.QueueBind(queue: dlqName
                 , exchange: dlxExchange
                 , routingKey: dlqName
                 , arguments: null);
+
             return new Dictionary<string, object?>
             {
                 ["x-dead-letter-exchange"] = dlxExchange,
@@ -400,17 +415,6 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
     }
 
     /// <summary>
-    /// Returns the queue name for the specified command message type.
-    /// This assumes only one queue (one consumer) exists per command type.
-    /// For event message types, multiple queues may exist, so this should not be used for events.
-    /// </summary>
-    private string GetCommandQueueName(Type messageType)
-    {
-        return _queueTypeMap.FirstOrDefault(kvp => kvp.Value == messageType).Key
-               ?? throw new InvalidOperationException($"No handler type found for message type {messageType.FullName}");
-    }
-
-    /// <summary>
     /// Performs application-defined tasks associated with freeing, releasing, or
     /// resetting unmanaged resources asynchronously.</summary>
     /// <returns>A task that represents the asynchronous dispose operation.</returns>
@@ -428,6 +432,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                     try
                     {
                         _channel.BasicCancel(consumerTag: tag);
+
                     }
                     catch (Exception ex)
                     {
@@ -463,6 +468,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         try
         {
             _connection!.Close();
+
         }
         catch (Exception ex)
         {
@@ -472,6 +478,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         try
         {
             _connection!.Dispose();
+
         }
         catch (Exception ex)
         {
@@ -484,6 +491,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         try
         {
             _channel!.Close();
+
         }
         catch (Exception ex)
         {
@@ -493,6 +501,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         try
         {
             _channel!.Dispose();
+
         }
         catch (Exception ex)
         {
@@ -605,7 +614,6 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             throw new InvalidOperationException(
                 "Channel is not initialized. Ensure RabbitMqEventBus is properly created.");
         }
-        //GOP
         // Declare the exchange (topic) and publish to it. No queue or binding logic here.
         await _channel.ExchangeDeclareAsync(exchange: exchangeName
             , type: ExchangeType.Topic
@@ -633,20 +641,21 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             , routingKey: exchangeName
             , mandatory: false
             , basicProperties: properties
-            , body: body, cancellationToken: cancellationToken);
+            , body: body
+			, cancellationToken: cancellationToken);
     }
 
     public async Task Send<TCommand>(TCommand command
         , Type? handlerType = null
         , Guid? sagaId = null
-        , CancellationToken cancellationToken = default) 
+        , CancellationToken cancellationToken = default)
         where TCommand : ICommand
     {
         await EnsureChannelAsync(cancellationToken)
             .ConfigureAwait(false);
 
         var exchangeName = MessagingNamingHelper.GetExchangeName(typeof(TCommand)); // command.CreateOrderCommand
-        var routingKey = MessagingNamingHelper.GetTopicRoutingKey(typeof(TCommand)); // e.g., "command.CreateOrderCommand.#"//GOP
+        var routingKey = MessagingNamingHelper.GetTopicRoutingKey(typeof(TCommand)); // e.g., "command.CreateOrderCommand.#"
 
         if (_channel == null)
         {
@@ -662,11 +671,11 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             arguments: null, 
             cancellationToken: cancellationToken);
 
-        var headers = RabbitMqEventBusHelper.BuildMessageHeaders(command, sagaId, typeof(TCommand), Constants.CommandTypeHeader);//GOP
-        var properties = new BasicProperties
+        var headers = RabbitMqEventBusHelper.BuildMessageHeaders(command, sagaId, typeof(TCommand), Constants.CommandTypeHeader);
+        var properties = new BasicProperties														  
         {
             Persistent = true,
-            Headers = headers
+			Headers = headers
         };
 
         var json = JsonHelper.SerializeSafe(command);
@@ -677,13 +686,14 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             routingKey: routingKey,
             mandatory: false,
             basicProperties: properties,
-            body: body, cancellationToken: cancellationToken);//GOP
+            body: body
+			, cancellationToken: cancellationToken);
     }
 
     private async Task PublishToDeadLetterQueueAsync(string dlqName
         , byte[] body
         , IReadOnlyBasicProperties props
-        ,  CancellationToken cancellationToken = default)
+        , CancellationToken cancellationToken = default)
     {
         try
         {
@@ -696,12 +706,13 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             {
                 dlqArgs[XMesssageTtl] = (int)ttl.TotalMilliseconds;
             }
-            await _channel.QueueDeclareAsync(queue: dlqName
-                , durable: true
-                , exclusive: false
-                , autoDelete: false
-                , arguments: dlqArgs.Count > 0 ? dlqArgs : null
-                , cancellationToken: cancellationToken);
+            await _channel.QueueDeclareAsync(
+				queue: dlqName,
+                durable: true,
+                exclusive: false,
+                autoDelete: false,
+                arguments: dlqArgs.Count > 0 ? dlqArgs : null,
+                cancellationToken: cancellationToken);
 
             // For RabbitMQ.Client 7.x+ this is the only valid way:
             var basicProps = props as BasicProperties ?? new BasicProperties();
@@ -725,12 +736,13 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                 basicProps.ReplyToAddress = props.ReplyToAddress;
             }
 
-            await _channel.BasicPublishAsync(exchange: string.Empty
-                    , routingKey: dlqName
-                    , mandatory: false
-                    , basicProps
-                    , body
-                    , cancellationToken
+            await _channel.BasicPublishAsync(
+				exchange: string.Empty,
+                routingKey: dlqName,
+                mandatory: false,
+                basicProps,
+                body,
+                cancellationToken
                 );
 
             _logger.LogWarning("Dead-lettered message published to DLQ: {DlqName}", dlqName);
@@ -771,7 +783,8 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                 type: exchangeType,
                 durable: true,
                 autoDelete: false,
-                arguments: null, cancellationToken: cancellationToken);//GOP
+                arguments: null
+				, cancellationToken: cancellationToken);
             
             // Declare the queue with DLX and DLQ arguments
             var queueArgs = await DeclareDeadLetter(queueName, cancellationToken);
@@ -779,19 +792,21 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             {
                 queueArgs[XMesssageTtl] = (int)ttl.TotalMilliseconds;
             }
-            await _channel.QueueDeclareAsync(queue: queueName
-                , durable: true
-                , exclusive: false
-                , autoDelete: false
-                , arguments: queueArgs.Count > 0 ? queueArgs : null
-                , cancellationToken: cancellationToken);
+            await _channel.QueueDeclareAsync(
+				queue: queueName,
+                durable: true,
+                exclusive: false,
+                autoDelete: false,
+                arguments: queueArgs.Count > 0 ? queueArgs : null,
+                cancellationToken: cancellationToken);
 
             // Bind queue to exchange with queue name as a routing key
-            await _channel.QueueBindAsync(queue: queueName
-                , exchange: exchangeName
-                , routingKey: routingKey
-                , arguments: null
-                , cancellationToken: cancellationToken);
+            await _channel.QueueBindAsync(
+				queue: queueName,
+                exchange: exchangeName,
+                routingKey: routingKey,
+                arguments: null,
+                cancellationToken: cancellationToken);
             var consumer = new AsyncEventingBasicConsumer(_channel);
 
             // This pattern ensures that message handling errors are caught and do not crash the consumer loop.
@@ -811,15 +826,20 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                         , messageType.FullName);
 
                     // DLQ logic:
-                    await PublishToDeadLetterQueueAsync(queueName + ".dlq"
-                        , ea.Body.ToArray()
-                        , ea.BasicProperties
-                        , cancellationToken);
+                    await PublishToDeadLetterQueueAsync(
+						queueName + ".dlq", 
+						ea.Body.ToArray(), 
+						ea.BasicProperties, 
+						cancellationToken);
+											  
+								 
                 }
             };
-            await _channel.BasicConsumeAsync(queue: queueName
-                    , autoAck: true
-                    , consumer: consumer, cancellationToken: cancellationToken);
+            await _channel.BasicConsumeAsync(
+				queue: queueName,
+                autoAck: true,
+                consumer: consumer, 
+				cancellationToken: cancellationToken);
 
             _consumers.Add(consumer);
         }
@@ -904,7 +924,8 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                 {
                     try
                     {
-                        await _channel.BasicCancelAsync(consumerTag: tag).ConfigureAwait(false);
+                        await _channel.BasicCancelAsync(consumerTag: tag)
+							.ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
@@ -939,7 +960,8 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
     {
         try
         {
-            await _connection!.CloseAsync().ConfigureAwait(false);
+            await _connection!.CloseAsync()
+				.ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -948,7 +970,8 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
 
         try
         {
-            await _connection!.DisposeAsync().ConfigureAwait(false);
+            await _connection!.DisposeAsync()
+				.ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -960,7 +983,8 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
     {
         try
         {
-            await _channel!.CloseAsync().ConfigureAwait(false);
+            await _channel!.CloseAsync()
+				.ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -969,7 +993,8 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
 
         try
         {
-            await _channel!.DisposeAsync().ConfigureAwait(false);
+            await _channel!.DisposeAsync()
+				.ConfigureAwait(false);
         }
         catch (Exception ex)
         {
