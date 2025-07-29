@@ -1,25 +1,40 @@
-var builder = WebApplication.CreateBuilder(args);
+using Lycia.Extensions;
+using Lycia.Saga.Extensions;
+using Sample_Net90.Choreography.Api.EndPoints;
+using Sample_Net90.Choreography.Api.Middleware;
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
+namespace Sample_Net90.Choreography.Api;
 
-var app = builder.Build();
-
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+public class Program
 {
-    app.MapOpenApi();
+    public static void Main(string[] args)
+    {
+        var builder = WebApplication.CreateBuilder(args);
+
+        builder.Services.AddAuthorization();
+
+        builder.Services.AddOpenApi();
+
+        builder.Services
+            .AddLycia(builder.Configuration)
+            .AddSagasFromCurrentAssembly();
+
+        var app = builder.Build();
+
+        if (app.Environment.IsDevelopment())
+        {
+            app.MapOpenApi();
+        }
+
+        app.UseHttpsRedirection();
+
+        app.UseAuthorization();
+
+        app.UseMiddleware<RequestResponseLoggingMiddleware>();
+        app.UseMiddleware<ExceptionHandlingMiddleware>();
+
+        app.MapOrdersEndpoints();
+
+        app.Run();
+    }
 }
-
-app.UseHttpsRedirection();
-
-app.MapGet("/orders", () =>
-{
-    var forecast = Enumerable.Range(1, 5).ToArray();
-    return forecast;
-})
-.WithName("orders");
-
-app.Run();
-

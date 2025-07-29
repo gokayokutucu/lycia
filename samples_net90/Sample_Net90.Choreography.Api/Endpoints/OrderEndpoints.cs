@@ -1,6 +1,9 @@
-﻿namespace Sample_Net90.Choreography.Api.Endpoints;
+﻿using MediatR;
+using Sample_Net90.Choreography.Application.Order.Commands.Create;
 
-public static class OrderEndpoints
+namespace Sample_Net90.Choreography.Api.EndPoints;
+
+public static class OrdersEndpoints
 {
     public static void MapOrdersEndpoints(this WebApplication app)
     {
@@ -11,22 +14,24 @@ public static class OrderEndpoints
         };
 
         app.MapGet("/orders", () => orders)
-           .WithName("GetOrders");
+        //.WithName("GetOrders")
+        ;
 
         app.MapGet("/orders/{id:int}", (int id) =>
         {
             var order = orders.FirstOrDefault(o => o.Id == id);
             return order is not null ? Results.Ok(order) : Results.NotFound();
         })
-        .WithName("GetOrderById");
+        //.WithName("GetOrderById")
+        ;
 
-        app.MapPost("/orders", (Order order) =>
+        app.MapPost("/orders", async (IMediator mediator,  CreateOrderCommand order) =>
         {
-            order.Id = orders.Count == 0 ? 1 : orders.Max(o => o.Id) + 1;
-            orders.Add(order);
-            return Results.Created($"/orders/{order.Id}", order);
+            var id = await mediator.Send(order);
+            return Results.Created($"/orders/{id}", order);
         })
-        .WithName("CreateOrder");
+        //.WithName("CreateOrder")
+        ;
 
         app.MapPut("/orders/{id:int}", (int id, Order updatedOrder) =>
         {
@@ -36,7 +41,8 @@ public static class OrderEndpoints
             order.Description = updatedOrder.Description;
             return Results.Ok(order);
         })
-        .WithName("UpdateOrder");
+        //.WithName("UpdateOrder")
+        ;
 
         app.MapDelete("/orders/{id:int}", (int id) =>
         {
@@ -46,11 +52,7 @@ public static class OrderEndpoints
             orders.Remove(order);
             return Results.NoContent();
         })
-        .WithName("DeleteOrder");
-    }
-    public class Order
-    {
-        public int Id { get; set; }
-        public string Description { get; set; }
+        //.WithName("DeleteOrder")
+        ;
     }
 }
