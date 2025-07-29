@@ -4,14 +4,22 @@
     <TargetFramework>net9.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <UserSecretsId>aa868b1f-a64a-4d65-9e38-e176521e2dc6</UserSecretsId>
+    <UserSecretsId>de43b176-3a23-4ba5-a00b-435f892aeb68</UserSecretsId>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
     <DockerfileContext>..\..</DockerfileContext>
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="FluentValidation" Version="12.0.0" />
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="12.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.7" />
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.22.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Lycia.Extensions\Lycia.Extensions.csproj" />
+    <ProjectReference Include="..\..\src\Lycia.Saga\Lycia.Saga.csproj" />
+    <ProjectReference Include="..\Sample_Net90.Choreography.Application\Sample_Net90.Choreography.Application.csproj" />
   </ItemGroup>
 
 </Project>
