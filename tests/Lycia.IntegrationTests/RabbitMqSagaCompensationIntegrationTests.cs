@@ -35,12 +35,12 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         .Build();
 
     private string RabbitMqConnectionString =>
-           "amqp://guest:guest@127.0.0.1:5672/"; 
-        //_rabbitMqContainer.GetConnectionString();
+         //  "amqp://guest:guest@127.0.0.1:5672/"; 
+        _rabbitMqContainer.GetConnectionString();
 
     private string RedisEndpoint =>
-            "127.0.0.1:6379"; 
-        //$"{_redisContainer.Hostname}:{_redisContainer.GetMappedPublicPort(6379)}";
+         //   "127.0.0.1:6379"; 
+        $"{_redisContainer.Hostname}:{_redisContainer.GetMappedPublicPort(6379)}";
 
     public async Task InitializeAsync()
     {
