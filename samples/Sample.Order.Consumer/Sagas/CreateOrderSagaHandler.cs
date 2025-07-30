@@ -17,11 +17,11 @@ public class CreateOrderSagaHandler :
     
     public override async Task HandleStartAsync(CreateOrderCommand command)
     {
-        await Context.PublishWithTracking(new OrderCreatedEvent
+        await Context.Publish(new OrderCreatedEvent
         {
             OrderId = command.OrderId,
-        }).ThenMarkAsComplete();
-        //await Context.MarkAsComplete<CreateOrderCommand>();
+        });
+        await Context.MarkAsComplete<CreateOrderCommand>();
     }
 
     public override async Task CompensateStartAsync(CreateOrderCommand message)
