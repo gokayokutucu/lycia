@@ -63,12 +63,6 @@ public abstract class EventBase : IEvent
     public string ApplicationId { get; init; }
 #endif
     public Guid? SagaId { get; set; }
-#if UNIT_TESTING
-    [JsonIgnore]
-    public StepStatus? __TestStepStatus { get; set; }
-    [JsonIgnore]
-    public Type? __TestStepType { get; set; }
-#endif
 }
 
 public abstract class FailedEventBase(string reason) : EventBase

@@ -1,6 +1,4 @@
-﻿using Lycia.Messaging.Enums;
-
-namespace Lycia.Messaging;
+﻿namespace Lycia.Messaging;
 
 public interface IMessage
 {
@@ -38,10 +36,6 @@ public interface IMessage
     /// Optional saga instance identifier (if used in saga flows).
     /// </summary>
     Guid? SagaId { get; set; }
-#if UNIT_TESTING
-    StepStatus? __TestStepStatus { get; set; }
-    Type? __TestStepType { get; set; }
-#endif
 }
 
 public interface ICommand : IMessage {}

@@ -36,7 +36,7 @@ public class SagaDispatcherTests
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
         // Register handler for another message type (OrderCreatedEvent).
-        services.AddScoped<ISagaHandler<OrderCreatedEvent>, ShipOrderSagaHandler>();
+        services.AddScoped<ShipOrderSagaHandler>();
 
         var provider = services.BuildServiceProvider();
 
@@ -49,17 +49,9 @@ public class SagaDispatcherTests
 
         var message = new InitialCommand(); // No handler registered for this type.
 
-        // Act
-        await dispatcherMock.Object.DispatchAsync(message, sagaId: fixedSagaId, CancellationToken.None);
-
-        // Assert: Neither InvokeHandlerAsync nor DispatchCompensationHandlersAsync should be called.
-        dispatcherMock.Protected().Verify(
-            "InvokeHandlerAsync",
-            Times.Never(),
-            ItExpr.IsAny<IEnumerable<object?>>(),
-            ItExpr.IsAny<IMessage>(),
-            ItExpr.IsAny<FailResponse>()
-        );
+        // Act & Assert: Expect no handler to be invoked
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => 
+            await dispatcherMock.Object.DispatchAsync(message, handlerType: typeof(ShipOrderForCompensationSagaHandler), sagaId: fixedSagaId, CancellationToken.None));
     }
 
     [Fact]
@@ -79,7 +71,6 @@ public class SagaDispatcherTests
         services.AddScoped<ISagaHandler<FailingEvent>, FailingCompensationSagaHandler>();
 
         var provider = services.BuildServiceProvider();
-        var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
         var store = provider.GetRequiredService<ISagaStore>();
 
         var parentEventId = Guid.NewGuid();
@@ -106,84 +97,6 @@ public class SagaDispatcherTests
     }
 
     [Fact]
-    public async Task DispatchAsync_Should_Not_Continue_CompensationChain_After_CompensationFailure()
-    {
-        // Arrange
-        var fixedSagaId = Guid.NewGuid();
-        var services = new ServiceCollection();
-        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
-
-        services.AddScoped<ISagaStartHandler<InitialCommand>, InitialCompensationSagaHandler>();
-        services.AddScoped<ISagaHandler<ParentEvent>, ParentCompensationSagaHandler>();
-        services.AddScoped<ISagaHandler<FailingEvent>, FailingCompensationSagaHandler>();
-
-        // Reset compensation flags before test
-        FailingCompensationSagaHandler.CompensateCalled = false;
-        ParentCompensationSagaHandler.CompensateCalled = false;
-        InitialCompensationSagaHandler.CompensateCalled = false;
-
-        var provider = services.BuildServiceProvider();
-        var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
-        var store = provider.GetRequiredService<ISagaStore>();
-
-        var command = new InitialCommand();
-
-        // Act
-        await dispatcher.DispatchAsync(command, sagaId: fixedSagaId, CancellationToken.None);
-
-        // Assert: Only the first failing compensation handler should be called.
-        Assert.True(FailingCompensationSagaHandler.CompensateCalled);
-        Assert.False(ParentCompensationSagaHandler.CompensateCalled);
-        Assert.False(InitialCompensationSagaHandler.CompensateCalled);
-
-        var steps = await store.GetSagaHandlerStepsAsync(fixedSagaId);
-
-        Assert.Contains(steps.Values, meta => meta.Status == StepStatus.CompensationFailed);
-        // Parent should not have been compensated
-        var parentStep = steps.FirstOrDefault(x => x.Key.stepType.Contains(nameof(ParentEvent)));
-        if (!parentStep.Equals(default(KeyValuePair<(string, string, string), SagaStepMetadata>)))
-        {
-            Assert.False(parentStep.Value.Status == StepStatus.Compensated);
-        }
-    }
-
-    [Fact]
-    public async Task DispatchAsync_Should_Invoke_CompensateStartAsync_When_Overridden()
-    {
-        // Arrange
-        var fixedSagaId = Guid.NewGuid();
-        var services = new ServiceCollection();
-        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
-        services.AddScoped<ISagaStartHandler<CreateOrderCommand>, TestStartReactiveCompensateHandler>();
-
-        var provider = services.BuildServiceProvider();
-        var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
-
-        var command = new CreateOrderCommand
-        {
-            OrderId = Guid.NewGuid(),
-            UserId = Guid.NewGuid(),
-            TotalPrice = -42 // trigger compensation
-        };
-
-        // Act
-        await dispatcher.DispatchAsync(command, sagaId: fixedSagaId, CancellationToken.None);
-
-        // Assert: Was the flag set in overridden CompensateStartAsync?
-        Assert.True(TestStartReactiveCompensateHandler.CompensateCalled);
-    }
-
-    [Fact]
     public async Task DispatchAsync_Should_Swallow_Exception_And_Continue()
     {
         var fixedSagaId = Guid.NewGuid();
@@ -194,7 +107,7 @@ public class SagaDispatcherTests
         services.AddScoped<ISagaStore, InMemorySagaStore>();
         services.AddScoped<IEventBus>(sp =>
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
-        services.AddScoped<ISagaHandler<OrderCreatedEvent>, SwallowingSagaHandler>();
+        services.AddScoped<SwallowingSagaHandler>();
 
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
@@ -206,30 +119,8 @@ public class SagaDispatcherTests
         };
 
         // Act & Assert: Exception swallowed, should not propagate
-        var ex = await Record.ExceptionAsync(() => dispatcher.DispatchAsync(message, sagaId: fixedSagaId, CancellationToken.None));
+        var ex = await Record.ExceptionAsync(() => dispatcher.DispatchAsync(message, handlerType: typeof(SwallowingSagaHandler), sagaId: fixedSagaId, CancellationToken.None));
         Assert.Null(ex);
-    }
-
-    [Fact]
-    public async Task DispatchAsync_Should_Propagate_Exception_If_Not_Swallowed()
-    {
-        var fixedSagaId = Guid.NewGuid();
-        var services = new ServiceCollection();
-        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
-        services.AddScoped<ISagaHandler<OrderCreatedEvent>, ThrowingSagaHandler>();
-
-        var provider = services.BuildServiceProvider();
-        var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
-
-        var message = new OrderCreatedEvent { OrderId = Guid.NewGuid() };
-
-        // Act & Assert: Exception must be propagated
-        await Assert.ThrowsAsync<InvalidOperationException>(() => dispatcher.DispatchAsync(message, sagaId: fixedSagaId, CancellationToken.None));
     }
 
     [Fact]
@@ -246,9 +137,9 @@ public class SagaDispatcherTests
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
         // Register all relevant SagaHandlers
-        services.AddScoped<ISagaStartHandler<CreateOrderCommand>, CreateOrderSagaHandler>();
-        services.AddScoped<ISagaHandler<OrderCreatedEvent>, ShipOrderSagaHandler>();
-        services.AddScoped<ISagaHandler<OrderCreatedEvent>, AuditOrderSagaHandler>();
+        services.AddScoped<CreateOrderSagaHandler>();
+        services.AddScoped<ShipOrderSagaHandler>();
+        services.AddScoped<AuditOrderSagaHandler>();
 
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
@@ -261,8 +152,19 @@ public class SagaDispatcherTests
             TotalPrice = 100
         };
 
+        var orderCreatedEvent = new OrderCreatedEvent()
+        {
+            OrderId = command.OrderId,
+            UserId = command.UserId,
+            TotalPrice = command.TotalPrice,
+            SagaId = fixedSagaId,
+            ParentMessageId = command.MessageId
+        };
+
         // Act
-        await dispatcher.DispatchAsync(command, sagaId: fixedSagaId, CancellationToken.None);
+        await dispatcher.DispatchAsync(command, handlerType: typeof(CreateOrderSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
+        await dispatcher.DispatchAsync(orderCreatedEvent, handlerType: typeof(ShipOrderSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
+        await dispatcher.DispatchAsync(orderCreatedEvent, handlerType: typeof(AuditOrderSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
 
         // Assert
         var steps = await store.GetSagaHandlerStepsAsync(fixedSagaId);
@@ -292,22 +194,28 @@ public class SagaDispatcherTests
             .Build();
 
         services.AddLyciaInMemory(configuration)
-            .AddSagas(typeof(CreateOrderSagaHandler), typeof(ShipOrderForCompensationSagaHandler),
-                typeof(ShipOrderForCompensationSagaHandler));
+            .AddSagas(typeof(CreateOrderSagaHandler), typeof(ShipOrderForCompensationSagaHandler));
 
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
         var store = provider.GetRequiredService<ISagaStore>();
+        
+        var startMessageId = Guid.NewGuid();
 
-        var command = new CreateOrderCommand
+        var command = new OrderCreatedEvent()
         {
+            MessageId = Guid.NewGuid(),
+            ParentMessageId = startMessageId,
             OrderId = Guid.NewGuid(),
             UserId = Guid.NewGuid(),
             TotalPrice = -10, // Negative price to trigger compensation failed
         };
+        
+        await store.LogStepAsync(fixedSagaId, startMessageId, Guid.Empty, typeof(CreateOrderCommand), StepStatus.Completed,
+            typeof(CreateOrderSagaHandler), command);
 
         // Act
-        await dispatcher.DispatchAsync(command, sagaId: fixedSagaId, CancellationToken.None);
+        await dispatcher.DispatchAsync(command, handlerType: typeof(ShipOrderForCompensationSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
 
         // Assert - check the status of the steps in the chain
         var steps = await store.GetSagaHandlerStepsAsync(fixedSagaId);
@@ -332,13 +240,13 @@ public class SagaDispatcherTests
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
         // Register all relevant SagaHandlers
-        services.AddScoped<ISagaStartHandler<CreateOrderCommand>, CreateOrderSagaHandler>();
-        services.AddScoped<ISagaHandler<OrderShippedEvent>, DeliverOrderSagaHandler>();
-        services.AddScoped<ISagaHandler<OrderCreatedEvent>, ShipOrderSagaHandler>();
+        services.AddScoped<CreateOrderSagaHandler>();
+        services.AddScoped<ShipOrderSagaHandler>();
+        services.AddScoped<DeliverOrderSagaHandler>();
 
         var serviceProvider = services.BuildServiceProvider();
-        var eventBus = serviceProvider.GetRequiredService<IEventBus>();
         var sagaStore = serviceProvider.GetRequiredService<ISagaStore>();
+        var dispatcher = serviceProvider.GetRequiredService<ISagaDispatcher>();
 
         var command = new CreateOrderCommand
         {
@@ -346,9 +254,25 @@ public class SagaDispatcherTests
             UserId = Guid.NewGuid(),
             TotalPrice = 100
         };
+        
+        var orderCreatedEvent = new OrderCreatedEvent
+        {
+            OrderId = command.OrderId,
+            UserId = command.UserId,
+            TotalPrice = command.TotalPrice,
+            SagaId = fixedSagaId,
+            ParentMessageId = command.MessageId
+        };
+        
+        var orderShippedEvent = new OrderShippedEvent
+        {
+            OrderId = command.OrderId,
+            SagaId = fixedSagaId,
+            ParentMessageId = orderCreatedEvent.MessageId
+        };
 
-        // Act
-        await eventBus.Send(command, typeof(CreateOrderSagaHandler));
+        // Act-1
+        await dispatcher.DispatchAsync(command, handlerType: typeof(CreateOrderSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
 
         // Assert
         var steps = await sagaStore.GetSagaHandlerStepsAsync(fixedSagaId);
@@ -361,12 +285,22 @@ public class SagaDispatcherTests
             typeof(CreateOrderSagaHandler));
         Assert.True(wasLogged);
 
+        // Act-2
+        await dispatcher.DispatchAsync(orderCreatedEvent, handlerType: typeof(ShipOrderSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
+        
+        // Assert
+        steps = await sagaStore.GetSagaHandlerStepsAsync(fixedSagaId);
         var orderCreatedEventMessageId =
             SagaTestHelper.GetMessageId<OrderCreatedEvent, ShipOrderSagaHandler>(steps);
         var wasShipped =
             await sagaStore.IsStepCompletedAsync(fixedSagaId, orderCreatedEventMessageId!.Value,
                 typeof(OrderCreatedEvent), typeof(ShipOrderSagaHandler));
 
+        // Act-3
+        await dispatcher.DispatchAsync(orderShippedEvent, handlerType: typeof(DeliverOrderSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
+        
+        // Assert
+        steps = await sagaStore.GetSagaHandlerStepsAsync(fixedSagaId);
         var orderShippedEventMessageId =
             SagaTestHelper.GetMessageId<OrderShippedEvent, DeliverOrderSagaHandler>(steps);
         var wasDelivered =
@@ -392,8 +326,8 @@ public class SagaDispatcherTests
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
         // Register all relevant SagaHandlers
-        services.AddScoped<ISagaStartHandler<CreateOrderCommand>, CreateOrderSagaHandler>();
-        services.AddScoped<ISagaHandler<OrderCreatedEvent>, ShipOrderForCompensationSagaHandler>();
+        services.AddScoped<CreateOrderSagaHandler>();
+        services.AddScoped<ShipOrderForCompensationSagaHandler>();
 
         var provider = services.BuildServiceProvider();
 
@@ -407,9 +341,19 @@ public class SagaDispatcherTests
             TotalPrice = 99.0m,
             Timestamp = DateTime.UtcNow
         };
+        
+        var orderCreatedEvent = new OrderCreatedEvent
+        {
+            OrderId = command.OrderId,
+            UserId = command.UserId,
+            TotalPrice = command.TotalPrice,
+            SagaId = fixedSagaId,
+            ParentMessageId = command.MessageId
+        };
 
         // Act
-        await dispatcher.DispatchAsync(command, sagaId: fixedSagaId, CancellationToken.None);
+        await dispatcher.DispatchAsync(command, handlerType: typeof(CreateOrderSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
+        await dispatcher.DispatchAsync(orderCreatedEvent, handlerType: typeof(ShipOrderForCompensationSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
 
         var steps = await store.GetSagaHandlerStepsAsync(fixedSagaId);
 
@@ -441,7 +385,7 @@ public class SagaDispatcherTests
         };
 
         // Act & Assert
-        await dispatcher.DispatchAsync(command, sagaId: null, CancellationToken.None); // No handler registered, should not throw
+        await dispatcher.DispatchAsync(command, handlerType: null, sagaId: null, CancellationToken.None); // No handler registered, should not throw
     }
 
     // CreateOrder -> OrderCreated (fail) -> Compensation started
@@ -459,13 +403,9 @@ public class SagaDispatcherTests
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
         // The ShipOrderForCompensationSagaHandler will intentionally fail at this step.
-        services.AddScoped<ISagaStartHandler<CreateOrderCommand>, CreateOrderSagaHandler>();
-        services.AddScoped<ISagaHandler<OrderCreatedEvent>, ShipOrderForCompensationSagaHandler>();
-
-        // services.AddSagaHandlers(
-        //     typeof(CreateOrderSagaHandler),
-        //     typeof(ShipOrderForCompensationSagaHandler)
-        // );
+        services.AddScoped<CreateOrderSagaHandler>();
+        services.AddScoped<ShipOrderForCompensationSagaHandler>();
+        
 
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
@@ -478,11 +418,21 @@ public class SagaDispatcherTests
             UserId = Guid.NewGuid(),
             TotalPrice = 10
         };
+        var orderCreatedEvent = new OrderCreatedEvent
+        {
+            OrderId = command.OrderId,
+            UserId = command.UserId,
+            TotalPrice = command.TotalPrice,
+            SagaId = fixedSagaId,
+            ParentMessageId = command.MessageId
+        };
         // Without vibe coding and AI support, it would most likely have taken more than 6 months to complete.
         // Plus, this codebase will also reduce the time required for future developments.
 
         // Act
-        await dispatcher.DispatchAsync(command, sagaId: fixedSagaId, CancellationToken.None);
+        await dispatcher.DispatchAsync(command, handlerType: typeof(CreateOrderSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
+        await dispatcher.DispatchAsync(orderCreatedEvent, handlerType: typeof(ShipOrderForCompensationSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
+        
 
         // Assert - check the status of the steps in the chain
         var steps = await store.GetSagaHandlerStepsAsync(fixedSagaId);
@@ -503,9 +453,9 @@ public class SagaDispatcherTests
         services.AddScoped<IEventBus>(sp =>
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
-        services.AddScoped<ISagaStartHandler<CreateOrderCommand>, CreateOrderSagaHandler>();
-        services.AddScoped<ISagaHandler<OrderShippedEvent>, DeliverOrderSagaHandler>();
-        services.AddScoped<ISagaHandler<OrderCreatedEvent>, ShipOrderSagaHandler>();
+        services.AddScoped<CreateOrderSagaHandler>();
+        services.AddScoped<DeliverOrderSagaHandler>();
+        services.AddScoped<ShipOrderSagaHandler>();
 
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
@@ -517,9 +467,27 @@ public class SagaDispatcherTests
             UserId = Guid.NewGuid(),
             TotalPrice = 10
         };
+        
+        var orderCreatedEvent = new OrderCreatedEvent
+        {
+            OrderId = command.OrderId,
+            UserId = command.UserId,
+            TotalPrice = command.TotalPrice,
+            SagaId = fixedSagaId,
+            ParentMessageId = command.MessageId
+        };
+        
+        var orderShippedEvent = new OrderShippedEvent
+        {
+            OrderId = command.OrderId,
+            SagaId = fixedSagaId,
+            ParentMessageId = orderCreatedEvent.MessageId
+        };
 
         // Act
-        await dispatcher.DispatchAsync(command, sagaId: fixedSagaId, CancellationToken.None);
+        await dispatcher.DispatchAsync(command, handlerType: typeof(CreateOrderSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
+        await dispatcher.DispatchAsync(orderCreatedEvent, handlerType: typeof(ShipOrderSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
+        await dispatcher.DispatchAsync(orderShippedEvent, handlerType: typeof(DeliverOrderSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
 
         // Assert: Are all steps processed in order and completed?
         var steps = await store.GetSagaHandlerStepsAsync(fixedSagaId);
@@ -549,7 +517,7 @@ public class SagaDispatcherTests
         services.AddScoped<IEventBus>(sp =>
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
-        services.AddScoped<ISagaStartHandler<CreateOrderCommand>, CreateOrderSagaHandler>();
+        services.AddScoped<CreateOrderSagaHandler>();
         // Other steps can also be added if needed.
 
         var provider = services.BuildServiceProvider();
@@ -564,13 +532,13 @@ public class SagaDispatcherTests
         };
 
         // Act
-        await dispatcher.DispatchAsync(command, sagaId: fixedSagaId, CancellationToken.None);
+        await dispatcher.DispatchAsync(command, handlerType: typeof(CreateOrderSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
 
         //await Assert.ThrowsAsync<InvalidOperationException>(async () => { await dispatcher.DispatchAsync(command); });
 
         try
         {
-            await dispatcher.DispatchAsync(command, sagaId: fixedSagaId, CancellationToken.None);
+            await dispatcher.DispatchAsync(command, handlerType: typeof(CreateOrderSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
         }
         catch (Exception e)
         {
@@ -584,6 +552,37 @@ public class SagaDispatcherTests
 
         Assert.All(steps.Where(x => x.Key.stepType.Contains(nameof(CreateOrderCommand))),
             kv => Assert.Equal(StepStatus.Completed, kv.Value.Status));
+    }
+    
+    [Fact]
+    public async Task DispatchAsync_Should_Invoke_CompensateStartAsync_When_Overridden()
+    {
+        // Arrange
+        var fixedSagaId = Guid.NewGuid();
+        var services = new ServiceCollection();
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        services.AddScoped<ISagaStore, InMemorySagaStore>();
+        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
+        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
+        services.AddScoped<IEventBus>(sp =>
+            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
+        services.AddScoped<TestStartReactiveCompensateHandler>();
+
+        var provider = services.BuildServiceProvider();
+        var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
+
+        var command = new CreateOrderCommand
+        {
+            OrderId = Guid.NewGuid(),
+            UserId = Guid.NewGuid(),
+            TotalPrice = -42 // trigger compensation
+        };
+
+        // Act
+        await dispatcher.DispatchAsync(command, handlerType: typeof(TestStartReactiveCompensateHandler), sagaId: fixedSagaId, CancellationToken.None);
+
+        // Assert: Was the flag set in overridden CompensateStartAsync?
+        Assert.True(TestStartReactiveCompensateHandler.CompensateCalled);
     }
 
     public class InitialCommand : CommandBase

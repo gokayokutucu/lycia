@@ -10,10 +10,11 @@ public static class SagaTestHelper
     {
         var stepEntry = steps.FirstOrDefault(x =>
         {
-            var fullName = typeof(TMessage).FullName;
-            return fullName != null &&
-                   x.Key.stepType.Contains(fullName) &&
-                   x.Key.handlerType == typeof(THandler).FullName;
+            var stepTypeFullName = typeof(TMessage).FullName;
+            var handlerTypeFullName = typeof(THandler).FullName;
+            return stepTypeFullName != null &&
+                   x.Key.stepType.Contains(stepTypeFullName) &&
+                   x.Key.handlerType.Contains(handlerTypeFullName);
         });
 
         return string.IsNullOrWhiteSpace(stepEntry.Key.messageId) ? Guid.Empty : Guid.Parse(stepEntry.Key.messageId);

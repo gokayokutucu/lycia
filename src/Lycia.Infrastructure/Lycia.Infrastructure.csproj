@@ -5,17 +5,8 @@
 		<GenerateReferenceAssembly>false</GenerateReferenceAssembly>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
-		<!--<DefineConstants>$(DefineConstants);UNIT_TESTING</DefineConstants>-->
 		<LangVersion>preview</LangVersion>
 	</PropertyGroup>
-
-	<ItemGroup>
-	</ItemGroup>
-
-	<!--    <PropertyGroup Condition="'$(BuildingTests)' == 'true'">-->
-	<!--        <DefineConstants>$(DefineConstants);UNIT_TESTING</DefineConstants>-->
-	<!--    </PropertyGroup>-->
-
 	<ItemGroup>
 		<ProjectReference Include="..\Lycia.Saga\Lycia.Saga.csproj" />
 	</ItemGroup>
