@@ -1,6 +1,5 @@
 using System.Reflection;
 using Lycia.Infrastructure.Extensions;
-using Lycia.Infrastructure.Helpers;
 using Lycia.Messaging;
 using Lycia.Messaging.Enums;
 using Lycia.Saga.Abstractions;
@@ -10,8 +9,6 @@ using Lycia.Saga.Handlers;
 using Lycia.Saga.Helpers;
 using Microsoft.Extensions.DependencyInjection;
 using Newtonsoft.Json;
-
-// Added for SagaContext<>
 
 namespace Lycia.Infrastructure.Compensating;
 
@@ -23,8 +20,12 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
     /// </summary>
     /// <param name="sagaId">The identifier of the saga.</param>
     /// <param name="failedStepType">The type of the failed step to compensate.</param>
-    public async Task CompensateAsync(Guid sagaId, Type failedStepType)
+    /// <param name="handlerType"></param>
+    /// <param name="message"></param>
+    public async Task CompensateAsync(Guid sagaId, Type failedStepType, Type? handlerType, IMessage message)
     {
+        if (handlerType == null) return;
+
         if (serviceProvider.GetService(typeof(IEventBus)) is not IEventBus eventBus)
             throw new InvalidOperationException("IEventBus not resolved.");
 
@@ -32,43 +33,28 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
             sagaStore)
             throw new InvalidOperationException("ISagaStore not resolved.");
 
-        var steps = await sagaStore.GetSagaHandlerStepsAsync(sagaId);
+        var stepKeyValuePair = await sagaStore.GetSagaHandlerStepAsync(sagaId, message.MessageId);
+        if (IsStepAlreadyInStatus(stepKeyValuePair, StepStatus.Failed, StepStatus.Compensated, StepStatus.CompensationFailed))
+            return;
 
-        // Filter steps to find those that match the failed step type and have a status of Failed
-        var failedSteps = steps
-            .Where(s =>
-                s.Value.MessageTypeName == failedStepType.AssemblyQualifiedName &&
-                s.Value.Status == StepStatus.Failed)
-            .ToList();
+        await sagaStore.LogStepAsync(sagaId, message.MessageId, message.ParentMessageId, failedStepType,
+            StepStatus.Failed, handlerType, message);
 
-        foreach (var step in failedSteps)
-        {
-            var stepType = Type.GetType(step.Key.stepType);
-            var payloadType = Type.GetType(step.Value.MessageTypeName);
-            if (stepType == null || payloadType == null) continue;
+        stepKeyValuePair = await sagaStore.GetSagaHandlerStepAsync(sagaId, message.MessageId);
+        if (!stepKeyValuePair.HasValue) return;
+        var step = stepKeyValuePair.Value;
 
-            var messageObject = JsonConvert.DeserializeObject(step.Value.MessagePayload, payloadType);
-            if (messageObject == null) continue;
+        var stepType = Type.GetType(step.Key.stepType);
+        var payloadType = Type.GetType(step.Value.MessageTypeName);
+        if (stepType == null || payloadType == null) return;
 
-            // Try to get the handler via ISagaCompensationHandler<>
-            var onlySagaCompensationHandlerType = typeof(ISagaCompensationHandler<>).MakeGenericType(stepType);
-            // If no handler found, try to find candidate handlers using the new method
-            var handlers = FindCompensationHandlers(onlySagaCompensationHandlerType, stepType);
+        var messageObject = JsonConvert.DeserializeObject(step.Value.MessagePayload, payloadType);
+        if (messageObject == null) return;
 
-            foreach (var handler in handlers)
-            {
-                await InvokeCompensationHandlerAsync(sagaId, handler, stepType, sagaStore, messageObject, eventBus);
-            }
-        }
-    }
+        // If no handler found, try to find candidate handlers using the new method
+        var handler = FindCompensationHandler(handlerType, stepType);
 
-    private List<object?> FindCompensationHandlers(Type onlySagaCompensationHandlerType, Type stepType)
-    {
-        return serviceProvider.GetServices(onlySagaCompensationHandlerType).Cast<object>()
-            .Concat(SagaHandlerHelper.FindCompensationHandlers(serviceProvider,
-                stepType)) // ISagaCompensationHandler<> + ISagaStartHandler<> and ISagaHandler<>
-            .DistinctByKey(h => h.GetType())
-            .ToList();
+        await InvokeCompensationHandlerAsync(sagaId, handler, stepType, sagaStore, messageObject, eventBus);
     }
 
 
@@ -77,8 +63,9 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
     /// </summary>
     /// <param name="sagaId">The identifier of the saga.</param>
     /// <param name="stepType">The type of the step whose parent is to be compensated.</param>
+    /// <param name="handlerType"></param>
     /// <param name="message">The message of the current step</param>
-    public async Task CompensateParentAsync(Guid sagaId, Type stepType, IMessage message)
+    public async Task CompensateParentAsync(Guid sagaId, Type stepType, Type handlerType, IMessage message)
     {
         if (serviceProvider.GetService(typeof(IEventBus)) is not IEventBus eventBus)
             throw new InvalidOperationException("IEventBus not resolved.");
@@ -87,7 +74,15 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
             sagaStore)
             throw new InvalidOperationException("ISagaStore not resolved.");
 
-        var steps = await sagaStore.GetSagaHandlerStepsAsync(sagaId);
+        var stepKeyValuePair = await sagaStore.GetSagaHandlerStepAsync(sagaId, message.MessageId);
+        if (IsStepAlreadyInStatus(stepKeyValuePair, StepStatus.Compensated, StepStatus.CompensationFailed))
+            return;
+        // Log the step as failed before compensating
+        await sagaStore.LogStepAsync(sagaId, message.MessageId, message.ParentMessageId, stepType,
+            StepStatus.Compensated, handlerType, message);
+
+        stepKeyValuePair = await sagaStore.GetSagaHandlerStepAsync(sagaId, message.MessageId);
+        if (!stepKeyValuePair.HasValue) return;
 
         // Get the parent message ID from the current message
         var parentMessageId = message.ParentMessageId;
@@ -95,37 +90,29 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
             return;
 
         // Find the parent step in the saga steps(with MessageId)
-        var parentStep = steps.FirstOrDefault(meta =>
-            meta.Value.MessageId == parentMessageId);
+        var parentStepKeyValuePair = await sagaStore.GetSagaHandlerStepAsync(sagaId, message.ParentMessageId);
 
-        if (parentStep.Key == default)
-            return;
+        if (!parentStepKeyValuePair.HasValue) return;
+
+        var parentStep = parentStepKeyValuePair.Value;
 
         var parentStepType = Type.GetType(parentStep.Key.stepType);
         if (parentStepType == null)
             return;
 
-        var payloadType = Type.GetType(parentStep.Value.MessageTypeName);
-        if (payloadType == null)
-            return;
-
-        var messageObject = JsonConvert.DeserializeObject(parentStep.Value.MessagePayload, payloadType);
+        var messageObject = JsonConvert.DeserializeObject(parentStep.Value.MessagePayload, parentStepType);
         if (messageObject == null)
             return;
 
+        var parentHandlerType = Type.GetType(parentStep.Key.handlerType);
         // Find the compensation handler for the parent step type
-        var onlySagaCompensationHandlerType = typeof(ISagaCompensationHandler<>).MakeGenericType(parentStepType);
-        var handlers = serviceProvider.GetServices(onlySagaCompensationHandlerType);
-        var handler = handlers.Cast<object>()
-                          .FirstOrDefault(h => h.GetType().FullName == parentStep.Key.handlerType)
-                      ?? SagaHandlerHelper.FindCompensationHandlers(serviceProvider, parentStepType)
-                          .FirstOrDefault(h => h.GetType().FullName == parentStep.Key.handlerType);
-
+        var handler =
+            FindCompensationHandler(parentHandlerType, parentStepType);
 
         await InvokeCompensationHandlerAsync(sagaId, handler, parentStepType, sagaStore, messageObject, eventBus);
     }
 
-        private async Task InvokeCompensationHandlerAsync(Guid sagaId, object? handler, Type stepType, ISagaStore sagaStore,
+    private async Task InvokeCompensationHandlerAsync(Guid sagaId, object? handler, Type stepType, ISagaStore sagaStore,
         object messageObject, IEventBus eventBus)
     {
         if (handler == null)
@@ -157,7 +144,7 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
             var implementsCompensationHandler = handlerTypeActual.GetInterfaces().Any(i =>
                 i.IsGenericType &&
                 i.GetGenericTypeDefinition() == typeof(ISagaCompensationHandler<>) &&
-                i.GetGenericArguments()[0] == stepType);
+                i.GetGenericArguments()[0].FullName == stepType.FullName);
 
             if (implementsCompensationHandler)
             {
@@ -216,5 +203,30 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
         }
 
         return (initializeMethod, contextInstance);
+    }
+
+    private object? FindCompensationHandler(Type? handlerType, Type stepType)
+    {
+        if (handlerType == null) return null;
+
+        var interfaceType = typeof(ISagaCompensationHandler<>).MakeGenericType(stepType);
+
+        var interfaceHandlers = serviceProvider.GetServices(interfaceType).Cast<object>();
+        var concreteHandler = serviceProvider.GetService(handlerType);
+
+        var allHandlers = concreteHandler != null
+            ? interfaceHandlers.Concat([concreteHandler])
+            : interfaceHandlers;
+
+        return allHandlers
+            .DistinctByKey(h => h.GetType())
+            .FirstOrDefault(t => t?.GetType().FullName == handlerType.FullName);
+    }
+
+    private static bool IsStepAlreadyInStatus(
+        KeyValuePair<(string stepType, string handlerType, string messageId), SagaStepMetadata>? stepKeyValuePair,
+        params StepStatus[] statuses)
+    {
+        return stepKeyValuePair.HasValue && statuses.Contains(stepKeyValuePair.Value.Value.Status);
     }
 }

@@ -25,10 +25,4 @@ public abstract class ResponseBase<TPrevious> :
     public string ApplicationId { get; set; }
     public Guid CorrelationId { get; set; }
     public Guid? SagaId { get; set; }
-#if UNIT_TESTING
-    [JsonIgnore]
-    public StepStatus? __TestStepStatus { get; set; }
-    [JsonIgnore]
-    public Type? __TestStepType { get; set; }
-#endif
 }
