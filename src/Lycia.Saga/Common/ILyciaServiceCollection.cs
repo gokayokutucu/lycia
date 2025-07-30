@@ -7,7 +7,7 @@ public interface ILyciaServiceCollection
 {
     IServiceCollection Services { get; }
     IConfiguration? Configuration { get; }
-    IDictionary<string, Type> QueueTypeMap { get; }
+    IDictionary<string, (Type MessageType, Type HandlerType)> QueueTypeMap { get; }
 }
 
 public class LyciaServiceCollection : ILyciaServiceCollection
@@ -18,15 +18,15 @@ public class LyciaServiceCollection : ILyciaServiceCollection
     /// <param name="services">Service collection on application</param>
     /// <param name="configuration">Configuration on application</param>
     /// <param name="queueTypeMap">Query type map on assembly</param>
-    public LyciaServiceCollection(IServiceCollection services, IConfiguration? configuration, IDictionary<string, Type>? queueTypeMap = null)
+    public LyciaServiceCollection(IServiceCollection services, IConfiguration? configuration, IDictionary<string, (Type MessageType, Type HandlerType)>? queueTypeMap = null)
     {
         Services = services;
         Configuration = configuration;
-        QueueTypeMap = queueTypeMap ?? new Dictionary<string, Type>();
+        QueueTypeMap = queueTypeMap ?? new Dictionary<string, (Type MessageType, Type HandlerType)>();
     }
     
     
-    public IDictionary<string, Type> QueueTypeMap { get; }
+    public IDictionary<string, (Type MessageType, Type HandlerType)> QueueTypeMap { get; }
     /// <summary>
     /// Service collection of the app
     /// </summary>

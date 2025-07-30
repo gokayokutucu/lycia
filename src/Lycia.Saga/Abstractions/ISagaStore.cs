@@ -9,7 +9,7 @@ public interface ISagaStore
     /// Logs a saga step's execution status along with optional payload data.
     /// The step is uniquely identified by its type and the handler type.
     /// </summary>
-    Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status, Type handlerType, object? payload = null);
+    Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status, Type handlerType, object? payload);
 
     /// <summary>
     /// Checks whether a specific step in a saga has already been completed.
@@ -28,8 +28,17 @@ public interface ISagaStore
     /// <param name="handlerType"></param>
     /// <returns></returns>
     Task<StepStatus> GetStepStatusAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType);
-    
 
+
+    /// <summary>
+    /// Gets the metadata for a specific step-handler pair in the saga.
+    /// </summary>
+    /// <param name="sagaId"></param>
+    /// <param name="messageId"></param>
+    /// <returns></returns>
+    Task<KeyValuePair<(string stepType, string handlerType, string messageId), SagaStepMetadata>?>
+        GetSagaHandlerStepAsync(Guid sagaId, Guid messageId);
+    
     /// <summary>
     /// Retrieves all logged step-handler pairs and their statuses for the given saga.
     /// </summary>

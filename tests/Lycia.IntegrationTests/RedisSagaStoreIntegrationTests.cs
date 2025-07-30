@@ -131,11 +131,11 @@ public class RedisSagaStoreIntegrationTests : IAsyncLifetime
 
         var store = new RedisSagaStore(_db, null!, null!, null!, sagaStoreOptions);
 
-        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType);
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType, null);
 
         // Attempt to revert to Started (illegal)
         Func<Task> act = () =>
-            store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Started, handlerType);
+            store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Started, handlerType, null);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
     }

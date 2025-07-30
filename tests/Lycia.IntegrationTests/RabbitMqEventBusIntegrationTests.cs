@@ -59,9 +59,9 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
             }
         }
 
-        var queueTypeMap = new Dictionary<string, Type>
+        var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
-            { queueName, typeof(TestEvent) }
+            { queueName, (typeof(TestEvent), typeof(TestEventHandlerA)) }
         };
 
         var ttl = TimeSpan.FromSeconds(5);
@@ -105,7 +105,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
                 SagaId = Guid.NewGuid(),
                 Message = "DLQ Test Message"
             };
-            await publisherBus.Publish(testEvent, handlerType: handlerType);
+            await publisherBus.Publish(testEvent);
         }
        
         // Wait for TTL + DLQ transfer
@@ -134,9 +134,9 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         var applicationId = "TestApp";
         var handlerType = typeof(TestEventHandlerA);
 
-        var queueTypeMap = new Dictionary<string, Type>
+        var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
-            { MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType, applicationId), typeof(TestEvent) }
+            { MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType, applicationId), (typeof(TestEvent), typeof(TestEventHandlerA) )}
         };
 
         var eventBusOptions = new EventBusOptions
@@ -156,10 +156,10 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
 
         var consumeTask = Task.Run(async () =>
         {
-            await foreach (var (body, type) in eventBus.ConsumeAsync(cancellationToken: cts.Token))
+            await foreach (var (body, messageType, _) in eventBus.ConsumeAsync(cancellationToken: cts.Token))
             {
                 var json = Encoding.UTF8.GetString(body);
-                var evt = System.Text.Json.JsonSerializer.Deserialize(json, type);
+                var evt = System.Text.Json.JsonSerializer.Deserialize(json, messageType);
 
                 evt.Should().BeOfType<TestEvent>();
                 ((TestEvent)evt).Message.Should().Be("Integration test message");
@@ -194,10 +194,10 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         var handlerType2 = typeof(TestEventHandlerB);
 
         // Separate queueTypeMap entry for each handler
-        var queueTypeMap = new Dictionary<string, Type>
+        var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
-            { MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType1, applicationId), typeof(TestEvent) },
-            { MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType2, applicationId), typeof(TestEvent) }
+            { MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType1, applicationId), (typeof(TestEvent), typeof(TestEventHandlerA)) },
+            { MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType2, applicationId), (typeof(TestEvent), typeof(TestEventHandlerB)) }
         };
 
         var eventBusOptions = new EventBusOptions
@@ -217,10 +217,10 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
 
         var consumeTask = Task.Run(async () =>
         {
-            await foreach (var (body, type) in eventBus.ConsumeAsync(cancellationToken: cts.Token))
+            await foreach (var (body, messageType, _) in eventBus.ConsumeAsync(cancellationToken: cts.Token))
             {
                 var json = Encoding.UTF8.GetString(body);
-                var evt = System.Text.Json.JsonSerializer.Deserialize(json, type);
+                var evt = System.Text.Json.JsonSerializer.Deserialize(json, messageType);
                 evt.Should().BeOfType<TestEvent>();
                 ((TestEvent)evt).Message.Should().Be("Integration test message multi");
 
@@ -257,11 +257,11 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         var handlerType = typeof(TestCommandHandlerA);
 
         // Only a single consumer/queue mapping for command (point-to-point)
-        var queueTypeMap = new Dictionary<string, Type>
+        var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
             {
                 MessagingNamingHelper.GetRoutingKey(typeof(TestCommand), handlerType, applicationId),
-                typeof(TestCommand)
+                (typeof(TestCommand), typeof(TestCommandHandlerA))
             }
         };
 
@@ -282,10 +282,10 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
 
         var consumeTask = Task.Run(async () =>
         {
-            await foreach (var (body, type) in eventBus.ConsumeAsync(cancellationToken: cts.Token))
+            await foreach (var (body, messageType, _) in eventBus.ConsumeAsync(cancellationToken: cts.Token))
             {
                 var json = Encoding.UTF8.GetString(body);
-                var cmd = System.Text.Json.JsonSerializer.Deserialize(json, type);
+                var cmd = System.Text.Json.JsonSerializer.Deserialize(json, messageType);
 
                 cmd.Should().BeOfType<TestCommand>();
                 ((TestCommand)cmd).Message.Should().Be("Integration test command");
@@ -301,7 +301,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
             SagaId = Guid.NewGuid(),
             Message = "Integration test command"
         };
-        await eventBus.Send(testCommand, handlerType);
+        await eventBus.Send(testCommand);
 
         await consumeTask;
 
