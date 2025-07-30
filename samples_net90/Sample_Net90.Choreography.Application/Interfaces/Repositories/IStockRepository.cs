@@ -8,4 +8,5 @@ namespace Sample_Net90.Choreography.Application.Interfaces.Repositories;
 
 public interface IStockRepository
 {
+    Task<bool> IsStockAvailableAsync(Guid productId, int quantity);
 }
