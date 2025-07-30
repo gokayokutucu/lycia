@@ -33,8 +33,4 @@ public class DummyEvent : IMessage
     public DateTime Timestamp { get; set; }
     public string ApplicationId { get; set; }
     public Guid? SagaId { get; set; }
-#if UNIT_TESTING
-    public StepStatus? __TestStepStatus { get; set; }
-    public Type? __TestStepType { get; set; }
-#endif
 }

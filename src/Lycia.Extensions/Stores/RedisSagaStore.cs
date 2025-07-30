@@ -8,6 +8,7 @@ using Lycia.Saga.Helpers;
 using StackExchange.Redis;
 using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Helpers;
+using Lycia.Infrastructure.Helpers;
 using Lycia.Saga.Enums;
 using Lycia.Saga.Exceptions;
 
@@ -30,13 +31,13 @@ public class RedisSagaStore(
     private static string StepLogKey(Guid sagaId) => $"saga:steps:{sagaId}";
 
     public async Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
-        Type handlerType, object? payload = null)
+        Type handlerType, object? payload)
     {
         var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
         var applicationId = ApplicationId();
-        var messageTypeName = GetMessageTypeName(stepType);
+        var messageTypeName = SagaStoreLogicHelper.GetMessageTypeName(stepType);
         var redisStepLogKey = StepLogKey(sagaId);
-        
+
         var existingSteps = await GetSagaHandlerStepsAsync(sagaId);
 
         // Atomic update retry config
@@ -46,16 +47,17 @@ public class RedisSagaStore(
             attempt++;
             // 1. Read current value (if exists)
             var existingMetaJson = await redisDb.HashGetAsync(redisStepLogKey, stepKey);
-            
+
             var existingMeta = existingMetaJson.HasValue
                 ? JsonConvert.DeserializeObject<SagaStepMetadata>(existingMetaJson!)
                 : null;
-            
+
             var metadata = SagaStepMetadata.Build(status, messageId, parentMessageId, messageTypeName, applicationId,
                 payload);
-            
-            var result = SagaStepHelper.ValidateSagaStepTransition(messageId, parentMessageId, status, existingSteps.Values, stepKey, metadata, existingMeta);
-            
+
+            var result = SagaStepHelper.ValidateSagaStepTransition(messageId, parentMessageId, status,
+                existingSteps.Values, stepKey, metadata, existingMeta);
+
             var updated = false;
             var shouldBreak = false;
             switch (result.ValidationResult)
@@ -64,7 +66,7 @@ public class RedisSagaStore(
                     var newMetaJson = JsonHelper.SerializeSafe(metadata);
                     // 2. Try atomic update (CAS: Compare-And-Set)
                     updated = await TryAtomicUpdate(redisStepLogKey, stepKey, existingMetaJson, newMetaJson);
-                    if (updated)  await SetExpiryAsync(redisStepLogKey);
+                    if (updated) await SetExpiryAsync(redisStepLogKey);
                     break;
                 case SagaStepValidationResult.Idempotent:
                     // Silently ignore idempotent updates
@@ -93,7 +95,6 @@ public class RedisSagaStore(
             await Task.Delay(5 * attempt);
         }
     }
-
 
 
     /// <summary>
@@ -159,6 +160,28 @@ public class RedisSagaStore(
         return metadata?.Status ?? StepStatus.None;
     }
 
+    public async Task<KeyValuePair<(string stepType, string handlerType, string messageId), SagaStepMetadata>?>
+        GetSagaHandlerStepAsync(Guid sagaId, Guid messageId)
+    {
+        var redisStepLogKey = StepLogKey(sagaId);
+        var entries = await redisDb.HashGetAllAsync(redisStepLogKey);
+
+        foreach (var entry in entries)
+        {
+            var key = (string)entry.Name!;
+            var (stepTypeName, handlerTypeName, msgId) = SagaStoreLogicHelper.ParseStepKey(key);
+
+            if (msgId != messageId.ToString()) continue;
+            
+            var metadata = JsonConvert.DeserializeObject<SagaStepMetadata>(entry.Value!)!;
+            return new KeyValuePair<(string, string, string), SagaStepMetadata>(
+                (stepTypeName, handlerTypeName, msgId), metadata
+            );
+        }
+
+        return null;
+    }
+
     public async Task<IReadOnlyDictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>>
         GetSagaHandlerStepsAsync(Guid sagaId)
     {
@@ -169,25 +192,10 @@ public class RedisSagaStore(
         foreach (var entry in entries)
         {
             var key = (string)entry.Name!;
-            var parts = key.Split(':');
             var metadata = JsonConvert.DeserializeObject<SagaStepMetadata>(entry.Value!)!;
 
-            if (parts.Length == 8 &&
-                parts[0] == "step" &&
-                parts[2] == "assembly" &&
-                parts[4] == "handler" &&
-                parts[6] == "message-id")
-            {
-                var stepTypeName = $"{parts[1]}, {parts[3]}"; // Combine step type and assembly
-                var handlerTypeName = parts[5];
-                var messageId = parts[7];
-
-                result[(stepTypeName, handlerTypeName, messageId)] = metadata;
-            }
-            else
-            {
-                result[(key, string.Empty, Guid.Empty.ToString())] = metadata;
-            }
+            var (stepTypeName, handlerTypeName, messageId) = SagaStoreLogicHelper.ParseStepKey(key);
+            result[(stepTypeName, handlerTypeName, messageId)] = metadata;
         }
 
         return result;
@@ -228,8 +236,8 @@ public class RedisSagaStore(
 
         ISagaContext<TStep, TSagaData> context = new SagaContext<TStep, TSagaData>(
             sagaId: sagaId,
-            currentContextMessage: message,
-            handlerType: handlerType,
+            currentStep: message,
+            handlerTypeOfCurrentStep: handlerType,
             data: data,
             eventBus: eventBus,
             sagaStore: this,
@@ -238,15 +246,9 @@ public class RedisSagaStore(
         );
         return context;
     }
-    
+
     private string? ApplicationId()
-    => !string.IsNullOrWhiteSpace(_options.ApplicationId)
+        => !string.IsNullOrWhiteSpace(_options.ApplicationId)
             ? _options.ApplicationId
             : throw new InvalidOperationException("ApplicationId is required");
-
-    private static string GetMessageTypeName(Type stepType)
-    {
-        return stepType.AssemblyQualifiedName ?? throw new InvalidOperationException(
-            $"Step type {stepType.FullName} does not have an AssemblyQualifiedName");
-    }
 }

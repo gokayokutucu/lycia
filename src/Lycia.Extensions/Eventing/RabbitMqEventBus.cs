@@ -6,10 +6,8 @@ using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using System.Collections.Concurrent;
-using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
-using Lycia.Infrastructure.Helpers;
 using Lycia.Saga.Helpers;
 
 using Lycia.Extensions.Configurations;
@@ -26,12 +24,12 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
     private readonly ILogger<RabbitMqEventBus> _logger;
     private IConnection? _connection;
     private IChannel? _channel;
-    private readonly IDictionary<string, Type> _queueTypeMap;
+    private readonly IDictionary<string, (Type MessageType, Type HandlerType)> _queueTypeMap;
     private readonly List<AsyncEventingBasicConsumer> _consumers = [];
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private readonly EventBusOptions _options;
 
-    private RabbitMqEventBus(string? conn, ILogger<RabbitMqEventBus> logger, IDictionary<string, Type> queueTypeMap, EventBusOptions options)
+    private RabbitMqEventBus(string? conn, ILogger<RabbitMqEventBus> logger, IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap, EventBusOptions options)
     {
         _logger = logger;
         _queueTypeMap = queueTypeMap;
@@ -49,7 +47,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
     public static async Task<RabbitMqEventBus> CreateAsync(
         string? conn,
         ILogger<RabbitMqEventBus> logger,
-        IDictionary<string, Type> queueTypeMap,
+        IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap,
         EventBusOptions options,
         CancellationToken cancellationToken = default)
     {
@@ -93,7 +91,11 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         }
     }
 
-    public async Task Publish<TEvent>(TEvent @event, Type? handlerType = null, Guid? sagaId = null, CancellationToken cancellationToken = default)
+    public async Task Publish<TEvent>(
+        TEvent @event, 
+        Type? handlerType = null, //Discard handlerType as it's not used in RabbitMQ
+        Guid? sagaId = null,
+        CancellationToken cancellationToken = default)
         where TEvent : IEvent
     {
         await EnsureChannelAsync(cancellationToken).ConfigureAwait(false);
@@ -134,7 +136,10 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             body: body, cancellationToken: cancellationToken);
     }
 
-    public async Task Send<TCommand>(TCommand command, Type? handlerType = null, Guid? sagaId = null,
+    public async Task Send<TCommand>(
+        TCommand command, 
+        Type? handlerType = null, //Discard handlerType as it's not used in RabbitMQ
+        Guid? sagaId = null,
         CancellationToken cancellationToken = default) where TCommand : ICommand
     {
         await EnsureChannelAsync(cancellationToken).ConfigureAwait(false);
@@ -235,21 +240,22 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         }
     }
 
-    private async IAsyncEnumerable<(byte[] Body, Type MessageType)> ConsumeAsync(
-        IDictionary<string, Type> queueTypeMap, bool autoAck = true,
+    private async IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType)> ConsumeAsync(
+        IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap, bool autoAck = true,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (_channel == null)
             throw new InvalidOperationException(
                 "Channel is not initialized. Ensure RabbitMqEventBus is properly created.");
 
-        var messageQueue = new ConcurrentQueue<(byte[] Body, Type MessageType)>();
+        var messageQueue = new ConcurrentQueue<(byte[] Body, Type MessageType, Type HandlerType)>();
 
         // queueName => e.g. Full format: event.OrderCreatedEvent.CreateOrderSagaHandler.OrderService
         foreach (var kvp in queueTypeMap)
         {
             var queueName = kvp.Key;
-            var messageType = kvp.Value;
+            var messageType = kvp.Value.MessageType;
+            var handlerType = kvp.Value.HandlerType;
             // Ensure queue and exchange exist and are bound before subscribing the consumer.
             // These operations are idempotent.
             var exchangeName = MessagingNamingHelper.GetExchangeName(messageType); // e.g., "event.OrderCreatedEvent"
@@ -297,7 +303,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             {
                 try
                 {
-                    messageQueue.Enqueue((ea.Body.ToArray(), messageType));
+                    messageQueue.Enqueue((ea.Body.ToArray(), messageType, handlerType));
                     await Task.CompletedTask;
                 }
                 catch (Exception ex)
@@ -367,7 +373,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         };
     }
 
-    public IAsyncEnumerable<(byte[] Body, Type MessageType)> ConsumeAsync(bool autoAck = true, CancellationToken cancellationToken = default)
+    public IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType)> ConsumeAsync(bool autoAck = true, CancellationToken cancellationToken = default)
     {
         if (_queueTypeMap == null)
             throw new InvalidOperationException(

@@ -27,18 +27,19 @@ public static class SagaHandlerRegistrationExtensions
     {
         var appId = serviceCollection.Configuration!["ApplicationId"] ??
                     throw new InvalidOperationException("ApplicationId is not configured.");
-        
-        RegisterSagaHandler(serviceCollection.Services, handlerType);
 
-        if (handlerType != null)
+        if (handlerType is null)
+            throw new ArgumentNullException(nameof(handlerType), "Handler type cannot be null.");
+
+        serviceCollection.Services.AddScoped(handlerType);
+
+        var messageTypes = GetMessageTypesFromHandler(handlerType);
+        foreach (var messageType in messageTypes)
         {
-            var messageTypes = GetMessageTypesFromHandler(handlerType);
-            foreach (var messageType in messageTypes)
-            {
-                var routingKey = MessagingNamingHelper.GetRoutingKey(messageType, handlerType, appId);
-                serviceCollection.QueueTypeMap[routingKey] = messageType;
-            }
+            var routingKey = MessagingNamingHelper.GetRoutingKey(messageType, handlerType, appId);
+            serviceCollection.QueueTypeMap[routingKey] = (messageType, handlerType);
         }
+
 
         return serviceCollection;
     }
@@ -49,28 +50,29 @@ public static class SagaHandlerRegistrationExtensions
     /// <param name="serviceCollection">The DI service collection.</param>
     /// <param name="handlerTypes">Array of handler class types.</param>
     /// <returns>The updated service collection.</returns>
-    public static ILyciaServiceCollection AddSagas(this ILyciaServiceCollection serviceCollection, params Type?[] handlerTypes)
+    public static ILyciaServiceCollection AddSagas(this ILyciaServiceCollection serviceCollection,
+        params Type?[] handlerTypes)
     {
         var appId = serviceCollection.Configuration!["ApplicationId"] ??
                     throw new InvalidOperationException("ApplicationId is not configured.");
-        
+
         foreach (var handlerType in handlerTypes)
         {
-            RegisterSagaHandler(serviceCollection.Services, handlerType);
+            if(handlerType is null) continue;
+            
+            serviceCollection.Services.AddScoped(handlerType);
 
-            if (handlerType != null)
+            var messageTypes = GetMessageTypesFromHandler(handlerType);
+            foreach (var messageType in messageTypes)
             {
-                var messageTypes = GetMessageTypesFromHandler(handlerType);
-                foreach (var messageType in messageTypes)
-                {
-                    var routingKey = MessagingNamingHelper.GetRoutingKey(messageType, handlerType, appId);
-                    serviceCollection.QueueTypeMap[routingKey] = messageType;
-                }
+                var routingKey = MessagingNamingHelper.GetRoutingKey(messageType, handlerType, appId);
+                serviceCollection.QueueTypeMap[routingKey] = (messageType, handlerType);
             }
         }
+
         return serviceCollection;
     }
-    
+
 
     /// <summary>
     /// Scans the assembly from which this method is called and automatically registers all Saga handler types.
@@ -108,7 +110,7 @@ public static class SagaHandlerRegistrationExtensions
     {
         var appId = serviceCollection.Configuration!["ApplicationId"] ??
                     throw new InvalidOperationException("ApplicationId is not configured.");
-        
+
         foreach (var assembly in assemblies)
         {
             IEnumerable<Type?> handlerTypes = assembly.GetTypes().Where(t =>
@@ -117,14 +119,15 @@ public static class SagaHandlerRegistrationExtensions
             );
             foreach (var handlerType in handlerTypes)
             {
-                RegisterSagaHandler(serviceCollection.Services, handlerType);
-
                 if (handlerType == null) continue;
+                
+                serviceCollection.Services.AddScoped(handlerType);
+                
                 var messageTypes = GetMessageTypesFromHandler(handlerType);
                 foreach (var messageType in messageTypes)
                 {
                     var routingKey = MessagingNamingHelper.GetRoutingKey(messageType, handlerType, appId);
-                    serviceCollection.QueueTypeMap[routingKey] = messageType;
+                    serviceCollection.QueueTypeMap[routingKey] = (messageType, handlerType);
                 }
             }
         }
@@ -132,132 +135,8 @@ public static class SagaHandlerRegistrationExtensions
         return serviceCollection;
     }
 
-    /// <summary>
-    /// Registers the handler and its matching interfaces with Scoped lifetime.
-    /// </summary>
-    private static void RegisterSagaHandler(IServiceCollection serviceCollection, Type? type)
-    {
-        if (type == null)
-            return;
-
-        // Register StartReactiveSagaHandler<T>
-        var startReactiveBase = GetGenericBaseType(type, typeof(StartReactiveSagaHandler<>));
-        if (startReactiveBase != null)
-        {
-            var handlerInterfaces = type.GetInterfaces()
-                .Where(i =>
-                    i.IsGenericType && (
-                        i.GetGenericTypeDefinition() == typeof(ISagaStartHandler<>) ||
-                        i.GetGenericTypeDefinition() == typeof(ISagaCompensationHandler<>)
-                    )
-                )
-                .ToList();
-
-            foreach (var interfaceType in handlerInterfaces)
-            {
-                serviceCollection.TryAddScoped(interfaceType, type);
-            }
-
-            return;
-        }
-
-        // Register ReactiveSagaHandler<T>
-        var reactiveBase = GetGenericBaseType(type, typeof(ReactiveSagaHandler<>));
-        if (reactiveBase != null)
-        {
-            var handlerInterfaces = type.GetInterfaces()
-                .Where(i =>
-                    i.IsGenericType && (
-                        i.GetGenericTypeDefinition() == typeof(ISagaHandler<>) ||
-                        i.GetGenericTypeDefinition() == typeof(ISagaCompensationHandler<>)
-                    )
-                )
-                .ToList();
-
-            foreach (var interfaceType in handlerInterfaces)
-            {
-                serviceCollection.TryAddScoped(interfaceType, type);
-            }
-            return;
-        }
-
-        // Register StartCoordinatedSagaHandler<T, TR, TD>
-        var startCoordinatedBase = GetGenericBaseType(type, typeof(StartCoordinatedSagaHandler<,,>));
-        if (startCoordinatedBase != null)
-        {
-            var handlerInterfaces = type.GetInterfaces()
-                .Where(i =>
-                    i.IsGenericType && (
-                        i.GetGenericTypeDefinition() == typeof(ISagaStartHandler<,>) ||
-                        i.GetGenericTypeDefinition() == typeof(ISuccessResponseHandler<>) ||
-                        i.GetGenericTypeDefinition() == typeof(IFailResponseHandler<>) ||
-                        i.GetGenericTypeDefinition() == typeof(ISagaCompensationHandler<>)
-                    )
-                )
-                .ToList();
-            
-            foreach (var interfaceType in handlerInterfaces)
-            {
-                serviceCollection.TryAddScoped(interfaceType, type);
-            }
-            
-            return;
-        }
-
-        // Register CoordinatedSagaHandler<T, TR, TD>
-        var coordinatedBase = GetGenericBaseType(type, typeof(CoordinatedSagaHandler<,,>));
-        if (coordinatedBase != null)
-        {
-            var handlerInterfaces = type.GetInterfaces()
-                .Where(i =>
-                    i.IsGenericType && (
-                        i.GetGenericTypeDefinition() == typeof(ISagaHandler<,>) ||
-                        i.GetGenericTypeDefinition() == typeof(ISuccessResponseHandler<>) ||
-                        i.GetGenericTypeDefinition() == typeof(IFailResponseHandler<>) ||
-                        i.GetGenericTypeDefinition() == typeof(ISagaCompensationHandler<>)
-                    )
-                )
-                .ToList();
-            
-            foreach (var interfaceType in handlerInterfaces)
-            {
-                serviceCollection.TryAddScoped(interfaceType, type);
-            }
-            return;
-        }
-
-        // Register ResponseSagaHandler<TResponse, TSagaData>
-        var responseBase = GetGenericBaseType(type, typeof(ResponseSagaHandler<,>));
-        if (responseBase != null)
-        {
-            var handlerInterfaces = type.GetInterfaces()
-                .Where(i =>
-                    i.IsGenericType && (
-                        i.GetGenericTypeDefinition() == typeof(ISuccessResponseHandler<>) ||
-                        i.GetGenericTypeDefinition() == typeof(IFailResponseHandler<>)
-                    )
-                )
-                .ToList();
-
-            foreach (var interfaceType in handlerInterfaces)
-                serviceCollection.TryAddScoped(interfaceType, type);
-            
-            return;
-        }
-
-        // Fallback: Register directly for known interfaces
-        var sagaInterfaces = GetSagaInterfaces(type);
-
-        if (sagaInterfaces.Count == 0) return;
-
-        // Fallback: Register the type for all detected interfaces
-        foreach (var iFace in sagaInterfaces)
-        {
-            serviceCollection.TryAddScoped(iFace, type);
-        }
-    }
-    
-    public static Dictionary<string, Type> DiscoverQueueTypeMap(string? applicationId, params Assembly[] assemblies)
+    public static Dictionary<string, (Type MessageType, Type HandlerType)> DiscoverQueueTypeMap(string? applicationId,
+        params Assembly[] assemblies)
     {
         var handlerTypes = assemblies
             .SelectMany(a => a.GetTypes())
@@ -274,7 +153,7 @@ public static class SagaHandlerRegistrationExtensions
                 )))
             .ToList();
 
-        var queueTypeMap = new Dictionary<string, Type>();
+        var queueTypeMap = new Dictionary<string, (Type MessageType, Type HandlerType)>();
 
         foreach (var handlerType in handlerTypes)
         {
@@ -282,25 +161,11 @@ public static class SagaHandlerRegistrationExtensions
             foreach (var messageType in messageTypes)
             {
                 var routingKey = MessagingNamingHelper.GetRoutingKey(messageType, handlerType, applicationId);
-                queueTypeMap[routingKey] = messageType;
+                queueTypeMap[routingKey] = (messageType, handlerType);
             }
         }
 
         return queueTypeMap;
-    }
-
-    private static List<Type> GetSagaInterfaces(Type type)
-    {
-        return type.GetInterfaces()
-            .Where(i => i.IsGenericType &&
-                        (i.GetGenericTypeDefinition() == typeof(ISagaHandler<>)
-                         || i.GetGenericTypeDefinition() == typeof(ISagaStartHandler<>)
-                         || i.GetGenericTypeDefinition() == typeof(ISagaHandler<,>)
-                         || i.GetGenericTypeDefinition() == typeof(ISagaStartHandler<,>)
-                         || i.GetGenericTypeDefinition() == typeof(ISagaCompensationHandler<>)
-                         || i.GetGenericTypeDefinition() == typeof(ISuccessResponseHandler<>)
-                         || i.GetGenericTypeDefinition() == typeof(IFailResponseHandler<>)))
-            .ToList();
     }
 
     /// <summary>

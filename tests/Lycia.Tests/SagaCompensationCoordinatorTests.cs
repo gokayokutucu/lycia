@@ -1,8 +1,5 @@
 using Lycia.Infrastructure.Compensating;
-using Lycia.Infrastructure.Dispatching;
-using Lycia.Infrastructure.Eventing;
 using Lycia.Infrastructure.Stores;
-using Lycia.Messaging;
 using Lycia.Saga.Abstractions;
 using Lycia.Messaging.Enums;
 using Lycia.Saga.Exceptions;
@@ -11,14 +8,53 @@ using Lycia.Tests.Helpers;
 using Lycia.Tests.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
-using Moq.Protected;
-using Sample.Shared.Messages.Events;
 
 namespace Lycia.Tests;
 
 public class SagaCompensationCoordinatorTests
 {
-    
+    [Fact]
+    public async Task CompensationHandler_Should_Be_Idempotent()
+    {
+        // Arrange
+        var sagaId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        int invocationCount = 0;
+        
+        var dummyEvent = new DummyEvent
+        {
+            MessageId = messageId,
+            ParentMessageId = Guid.Empty
+        };
+
+        var handlerMock = new Mock<ISagaCompensationHandler<DummyEvent>>();
+        handlerMock.Setup(h => h.CompensateAsync(It.IsAny<DummyEvent>()))
+            .Returns(() =>
+            {
+                invocationCount++;
+                return Task.CompletedTask;
+            });
+
+        var services = new ServiceCollection();
+        var eventBusMock = Mock.Of<IEventBus>();
+        var sagaIdGen = Mock.Of<ISagaIdGenerator>();
+        var dummyCoordinator = Mock.Of<ISagaCompensationCoordinator>();
+        var store = new InMemorySagaStore(eventBusMock, sagaIdGen, dummyCoordinator);
+
+        services.AddSingleton(handlerMock.Object);
+        services.AddSingleton<ISagaStore>(store);
+        services.AddSingleton<IEventBus>(eventBusMock);
+        var provider = services.BuildServiceProvider();
+        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
+
+        // Act
+        await coordinator.CompensateAsync(sagaId, typeof(DummyEvent), handlerMock.Object.GetType(), dummyEvent);
+        await coordinator.CompensateAsync(sagaId, typeof(DummyEvent), handlerMock.Object.GetType(), dummyEvent);
+
+        // Assert
+        Assert.Equal(1, invocationCount);
+    }
+
     [Fact]
     public async Task Compensation_Should_Not_Invoke_Handler_If_Already_Compensated_Or_CompensationFailed()
     {
@@ -56,7 +92,7 @@ public class SagaCompensationCoordinatorTests
         var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
 
         // Act
-        await coordinator.CompensateAsync(sagaId, stepType);
+        await coordinator.CompensateAsync(sagaId, stepType, typeof(NoOpHandler), payload);
 
         // Assert: Handler should NOT be called because step is already Compensated
         Assert.Empty(NoOpHandler.Invocations);
@@ -77,7 +113,7 @@ public class SagaCompensationCoordinatorTests
             typeof(NoOpHandler), payload2);
 
         // Act
-        await coordinator.CompensateAsync(sagaId2, stepType);
+        await coordinator.CompensateAsync(sagaId2, stepType, typeof(NoOpHandler), payload2);
 
         // Assert: Handler should NOT be called because step is already CompensationFailed
         Assert.Empty(NoOpHandler.Invocations);
@@ -119,7 +155,6 @@ public class SagaCompensationCoordinatorTests
         // Handlers will record invocations
         CircularHandler.Invocations.Clear();
 
-        var services = new ServiceCollection();
         var eventBusMock = Mock.Of<IEventBus>();
         var sagaIdGen = new TestSagaIdGenerator(sagaId);
         var dummyCoordinator = Mock.Of<ISagaCompensationCoordinator>();
@@ -128,7 +163,8 @@ public class SagaCompensationCoordinatorTests
         // Log both steps with compensation failed status to trigger parent chain
         await store.LogStepAsync(sagaId, messageId1, messageId2, stepType, StepStatus.CompensationFailed,
             typeof(CircularHandler), msg1);
-        await Assert.ThrowsAsync<SagaStepCircularChainException>(()=> store.LogStepAsync(sagaId, messageId2, messageId1, stepType, StepStatus.CompensationFailed,
+        await Assert.ThrowsAsync<SagaStepCircularChainException>(() => store.LogStepAsync(sagaId, messageId2,
+            messageId1, stepType, StepStatus.CompensationFailed,
             typeof(CircularHandler), msg2));
     }
 
@@ -141,61 +177,6 @@ public class SagaCompensationCoordinatorTests
             Invocations.Add(nameof(CircularHandler));
             return Task.CompletedTask;
         }
-    }
-
-    [Fact]
-    public async Task CompensateAsync_Should_Invoke_All_Registered_CompensationHandlers_For_SameMessageType()
-    {
-        // Arrange
-        var sagaId = Guid.NewGuid();
-        var messageId = Guid.NewGuid();
-
-        var handler1 = new MultiHandler1();
-        var handler2 = new MultiHandler2();
-
-        var services = new ServiceCollection();
-        var eventBusMock = new Mock<IEventBus>().Object;
-        var sagaIdGen = Mock.Of<ISagaIdGenerator>();
-        var dummyCoordinator = Mock.Of<ISagaCompensationCoordinator>();
-        var store = new InMemorySagaStore(eventBusMock, sagaIdGen, dummyCoordinator);
-
-        var stepType = typeof(DummyEvent);
-        var payload = new DummyEvent
-        {
-            MessageId = messageId,
-            ParentMessageId = Guid.Empty,
-            CorrelationId = Guid.NewGuid(),
-            Timestamp = DateTime.UtcNow,
-            ApplicationId = "Test"
-        };
-
-        await store.LogStepAsync(
-            sagaId,
-            messageId,
-            Guid.Empty,
-            stepType,
-            StepStatus.Failed, // Force compensation trigger
-            stepType,
-            payload);
-
-        // Register two different handlers for the same message type
-        services.AddSingleton<ISagaCompensationHandler<DummyEvent>>(handler1);
-        services.AddSingleton<ISagaCompensationHandler<DummyEvent>>(handler2);
-        services.AddSingleton<IEventBus>(eventBusMock);
-        services.AddSingleton<ISagaStore>(store);
-
-        var provider = services.BuildServiceProvider();
-        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
-
-        MultiHandler1.Called = false;
-        MultiHandler2.Called = false;
-
-        // Act
-        await coordinator.CompensateAsync(sagaId, stepType);
-
-        // Assert
-        Assert.True(MultiHandler1.Called);
-        Assert.True(MultiHandler2.Called);
     }
 
     [Fact]
@@ -272,7 +253,7 @@ public class SagaCompensationCoordinatorTests
         var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
 
         // Act
-        await coordinator.CompensateAsync(sagaId, stepType);
+        await coordinator.CompensateAsync(sagaId, stepType, typeof(ChildCompensationSagaHandler), child);
 
         // Assert
         // Parent should be invoked for compensation (even if it fails), but Grandparent must not be called.
@@ -302,7 +283,6 @@ public class SagaCompensationCoordinatorTests
 
         // IMPORTANT: Use the same type as the handler expects
         var stepType = typeof(DummyEvent);
-        var handlerType = typeof(ISagaCompensationHandler<DummyEvent>);
         var payload = new DummyEvent()
         {
             MessageId = messageId,
@@ -312,15 +292,6 @@ public class SagaCompensationCoordinatorTests
             ApplicationId = "Test"
         };
 
-        await store.LogStepAsync(
-            sagaId,
-            messageId,
-            Guid.Empty,
-            stepType,
-            StepStatus.Failed, // Triggering compensation set failed or another proper status
-            handlerType, // Used an interface type for the handler
-            payload);
-
         services.AddSingleton<ISagaStore>(store);
         services.AddSingleton<IEventBus>(eventBusMock);
         services.AddSingleton(handlerMock.Object);
@@ -329,7 +300,8 @@ public class SagaCompensationCoordinatorTests
         var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
 
         // Act
-        await coordinator.CompensateAsync(sagaId, stepType);
+        // use ISagaCompensationHandler<DummyEvent> to ensure correct type resolution
+        await coordinator.CompensateAsync(sagaId, stepType, handlerMock.Object.GetType(), payload);
 
         // Assert
         handlerMock.Verify(h => h.CompensateAsync(It.IsAny<DummyEvent>()), Times.Once);
@@ -387,32 +359,35 @@ public class SagaCompensationCoordinatorTests
         var stepType = typeof(DummyEvent);
 
         // Grandparent
-        await store.LogStepAsync(fixedSagaId, messageIdOfGrandParent, Guid.Empty, stepType, StepStatus.Compensated,
+        await store.LogStepAsync(fixedSagaId, messageIdOfGrandParent, Guid.Empty, stepType, 
+            StepStatus.Compensated,
             typeof(GrandparentCompensationHandler), grandparent);
         // Parent
-        await store.LogStepAsync(fixedSagaId, messageIdOfParent, messageIdOfGrandParent, stepType, StepStatus.Compensated,
+        await store.LogStepAsync(fixedSagaId, messageIdOfParent, messageIdOfGrandParent, stepType,
+            StepStatus.Compensated,
             typeof(ParentCompensationHandler),
             parent);
         // Child (last step failed)
-        await store.LogStepAsync(fixedSagaId, messageIdOfChild, messageIdOfParent, stepType, StepStatus.CompensationFailed,
+        await store.LogStepAsync(fixedSagaId, messageIdOfChild, messageIdOfParent, stepType,
+            StepStatus.CompensationFailed,
             typeof(ChildCompensationHandler), child);
 
         services.AddSingleton<ISagaStore>(store);
         services.AddSingleton<IEventBus>(eventBusMock);
-        services.AddSingleton<ISagaCompensationHandler<DummyEvent>, GrandparentCompensationHandler>();
-        services.AddSingleton<ISagaCompensationHandler<DummyEvent>, ParentCompensationHandler>();
-        services.AddSingleton<ISagaCompensationHandler<DummyEvent>, ChildCompensationHandler>();
+        services.AddSingleton<GrandparentCompensationHandler>();
+        services.AddSingleton<ParentCompensationHandler>();
+        services.AddSingleton<ChildCompensationHandler>();
 
         var provider = services.BuildServiceProvider();
         var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
 
         // Act
-        await coordinator.CompensateParentAsync(fixedSagaId, stepType, parent);
-        await coordinator.CompensateParentAsync(fixedSagaId, stepType, child);
+        await coordinator.CompensateParentAsync(fixedSagaId, stepType, typeof(ChildCompensationHandler), child);
+        await coordinator.CompensateParentAsync(fixedSagaId, stepType, typeof(ParentCompensationHandler), parent);
 
         // Assert
-        Assert.Contains("ParentCompensationHandler", ParentCompensationHandler.Invocations);
-        Assert.Contains("GrandparentCompensationHandler", GrandparentCompensationHandler.Invocations);
+        Assert.Empty(ParentCompensationHandler.Invocations);
+        Assert.Empty(GrandparentCompensationHandler.Invocations);
     }
 
     [Fact]
@@ -446,7 +421,8 @@ public class SagaCompensationCoordinatorTests
         var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
 
         // Act + Assert
-        await coordinator.CompensateAsync(sagaId, stepType);
+        // Use ICompensationHandler with a type that has no registered handler
+        await coordinator.CompensateAsync(sagaId, stepType, null, payload);
     }
 
     [Fact]
@@ -461,7 +437,7 @@ public class SagaCompensationCoordinatorTests
         {
             SagaId = sagaId,
             MessageId = rootMessageId,
-            ParentMessageId = Guid.Empty,
+            ParentMessageId = Guid.Empty, //No parent
             CorrelationId = Guid.NewGuid(),
             Timestamp = DateTime.UtcNow,
             ApplicationId = "Test"
@@ -475,9 +451,6 @@ public class SagaCompensationCoordinatorTests
         var store = new InMemorySagaStore(eventBusMock, sagaIdGen, dummyCoordinator);
 
         // Save step log for root message
-        await store.LogStepAsync(
-            sagaId, rootMessageId, rootParentMessageId, typeof(DummyEvent), StepStatus.CompensationFailed,
-            typeof(ParentCompensationHandler), root);
 
         services.AddSingleton<ISagaStore>(store);
         services.AddSingleton<ISagaCompensationHandler<DummyEvent>, ParentCompensationHandler>();
@@ -487,16 +460,12 @@ public class SagaCompensationCoordinatorTests
         var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
 
         // Act
-        await coordinator.CompensateParentAsync(sagaId, typeof(DummyEvent), root);
+        await coordinator.CompensateParentAsync(sagaId, typeof(DummyEvent), typeof(ParentCompensationHandler), root);
 
         // Assert
         Assert.Empty(ParentCompensationHandler.Invocations);
     }
-
-    private class NotDummyEvent : EventBase
-    {
-    }
-
+    
     private class NoOpHandler : ISagaCompensationHandler<DummyEvent>
     {
         public static readonly List<string> Invocations = [];
@@ -504,29 +473,6 @@ public class SagaCompensationCoordinatorTests
         public Task CompensateAsync(DummyEvent message)
         {
             Invocations.Add(nameof(NoOpHandler));
-            return Task.CompletedTask;
-        }
-    }
-
-    // Dummy multi-handler implementations for testing
-    private class MultiHandler1 : ISagaCompensationHandler<DummyEvent>
-    {
-        public static bool Called = false;
-
-        public Task CompensateAsync(DummyEvent message)
-        {
-            Called = true;
-            return Task.CompletedTask;
-        }
-    }
-
-    private class MultiHandler2 : ISagaCompensationHandler<DummyEvent>
-    {
-        public static bool Called = false;
-
-        public Task CompensateAsync(DummyEvent message)
-        {
-            Called = true;
             return Task.CompletedTask;
         }
     }

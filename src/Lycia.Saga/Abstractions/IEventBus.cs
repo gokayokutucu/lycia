@@ -58,5 +58,5 @@ public interface IEventBus
     /// <returns>
     ///     An asynchronous stream (<see cref="IAsyncEnumerable{T}"/>) yielding a tuple consisting of the raw message body (<see cref="byte[]"/>) and its corresponding <see cref="Type"/>.
     /// </returns>
-    IAsyncEnumerable<(byte[] Body, Type MessageType)> ConsumeAsync(bool autoAck = true, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType)> ConsumeAsync(bool autoAck = true, CancellationToken cancellationToken = default);
 }

@@ -6,16 +6,18 @@ public interface ISagaContext<TInitialMessage>
     where TInitialMessage : IMessage
 {
     Guid SagaId { get; }
-    Type HandlerType { get; }
+    Type HandlerTypeOfCurrentStep { get; }
     ISagaStore SagaStore { get; }
 
     Task Send<T>(T command) where T : ICommand;
     Task Publish<T>(T @event) where T : IEvent;
+    
+    Task Publish<T>(T @event, Type? handlerType) where T : IEvent;
 
-    ReactiveSagaStepFluent<TStep, TInitialMessage> PublishWithTracking<TStep>(TStep @event)
+    ReactiveSagaStepFluent<TStep, TInitialMessage> PublishWithTracking<TStep>(TStep nextEvent)
         where TStep : IEvent;
 
-    ReactiveSagaStepFluent<TStep, TInitialMessage> SendWithTracking<TStep>(TStep command)
+    ReactiveSagaStepFluent<TStep, TInitialMessage> SendWithTracking<TStep>(TStep nextCommand)
         where TStep : ICommand;
 
     Task Compensate<T>(T @event) where T : FailedEventBase;
@@ -35,9 +37,9 @@ public interface ISagaContext<TInitialMessage, TSagaData> : ISagaContext<TInitia
 {
     TSagaData Data { get; }
 
-    new CoordinatedSagaStepFluent<TStep, TSagaData> PublishWithTracking<TStep>(TStep @event)
+    new CoordinatedSagaStepFluent<TStep, TSagaData> PublishWithTracking<TStep>(TStep nextEvent)
         where TStep : IEvent;
 
-    new CoordinatedSagaStepFluent<TStep, TSagaData> SendWithTracking<TStep>(TStep command)
+    new CoordinatedSagaStepFluent<TStep, TSagaData> SendWithTracking<TStep>(TStep nextCommand)
         where TStep : ICommand;
 }

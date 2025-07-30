@@ -1,4 +1,3 @@
-using Lycia.Infrastructure.Helpers;
 using Lycia.Messaging;
 using Lycia.Saga;
 using Lycia.Saga.Abstractions;
@@ -18,33 +17,27 @@ public class SagaDispatcher(
     IServiceProvider serviceProvider)
     : ISagaDispatcher
 {
-    private async Task DispatchByMessageTypeAsync<TMessage>(TMessage message, Guid? sagaId,
+    private async Task DispatchByMessageTypeAsync<TMessage>(TMessage message, Type? handlerType, Guid? sagaId,
         CancellationToken cancellationToken) where TMessage : IMessage
     {
-        var messageType = message.GetType();
-
-        var startHandlers = SagaHandlerHelper.FindSagaStartHandlers(serviceProvider, messageType);
-        var startHandlersList = startHandlers.ToList();
-        if (startHandlersList.Count != 0)
+        if (handlerType == null)
         {
-            await InvokeHandlerAsync(startHandlersList, message, cancellationToken: cancellationToken);
+            // log null handlerType
+            return;
         }
-
-        var stepHandlers = SagaHandlerHelper.FindSagaHandlers(serviceProvider, messageType);
-        var stepHandlersList = stepHandlers.ToList();
-        if (stepHandlersList.Count != 0)
-        {
-            await InvokeHandlerAsync(stepHandlersList, message, sagaId, cancellationToken: cancellationToken);
-        }
+        
+        var handler = serviceProvider.GetRequiredService(handlerType);
+        await InvokeHandlerAsync(handler, message, sagaId, cancellationToken: cancellationToken);
     }
 
-    public async Task DispatchAsync<TMessage>(TMessage message, Guid? sagaId,
+    public async Task DispatchAsync<TMessage>(TMessage message, Type? handlerType, Guid? sagaId,
         CancellationToken cancellationToken) where TMessage : IMessage
     {
-        await DispatchByMessageTypeAsync(message, sagaId, cancellationToken);
+        await DispatchByMessageTypeAsync(message, handlerType, sagaId, cancellationToken);
     }
 
-    public async Task DispatchAsync<TMessage, TResponse>(TResponse message, Guid? sagaId, CancellationToken cancellationToken)
+    public async Task DispatchAsync<TMessage, TResponse>(TResponse message, Type? handlerType, Guid? sagaId,
+        CancellationToken cancellationToken)
         where TMessage : IMessage
         where TResponse : IResponse<TMessage>
     {
@@ -58,13 +51,12 @@ public class SagaDispatcher(
 
         if (IsSuccessResponse(messageType))
         {
-            var handlerType = typeof(ISuccessResponseHandler<>).MakeGenericType(messageType);
             Console.WriteLine($"[Dispatch] Dispatching {messageType.Name} to {handlerType.Name}");
-            await InvokeHandlerAsync(serviceProvider.GetServices(handlerType), message, cancellationToken: cancellationToken);
+            await InvokeHandlerAsync(serviceProvider.GetServices(handlerType), message,
+                cancellationToken: cancellationToken);
         }
         else if (IsFailResponse(messageType))
-        { 
-            var handlerType = typeof(IFailResponseHandler<>).MakeGenericType(messageType);
+        {
             var fail = new FailResponse
             {
                 Reason = "An error occurred while handling the message.",
@@ -72,16 +64,17 @@ public class SagaDispatcher(
                 OccurredAt = DateTime.UtcNow
             };
             Console.WriteLine($"[Dispatch] Dispatching {messageType.Name} to {handlerType.Name}");
-            await InvokeHandlerAsync(serviceProvider.GetServices(handlerType), message, sagaId, fail, cancellationToken);
+            await InvokeHandlerAsync(serviceProvider.GetServices(handlerType), message, sagaId, fail,
+                cancellationToken);
         }
         else
         {
-            await DispatchByMessageTypeAsync(message, sagaId, cancellationToken);
+            await DispatchByMessageTypeAsync(message, handlerType, sagaId, cancellationToken);
         }
     }
 
     protected virtual async Task InvokeHandlerAsync(
-        IEnumerable<object?> handlers,
+        object? handler,
         IMessage message,
         Guid? sagaId = null,
         FailResponse? fail = null, CancellationToken cancellationToken = default)
@@ -93,105 +86,103 @@ public class SagaDispatcher(
             compensationCoordinator)
             throw new InvalidOperationException("ISagaCompensationCoordinator not resolved.");
 
-        foreach (var handler in handlers)
+
+        // SagaId resolution logic
+        var messageType = message.GetType();
+        var sagaIdProp = messageType.GetProperty("SagaId");
+
+        // Only ISagaStartHandler gets a new SagaId if needed
+        var handlerType = handler!.GetType();
+        var isStartHandler = handlerType.IsSubclassOfRawGeneric(typeof(ISagaStartHandler<>));
+
+        if (sagaIdProp != null && sagaIdProp.GetValue(message) is Guid value && value != Guid.Empty)
         {
-            // SagaId resolution logic
-            var messageType = message.GetType();
-            var sagaIdProp = messageType.GetProperty("SagaId");
+            sagaId = value;
+        }
+        else if (isStartHandler)
+        {
+            sagaId = sagaIdGenerator.Generate();
+            // Optionally assign to message property if settable
+            if (sagaIdProp != null && sagaIdProp.CanWrite)
+                sagaIdProp.SetValue(message, sagaId);
+        }
+        else if (sagaId is null && sagaIdProp is null)
+        {
+            // Not a start handler and SagaId missing: throw!
+            throw new InvalidOperationException("Missing SagaId on a non-starting message.");
+        }
 
-            // Only ISagaStartHandler gets a new SagaId if needed
-            var handlerType = handler!.GetType();
-            var isStartHandler = handlerType.IsSubclassOfRawGeneric(typeof(ISagaStartHandler<>));
+        // Coordinated (with SagaData)
+        if (handlerType.IsSubclassOfRawGenericBase(typeof(CoordinatedSagaHandler<,,>)) ||
+            handlerType.IsSubclassOfRawGenericBase(typeof(StartCoordinatedSagaHandler<,,>)))
+        {
+            var genericArgs = handlerType.BaseType?.GetGenericArguments();
+            var msgType = genericArgs?[0];
+            var sagaDataType = genericArgs?[2];
 
-            if (sagaIdProp != null && sagaIdProp.GetValue(message) is Guid value && value != Guid.Empty)
-            {
-                sagaId = value;
-            }
-            else if (isStartHandler)
-            {
-                sagaId = sagaIdGenerator.Generate();
-                // Optionally assign to message property if settable
-                if (sagaIdProp != null && sagaIdProp.CanWrite)
-                    sagaIdProp.SetValue(message, sagaId);
-            }
-            else if (sagaId is null && sagaIdProp is null)
-            {
-                // Not a start handler and SagaId missing: throw!
-                throw new InvalidOperationException("Missing SagaId on a non-starting message.");
-            }
+            // Create SagaContext with loaded SagaData: SagaContext<msgType, sagaDataType>
+            var contextType = typeof(SagaContext<,>).MakeGenericType(msgType!, sagaDataType!);
+            var loadedSagaData =
+                await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", sagaDataType!, sagaId);
+            var contextInstance = Activator.CreateInstance(contextType,
+                sagaId,
+                message,
+                handlerType,
+                loadedSagaData,
+                eventBus,
+                sagaStore,
+                sagaIdGenerator,
+                compensationCoordinator);
+            var initializeMethod = handlerType.GetMethod("Initialize");
+            initializeMethod?.Invoke(handler, [contextInstance]);
 
-            // Coordinated (with SagaData)
-            if (handlerType.IsSubclassOfRawGenericBase(typeof(CoordinatedSagaHandler<,,>)) ||
-                handlerType.IsSubclassOfRawGenericBase(typeof(StartCoordinatedSagaHandler<,,>)))
-            {
-                var genericArgs = handlerType.BaseType?.GetGenericArguments();
-                var msgType = genericArgs?[0];
-                var sagaDataType = genericArgs?[2];
+            await HandleSagaAsync(message, handler, handlerType);
+            return;
+        }
 
-                // Create SagaContext with loaded SagaData: SagaContext<msgType, sagaDataType>
-                var contextType = typeof(SagaContext<,>).MakeGenericType(msgType!, sagaDataType!);
-                var loadedSagaData =
-                    await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", sagaDataType!, sagaId);
-                var contextInstance = Activator.CreateInstance(contextType,
+        // Reactive (no SagaData)
+        if (handlerType.IsSubclassOfRawGenericBase(typeof(ReactiveSagaHandler<>)) ||
+            handlerType.IsSubclassOfRawGenericBase(typeof(StartReactiveSagaHandler<>)))
+        {
+            var genericArgs = handlerType.BaseType?.GetGenericArguments();
+            var msgType = genericArgs?[0];
+
+            var contextType = typeof(SagaContext<>).MakeGenericType(msgType!);
+            var contextInstance =
+                Activator.CreateInstance(contextType,
                     sagaId,
                     message,
                     handlerType,
-                    loadedSagaData,
                     eventBus,
                     sagaStore,
                     sagaIdGenerator,
                     compensationCoordinator);
-                var initializeMethod = handlerType.GetMethod("Initialize");
-                initializeMethod?.Invoke(handler, [contextInstance]);
+            var initializeMethod = handlerType.GetMethod("Initialize");
+            initializeMethod?.Invoke(handler, [contextInstance]);
 
-                await HandleSagaAsync(handler, handlerType);
-                continue;
-            }
-
-            // Reactive (no SagaData)
-            if (handlerType.IsSubclassOfRawGenericBase(typeof(ReactiveSagaHandler<>)) ||
-                handlerType.IsSubclassOfRawGenericBase(typeof(StartReactiveSagaHandler<>)))
-            {
-                var genericArgs = handlerType.BaseType?.GetGenericArguments();
-                var msgType = genericArgs?[0];
-
-                var contextType = typeof(SagaContext<>).MakeGenericType(msgType!);
-                var contextInstance =
-                    Activator.CreateInstance(contextType,
-                        sagaId,
-                        message,
-                        handlerType,
-                        eventBus,
-                        sagaStore,
-                        sagaIdGenerator,
-                        compensationCoordinator);
-                var initializeMethod = handlerType.GetMethod("Initialize");
-                initializeMethod?.Invoke(handler, [contextInstance]);
-
-                await HandleSagaAsync(handler, handlerType);
-            }
+            await HandleSagaAsync(message, handler, handlerType);
         }
+    }
+    
+    private async Task HandleSagaAsync(IMessage message, object? handler, Type handlerType)
+    {
+        if (handler == null) return;
 
-        async Task HandleSagaAsync(object? handler, Type handlerType)
+        // Call HandleStartAsync
+        try
         {
-            if (handler == null) return;
+            var sagaId = GetSagaId(message);
 
-            // Call HandleStartAsync
-            try
-            {
-                var sagaId = GetSagaId(message);
+            var delegateMethod =
+                HandlerDelegateHelper.GetHandlerDelegate(handlerType, "HandleAsyncInternal", message.GetType());
+            await delegateMethod(handler, message);
 
-                var delegateMethod =
-                    HandlerDelegateHelper.GetHandlerDelegate(handlerType, "HandleAsyncInternal", message.GetType());
-                await delegateMethod(handler, message);
-
-                await ValidateSagaStepCompletionAsync(message, handlerType, sagaId);
-            }
-            catch (Exception ex)
-            {
-                // Optionally log or throw a descriptive error
-                throw new InvalidOperationException($"Failed to invoke HandleAsync dynamically: {ex.Message}", ex);
-            }
+            await ValidateSagaStepCompletionAsync(message, handlerType, sagaId);
+        }
+        catch (Exception ex)
+        {
+            // Optionally log or throw a descriptive error
+            throw new InvalidOperationException($"Failed to invoke HandleAsync dynamically: {ex.Message}", ex);
         }
     }
 
