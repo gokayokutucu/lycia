@@ -57,7 +57,8 @@ public static class SagaStepHelper
         var parentId = parentMessageId ?? Guid.Empty; //1
         seen.Add(currentMessageId); // 2
 
-        var allSteps = steps.ToDictionary(s => s.MessageId);
+        var allSteps = steps.GroupBy(s => s.MessageId)
+            .ToDictionary(g => g.Key, g => g.First());
 
         if (!allSteps.ContainsKey(currentMessageId))
         {
