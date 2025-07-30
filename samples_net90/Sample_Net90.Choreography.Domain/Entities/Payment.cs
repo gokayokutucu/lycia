@@ -2,10 +2,11 @@
 
 namespace Sample_Net90.Choreography.Domain.Entities;
 
-public record BaseEntity(
+public sealed record Payment(
     Guid Id,
     Guid By,
     DateTime At,
     CRUD Action,
     bool IsDeleted
-);
+) : BaseEntity(Id, By, At, Action, IsDeleted);
+

@@ -4,8 +4,8 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Sample_Net90.Choreography.Application.Order.Queries.Detail;
+namespace Sample_Net90.Choreography.Application.Payment.Commands.Process;
 
-public class GetOrderDetailCommandHandler
+public sealed class ProcessPaymentCommandResult
 {
 }
