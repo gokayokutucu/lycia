@@ -5,7 +5,6 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <IsPackable>false</IsPackable>
-        <DefineConstants>$(DefineConstants);UNIT_TESTING</DefineConstants>
     </PropertyGroup>
 
     <ItemGroup>

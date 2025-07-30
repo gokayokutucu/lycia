@@ -28,29 +28,29 @@ namespace Lycia.Extensions.Listener
             _workerThread.Start();
         }
 
-        private void Run(CancellationToken cancellationToken)
+        private void Run(CancellationToken stoppingToken)
         {
             _logger.LogInformation("RabbitMqListener started");
 
             _running = true;
-            while (!cancellationToken.IsCancellationRequested)
+            while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
                     using (var scope = _serviceProvider.CreateScope())
                     {
                         var sagaDispatcher = (ISagaDispatcher)scope.ServiceProvider.GetService(typeof(ISagaDispatcher));
-                        var enumerator = _eventBus.ConsumeAsync(cancellationToken: cancellationToken).GetAsyncEnumerator();
+                        var enumerator = _eventBus.ConsumeAsync(cancellationToken: stoppingToken).GetAsyncEnumerator();
 
                         try
                         {
                             while (true)
                             {
                                 var moveNext = enumerator.MoveNextAsync().AsTask();
-                                moveNext.Wait(cancellationToken);
+                                moveNext.Wait(stoppingToken);
                                 if (!moveNext.Result) break;
 
-                                var (body, messageType) = enumerator.Current;
+                                var (body, messageType, handlerType) = enumerator.Current;
                                 var json = Encoding.UTF8.GetString(body);
                                 var deserialized = JsonConvert.DeserializeObject(json, messageType);
 
@@ -61,19 +61,32 @@ namespace Lycia.Extensions.Listener
                                 }
 
                                 _logger.LogInformation("Dispatching {MessageType} to SagaDispatcher", messageType.Name);
-                                var genericMethod = typeof(ISagaDispatcher).GetMethods()
-                                    .FirstOrDefault(m => m is { Name: nameof(ISagaDispatcher.DispatchAsync), IsGenericMethodDefinition: true } && m.GetParameters().Length == 1);
+                                var dispatchMethod = typeof(ISagaDispatcher)
+                                    .GetMethods()
+                                    .FirstOrDefault(m =>
+                                        m is { Name: nameof(ISagaDispatcher.DispatchAsync), IsGenericMethodDefinition: true }
+                                        && m.GetParameters().Length == 4);
 
-                                if (genericMethod == null)
+                                if (dispatchMethod == null)
                                 {
                                     _logger.LogWarning("No suitable DispatchAsync<TMessage> found for message type {MessageType}", messageType.Name);
                                     continue;
                                 }
 
-                                var dispatchMethod = genericMethod.MakeGenericMethod(deserialized.GetType());
-                                if (dispatchMethod.Invoke(sagaDispatcher, [deserialized]) is not Task dispatchTask)
+                                var sagaIdProp = deserialized.GetType().GetProperty("SagaId");
+                                Guid? sagaId = null;
+                                if (sagaIdProp != null && sagaIdProp.GetValue(deserialized) is Guid id && id != Guid.Empty)
+                                    sagaId = id;
+
+                                // Make the method generic for the runtime type
+                                var constructed = dispatchMethod.MakeGenericMethod(deserialized.GetType());
+
+                                // Call with all parameters; null for handlerType/sagaId, stoppingToken
+                                if (constructed.Invoke(sagaDispatcher, [deserialized, handlerType, sagaId, stoppingToken]) is not Task dispatchTask)
                                 {
-                                    _logger.LogError("DispatchAsync invocation for message type {MessageType} did not return a Task instance", messageType.Name);
+                                    _logger.LogError(
+                                        "DispatchAsync invocation for message type {MessageType} did not return a Task instance",
+                                        messageType.Name);
                                     continue;
                                 }
 
@@ -82,7 +95,7 @@ namespace Lycia.Extensions.Listener
                         }
                         finally
                         {
-                            enumerator.DisposeAsync().AsTask().Wait(cancellationToken);
+                            enumerator.DisposeAsync().AsTask().Wait(stoppingToken);
                         }
                     }
                 }
