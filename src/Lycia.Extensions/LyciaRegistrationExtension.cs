@@ -29,15 +29,20 @@ namespace Lycia.Extensions;
 public static class LyciaRegistrationExtension
 {
 #if NETSTANDARD2_0
-    public static void AddLycia(this ContainerBuilder builder, System.Configuration.Configuration configuration = null, Type sagaType = null)
+    public static void AddLycia(this ContainerBuilder builder, System.Configuration.Configuration? configuration = null, Type? sagaType = null)
     {
+
+
         var eventBusProvider = configuration?.AppSettings.Settings["Lycia:EventBus:Provider"]?.Value ?? "RabbitMQ";
         var eventStoreProvider = configuration?.AppSettings.Settings["Lycia:EventStore:Provider"]?.Value ?? "Redis";
+
         var appId = configuration?.AppSettings.Settings["ApplicationId"]?.Value
                     ?? throw new InvalidOperationException("ApplicationId is not configured.");
+
         var ttlSeconds = int.TryParse(configuration?.AppSettings.Settings["Lycia:CommonTTL"]?.Value, out var parsedTtl) && parsedTtl > 0
             ? parsedTtl
             : Constants.Ttl;
+
         var logMaxRetryCount = int.TryParse(configuration?.AppSettings.Settings["Lycia:EventStore:LogMaxRetryCount"]?.Value, out var parsedLogRetryMaxCount) && parsedLogRetryMaxCount > 0
             ? parsedLogRetryMaxCount
             : Constants.LogMaxRetryCount;
@@ -45,6 +50,10 @@ public static class LyciaRegistrationExtension
         builder.RegisterType<DefaultSagaIdGenerator>().As<ISagaIdGenerator>().InstancePerLifetimeScope();
         builder.RegisterType<SagaDispatcher>().As<ISagaDispatcher>().InstancePerLifetimeScope();
         builder.RegisterType<SagaCompensationCoordinator>().As<ISagaCompensationCoordinator>().InstancePerLifetimeScope();
+
+
+
+
 
         if (eventStoreProvider == "Redis")
         {
@@ -54,7 +63,9 @@ public static class LyciaRegistrationExtension
             builder.Register(ctx => ctx.Resolve<IConnectionMultiplexer>().GetDatabase()).As<IDatabase>().InstancePerLifetimeScope();
         }
 
+
         var queueTypeMap = SagaHandlerRegistrationExtensions.DiscoverQueueTypeMap(appId, sagaType?.Assembly ?? Assembly.GetCallingAssembly());
+
 
         if (eventBusProvider == "RabbitMQ")
         {
@@ -64,6 +75,7 @@ public static class LyciaRegistrationExtension
                            ?? throw new InvalidOperationException("Lycia:EventBus:ConnectionString is not configured.");
                 // Logger implementation? (Autofac ile resolve edeceğin logger ekle!)
                 var logger = ctx.ResolveOptional<ILogger<RabbitMqEventBus>>();
+
                 var eventBusOptions = new EventBusOptions
                 {
                     ApplicationId = appId,
@@ -75,6 +87,7 @@ public static class LyciaRegistrationExtension
             builder.RegisterGeneric(typeof(Logger<>)).As(typeof(ILogger<>)).SingleInstance();
             builder.RegisterType<RabbitMqListenerWorker>().AsSelf().SingleInstance().AutoActivate();
         }
+
 
         if (eventStoreProvider == "Redis")
         {
@@ -206,7 +219,9 @@ public static class LyciaRegistrationExtension
         {
             services.AddSingleton<IEventBus>(provider =>
             {
+
                 var conn = configuration["Lycia:EventBus:ConnectionString"] ?? throw new InvalidOperationException("Lycia:EventBus:ConnectionString is not configured.");
+
                 var logger = provider.GetRequiredService<ILogger<RabbitMqEventBus>>();
 
                 var eventBusOptions = new EventBusOptions
@@ -218,6 +233,7 @@ public static class LyciaRegistrationExtension
             });
 
             services.AddHostedService<RabbitMqListener>();
+
         }
 
         // Configure and add RedisSagaStore

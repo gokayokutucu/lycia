@@ -6,6 +6,8 @@ using Lycia.Saga.Handlers;
 using Lycia.Saga.Helpers;
 using System.Configuration;
 using Lycia.Saga.Configurations;
+using Microsoft.Extensions.Configuration;
+
 
 
 
@@ -26,50 +28,69 @@ namespace Lycia.Saga.Extensions;
 public static class SagaHandlerRegistrationExtensions
 {
 #if NETSTANDARD2_0
-    // -----------------
-    // Autofac version --
-    // -----------------
-
-    /// <summary>
-    /// Registers a single Saga handler type and its interfaces. No extra parameters.
-    /// </summary>
-    public static void AddSaga(this ContainerBuilder builder, Type? handlerType)
+    public static ContainerBuilder AddSaga(this ContainerBuilder builder, IConfiguration configuration, Type handlerType, IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap)
     {
-        RegisterSagaHandler(builder, handlerType);
+        var appId = configuration["ApplicationId"] ?? throw new InvalidOperationException("ApplicationId is not configured.");
+        if (handlerType is null) throw new ArgumentNullException(nameof(handlerType), "Handler type cannot be null.");
+
+        builder.RegisterType(handlerType).InstancePerLifetimeScope();
+
+        var messageTypes = GetMessageTypesFromHandler(handlerType);
+        foreach (var messageType in messageTypes)
+        {
+            var routingKey = MessagingNamingHelper.GetRoutingKey(messageType, handlerType, appId);
+            queueTypeMap[routingKey] = (messageType, handlerType);
+        }
+        return builder;
     }
 
     /// <summary>
-    /// Registers multiple Saga handler types and their interfaces. No extra parameters.
+    /// Registers multiple Saga handler classes and their interfaces.
     /// </summary>
-    public static void AddSagas(this ContainerBuilder builder, params Type?[] handlerTypes)
+    /// <param name="serviceCollection">The DI service collection.</param>
+    /// <param name="handlerTypes">Array of handler class types.</param>
+    /// <returns>The updated service collection.</returns>
+    public static ContainerBuilder AddSagas(this ContainerBuilder builder, IConfiguration configuration, IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap, params Type?[] handlerTypes)
     {
+        var appId = configuration["ApplicationId"] ?? throw new InvalidOperationException("ApplicationId is not configured.");
         foreach (var handlerType in handlerTypes)
-            RegisterSagaHandler(builder, handlerType);
+        {
+            if (handlerType is null) continue;
+
+            builder.RegisterType(handlerType).InstancePerLifetimeScope();
+
+            var messageTypes = GetMessageTypesFromHandler(handlerType);
+            foreach (var messageType in messageTypes)
+            {
+                var routingKey = MessagingNamingHelper.GetRoutingKey(messageType, handlerType, appId);
+                queueTypeMap[routingKey] = (messageType, handlerType);
+            }
+        }
+        return builder;
     }
 
     /// <summary>
-    /// Scans the current assembly and automatically registers all detected Saga handler types. No extra parameters.
+    /// Scans the assembly from which this method is called and automatically registers all Saga handler types.
+    /// This is useful for registering all handlers in the current project or module without specifying marker types explicitly.
     /// </summary>
-    public static void AddSagasFromCurrentAssembly(this ContainerBuilder builder, LyciaOptions options = null)
+    /// <param name="serviceCollection">The DI service collection wrapper.</param>
+    /// <returns>The updated service collection.</returns>
+    public static ContainerBuilder AddSagasFromCurrentAssembly(this ContainerBuilder builder, IConfiguration configuration, IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap)
     {
         var callingAssembly = Assembly.GetCallingAssembly();
-        builder.AddSagasFromAssemblies(options, callingAssembly);
+        return builder.AddSagasFromAssemblies(configuration, queueTypeMap, callingAssembly);
     }
 
-    /// <summary>
-    /// Scans the assemblies of the marker types and registers detected Saga handler types. No extra parameters.
-    /// </summary>
-    public static void AddSagasFromAssembliesOf(this ContainerBuilder builder, LyciaOptions options = null, params Type[] markerTypes)
+    public static ContainerBuilder AddSagasFromAssembliesOf(this ContainerBuilder builder, IConfiguration configuration, IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap, params Type[] markerTypes)
     {
         var assemblies = markerTypes.Select(t => t.Assembly).Distinct().ToArray();
-        builder.AddSagasFromAssemblies(options, assemblies);
+        return builder.AddSagasFromAssemblies(configuration, queueTypeMap, assemblies);
     }
 
-    /// <summary>
-    /// Scans the provided assemblies and registers detected Saga handler types. No extra parameters.
-    /// </summary>
-    public static void AddSagasFromAssemblies(this ContainerBuilder builder, LyciaOptions options = null, params Assembly[] assemblies)
+    public static ContainerBuilder AddSagasFromAssemblies(this ContainerBuilder builder, IConfiguration configuration, IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap, params Assembly[] assemblies)
     {
+        var appId = configuration["ApplicationId"] ?? throw new InvalidOperationException("ApplicationId is not configured.");
+
         foreach (var assembly in assemblies)
         {
             IEnumerable<Type?> handlerTypes = assembly.GetTypes().Where(t =>
@@ -78,58 +99,21 @@ public static class SagaHandlerRegistrationExtensions
             );
             foreach (var handlerType in handlerTypes)
             {
-                RegisterSagaHandler(builder, handlerType, options);
+                if (handlerType == null) continue;
+
+                builder.RegisterType(handlerType).InstancePerLifetimeScope();
+
+                var messageTypes = GetMessageTypesFromHandler(handlerType);
+                foreach (var messageType in messageTypes)
+                {
+                    var routingKey = MessagingNamingHelper.GetRoutingKey(messageType, handlerType, appId);
+                    queueTypeMap[routingKey] = (messageType, handlerType);
+                }
             }
         }
-    }
-
-    /// <summary>
-    /// Registers the handler and its matching interfaces with InstancePerLifetimeScope,
-    /// and updates the shared queueTypeMap (and reads appId) from the container at runtime.
-    /// </summary>
-    private static void RegisterSagaHandler(ContainerBuilder builder, Type? type, LyciaOptions options = null)
-    {
-        if (type == null)
-            return;
-
-        var allHandlerInterfaces = type.GetInterfaces()
-            .Where(i => i.IsGenericType &&
-                (
-                    i.GetGenericTypeDefinition() == typeof(ISagaHandler<>)
-                    || i.GetGenericTypeDefinition() == typeof(ISagaStartHandler<>)
-                    || i.GetGenericTypeDefinition() == typeof(ISagaHandler<,>)
-                    || i.GetGenericTypeDefinition() == typeof(ISagaStartHandler<,>)
-                    || i.GetGenericTypeDefinition() == typeof(ISagaCompensationHandler<>)
-                    || i.GetGenericTypeDefinition() == typeof(ISuccessResponseHandler<>)
-                    || i.GetGenericTypeDefinition() == typeof(IFailResponseHandler<>)
-                ))
-            .ToList();
-
-        foreach (var interfaceType in allHandlerInterfaces)
-        {
-            builder.RegisterType(type)
-                .As(interfaceType)
-                .InstancePerLifetimeScope()
-                .OnActivated(e =>
-                {
-                    var appId = options?.ApplicationId ?? throw new InvalidOperationException("ApplicationId is not configured.");
-                    var queueTypeMap = new Dictionary<string, Type>();
-                    builder.RegisterInstance(queueTypeMap)
-                           .As<Dictionary<string, Type>>()
-                           .SingleInstance();
-
-                    var messageTypes = GetMessageTypesFromHandler(type!);
-                    foreach (var messageType in messageTypes)
-                    {
-                        var routingKey = MessagingNamingHelper.GetRoutingKey(messageType, type!, appId);
-                        queueTypeMap[routingKey] = messageType;
-                    }
-                });
-        }
+        return builder;
     }
 #else
-    // .NET 6+ implementation (no change)
-
     public static ILyciaServiceCollection AddSaga(this ILyciaServiceCollection serviceCollection, Type? handlerType)
     {
         var appId = serviceCollection.Configuration!["ApplicationId"] ??
@@ -146,8 +130,6 @@ public static class SagaHandlerRegistrationExtensions
             var routingKey = MessagingNamingHelper.GetRoutingKey(messageType, handlerType, appId);
             serviceCollection.QueueTypeMap[routingKey] = (messageType, handlerType);
         }
-
-
         return serviceCollection;
     }
 
