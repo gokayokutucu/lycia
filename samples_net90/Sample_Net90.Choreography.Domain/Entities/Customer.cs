@@ -1,20 +1,19 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using Sample_Net90.Choreography.Domain.Enums;
 
 namespace Sample_Net90.Choreography.Domain.Entities;
 
-public sealed class Customer : BaseEntity
-{
-    public string FirstName { get; init; }
-    public string LastName { get; init; }
-    public string Email { get; init; }
-    public string PhoneNumber { get; init; }
-    public DateTime DateOfBirth { get; init; }
-
-    public IEnumerable<Guid> Addresses { get; init; }
-    public IEnumerable<Guid> Cards { get; init; }
-    public IEnumerable<Guid> Orders { get; init; }
-}
+public sealed record Customer (
+    Guid Id,
+        Guid By,
+        DateTime At,
+        CRUD Action,
+        bool IsDeleted,
+    string FirstName,
+    string LastName,
+    string Email,
+    string PhoneNumber,
+    DateTime DateOfBirth,
+    IEnumerable<Guid> Addresses,
+    IEnumerable<Guid> Cards,
+    IEnumerable<Guid> Orders
+) : BaseEntity(Id, By, At, Action, IsDeleted);

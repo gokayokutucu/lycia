@@ -1,7 +1,4 @@
-﻿
-
-
-namespace Sample_Net90.Choreography.Application.Interfaces.Repositories;
+﻿namespace Sample_Net90.Choreography.Application.Interfaces.Repositories;
 
 public interface IOrderRepository
 {

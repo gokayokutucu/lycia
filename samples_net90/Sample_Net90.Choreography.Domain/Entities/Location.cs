@@ -1,15 +1,15 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using Sample_Net90.Choreography.Domain.Enums;
 
 namespace Sample_Net90.Choreography.Domain.Entities;
 
-public sealed class StockLocation : BaseEntity
-{
-    public string Warehouse { get; set; }
-    public string Zone { get; set; }
-    public string Block { get; set; }
-    public int Shelve { get; set; }
-}
+public sealed record StockLocation(
+    Guid Id,
+        Guid By,
+        DateTime At,
+        CRUD Action,
+        bool IsDeleted,
+    string Warehouse,
+    string Zone,
+    string Block,
+    int Shelve
+) : BaseEntity(Id, By, At, Action, IsDeleted);

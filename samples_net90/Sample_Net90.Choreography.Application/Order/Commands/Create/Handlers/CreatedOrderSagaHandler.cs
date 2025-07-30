@@ -23,7 +23,7 @@ public sealed class CreateOrderSagaHandler (ILogger<CreateOrderSagaHandler> logg
             order.Id = id;
             var orderCreatedEvent = mapper.Map<OrderCreatedSagaEvent>(order);
             await Context.PublishWithTracking(orderCreatedEvent).ThenMarkAsComplete();
-            logger.LogInformation("CreateOrderSagaHandler => HandleStartAsync => OrderCreatedSagaEvent published successfully.");
+            logger.LogInformation("CreateOrderSagaHandler => HandleStartAsync => OrderCreatedSagaEvent published successfully and CreateOrderSagaCommand marked as complete for OrderId: {OrderId}", id);
         }
         catch (Exception ex)
         {

@@ -11,7 +11,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Sagas\Payment\ProcessPayment\Commands\" />
     <Folder Include="Sagas\Payment\RefundPayment\Commands\" />
     <Folder Include="Sagas\Shipment\ScheduleShipment\Commands\" />
     <Folder Include="Sagas\Stock\ReserveStock\Commands\" />

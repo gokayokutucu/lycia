@@ -7,31 +7,17 @@ public static class OrdersEndpoints
 {
     public static void MapOrdersEndpoints(this WebApplication app)
     {
-        var orders = new List<Order>
+        app.MapPost("/orders", async (IMediator mediator,  CreateOrderCommand command) =>
         {
-            new Order { Id = 1, Description = "First Order" },
-            new Order { Id = 2, Description = "Second Order" }
-        };
+            var id = await mediator.Send(command);
+            return Results.Ok;
+        });
 
-        app.MapGet("/orders", () => orders)
-        //.WithName("GetOrders")
-        ;
-
-        app.MapGet("/orders/{id:int}", (int id) =>
+        app.MapPost("/orders/{id:int}/payment", async (IMediator mediator, ProcessPaymentCommand command) =>
         {
-            var order = orders.FirstOrDefault(o => o.Id == id);
-            return order is not null ? Results.Ok(order) : Results.NotFound();
-        })
-        //.WithName("GetOrderById")
-        ;
-
-        app.MapPost("/orders", async (IMediator mediator,  CreateOrderCommand order) =>
-        {
-            var id = await mediator.Send(order);
-            return Results.Created($"/orders/{id}", order);
-        })
-        //.WithName("CreateOrder")
-        ;
+            var id = await mediator.Send(command);
+            return Results.Ok;
+        });
 
         app.MapPut("/orders/{id:int}", (int id, Order updatedOrder) =>
         {

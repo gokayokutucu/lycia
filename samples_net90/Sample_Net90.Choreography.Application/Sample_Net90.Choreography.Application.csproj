@@ -8,18 +8,12 @@
 
   <ItemGroup>
     <Folder Include="Interfaces\Services\" />
-    <Folder Include="Order\Commands\Delete\Dto\" />
-    <Folder Include="Order\Commands\Delete\Mapping\" />
-    <Folder Include="Order\Commands\Delete\Validation\" />
-    <Folder Include="Order\Commands\Modify\Dto\" />
-    <Folder Include="Order\Commands\Modify\Mapping\" />
-    <Folder Include="Order\Commands\Modify\Validation\" />
-    <Folder Include="Order\Queries\Detail\Dto\" />
-    <Folder Include="Order\Queries\Detail\Mapping\" />
-    <Folder Include="Order\Queries\Detail\Validation\" />
-    <Folder Include="Order\Queries\List\Dto\" />
-    <Folder Include="Order\Queries\List\Mapping\" />
-    <Folder Include="Order\Queries\List\Validation\" />
+    <Folder Include="Payment\Commands\Process\Mapping\" />
+    <Folder Include="Payment\Commands\Process\Validation\" />
+    <Folder Include="Payment\Commands\Refund\Dto\" />
+    <Folder Include="Payment\Commands\Refund\Handlers\" />
+    <Folder Include="Payment\Commands\Refund\Mapping\" />
+    <Folder Include="Payment\Commands\Refund\Validation\" />
   </ItemGroup>
 
   <ItemGroup>

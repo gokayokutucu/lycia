@@ -1,11 +1,16 @@
-﻿namespace Sample_Net90.Choreography.Domain.Entities;
+﻿using Sample_Net90.Choreography.Domain.Enums;
 
-public sealed class Card : BaseEntity
-{
-    public Guid CustomerId { get; init; }
+namespace Sample_Net90.Choreography.Domain.Entities;
 
-    public string CardNumber { get; init; }
-    public string CardHolderName { get; init; }
-    public DateTime ExpirationDate { get; init; }
-    public string CVV { get; init; }
-}
+public sealed record Card(
+    Guid Id,
+        Guid By,
+        DateTime At,
+        CRUD Action,
+        bool IsDeleted,
+    Guid CustomerId,
+    string CardNumber,
+    string CardHolderName,
+    DateTime ExpirationDate,
+    string CVV
+) : BaseEntity(Id, By, At, Action, IsDeleted);
