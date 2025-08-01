@@ -25,6 +25,7 @@ public interface ISagaContext<TInitialMessage>
     Task MarkAsComplete<TStep>() where TStep : IMessage;
     Task MarkAsFailed<TStep>() where TStep : IMessage;
     Task MarkAsCompensated<TStep>() where TStep : IMessage;
+    Task CompensateAndBubbleUp<TStep>() where TStep : IMessage;
     Task MarkAsCompensationFailed<TStep>() where TStep : IMessage;
 
     Task<bool> IsAlreadyCompleted<T>() where T : IMessage;

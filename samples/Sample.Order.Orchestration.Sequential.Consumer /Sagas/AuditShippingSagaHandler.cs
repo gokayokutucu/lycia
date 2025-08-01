@@ -1,9 +1,12 @@
 using Lycia.Saga.Handlers;
 using Sample.Shared.Messages.Events;
+using Sample.Shared.Messages.Responses;
+using Sample.Shared.SagaStates;
 
-namespace Sample.Order.Choreography.Consumer.Sagas;
+namespace Sample.Order.Orchestration.Sequential.Consumer_.Sagas;
 
-public class AuditOrderSagaHandler : ReactiveSagaHandler<OrderCreatedEvent>
+public class AuditShippingSagaHandler : 
+    CoordinatedSagaHandler<OrderCreatedEvent, OrderAuditedResponse, CreateOrderSagaData>
 {
     public override async Task HandleAsync(OrderCreatedEvent message)
     {
@@ -22,7 +25,7 @@ public class AuditOrderSagaHandler : ReactiveSagaHandler<OrderCreatedEvent>
     {
         try
         {
-            await Context.MarkAsCompensated<OrderCreatedEvent>();
+            await Context.CompensateAndBubbleUp<OrderCreatedEvent>();
         }
         catch (Exception e)
         {

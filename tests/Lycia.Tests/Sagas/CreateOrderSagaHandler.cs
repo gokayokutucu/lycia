@@ -46,7 +46,7 @@ public class CreateOrderSagaHandler :
         {
             CompensateCalled = true;
             // Compensation logic
-            await Context.MarkAsCompensated<CreateOrderCommand>();
+            await Context.CompensateAndBubbleUp<CreateOrderCommand>();
         }
         catch (Exception ex)
         {

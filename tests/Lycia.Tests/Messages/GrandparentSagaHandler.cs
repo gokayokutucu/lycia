@@ -14,7 +14,7 @@ public class GrandparentCompensationSagaHandler : StartReactiveSagaHandler<Dummy
     public override Task CompensateStartAsync(DummyGrandparentEvent message)
     {
         Invocations.Add(nameof(GrandparentCompensationSagaHandler));
-        Context.MarkAsCompensated<DummyGrandparentEvent>();
+        Context.CompensateAndBubbleUp<DummyGrandparentEvent>();
         return Task.CompletedTask;
     }
 }
@@ -31,7 +31,7 @@ public class ParentCompensationSagaHandler : ReactiveSagaHandler<DummyParentEven
     public override Task CompensateAsync(DummyParentEvent message)
     {
         Invocations.Add(nameof(ParentCompensationSagaHandler));
-        Context.MarkAsCompensated<DummyParentEvent>();
+        Context.CompensateAndBubbleUp<DummyParentEvent>();
         return Task.CompletedTask;
     }
 }
@@ -55,7 +55,7 @@ public class ChildCompensationSagaHandler : ReactiveSagaHandler<DummyChildEvent>
         if (message.IsCompensationFailed)
             Context.MarkAsCompensationFailed<DummyChildEvent>();
         else
-            Context.MarkAsCompensated<DummyChildEvent>();
+            Context.CompensateAndBubbleUp<DummyChildEvent>();
         return Task.CompletedTask;
     }
 }

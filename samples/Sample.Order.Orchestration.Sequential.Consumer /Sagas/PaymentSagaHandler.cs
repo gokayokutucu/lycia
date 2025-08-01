@@ -3,7 +3,7 @@ using Sample.Shared.Messages.Commands;
 using Sample.Shared.Messages.Responses;
 using Sample.Shared.SagaStates;
 
-namespace Sample.Order.Orchestration.Consumer.Sagas;
+namespace Sample.Order.Orchestration.Sequential.Consumer_.Sagas;
 
 public class PaymentSagaHandler :
     CoordinatedSagaHandler<ProcessPaymentCommand, PaymentSucceededResponse, CreateOrderSagaData>
