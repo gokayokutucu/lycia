@@ -52,7 +52,7 @@ public class ShipOrderForCompensationSagaHandler :
                 throw new InvalidOperationException("Total price must be greater than zero for compensation.");
             }
             
-            await Context.MarkAsCompensated<OrderCreatedEvent>();
+            await Context.CompensateAndBubbleUp<OrderCreatedEvent>();
         }
         catch (Exception ex)
         {
