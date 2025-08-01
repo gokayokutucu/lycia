@@ -47,16 +47,16 @@ public interface ISagaStore
     /// <summary>
     /// Loads the persisted saga data for a given saga instance.
     /// </summary>
-    Task<SagaData?> LoadSagaDataAsync(Guid sagaId);
+    Task<TSagaData?> LoadSagaDataAsync<TSagaData>(Guid sagaId) where TSagaData : class;
 
     /// <summary>
     /// Saves the saga's state data to persistent storage.
     /// </summary>
-    Task SaveSagaDataAsync(Guid sagaId, SagaData data);
+    Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data);
     /// <summary>
     /// Loads the full saga context (including metadata and tracking state) for the given saga identifier.
     /// </summary>
     Task<ISagaContext<TMessage, TSagaData>> LoadContextAsync<TMessage, TSagaData>(Guid sagaId, TMessage message, Type handlerType) 
-        where TSagaData : SagaData, new() 
+        where TSagaData : new() 
         where TMessage : IMessage;
 }
