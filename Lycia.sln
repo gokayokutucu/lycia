@@ -8,9 +8,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Infrastructure", "src
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "samples", "samples", "{BC1E10B1-10E1-456F-9496-6DA354303160}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Order.Choreography.Api", "samples\Sample.Order.Choreography.Api\Sample.Order.Choreography.Api.csproj", "{A0A37466-E91D-4199-ABD2-679F8A3A9731}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Order.Orchestration.Worker", "samples\Sample.Order.Orchestration.Worker\Sample.Order.Orchestration.Worker.csproj", "{DFDC4E24-CD6F-40EF-9AF2-D2E3F2CB9976}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Order.Api", "samples\Sample.Order.Api\Sample.Order.Api.csproj", "{A0A37466-E91D-4199-ABD2-679F8A3A9731}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Shared", "samples\Sample.Shared\Sample.Shared.csproj", "{D2CFB436-054B-4795-8B47-40452CD8B143}"
 EndProject
@@ -24,9 +22,11 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.IntegrationTests", "t
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Tests", "tests\Lycia.Tests\Lycia.Tests.csproj", "{B2AE5013-780F-4387-970E-F7BAD9D26332}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Order.Consumer", "samples\Sample.Order.Consumer\Sample.Order.Consumer.csproj", "{454B7D73-55D4-4AD2-B8BD-25B0D4A0AD94}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Order.Choreography.Consumer", "samples\Sample.Order.Choreography.Consumer\Sample.Order.Choreography.Consumer.csproj", "{454B7D73-55D4-4AD2-B8BD-25B0D4A0AD94}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Tests.Helpers", "tests\Lycia.Tests.Helpers\Lycia.Tests.Helpers.csproj", "{60897FE6-CD56-4352-B3A8-DE9A38AA551D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Order.Orchestration.Consumer", "samples\Sample.Order.Orchestration.Consumer\Sample.Order.Orchestration.Consumer.csproj", "{9194D736-D70F-4C02-A38B-F7C0DB38788B}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -50,10 +50,6 @@ Global
 		{A0A37466-E91D-4199-ABD2-679F8A3A9731}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A0A37466-E91D-4199-ABD2-679F8A3A9731}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A0A37466-E91D-4199-ABD2-679F8A3A9731}.Release|Any CPU.Build.0 = Release|Any CPU
-		{DFDC4E24-CD6F-40EF-9AF2-D2E3F2CB9976}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{DFDC4E24-CD6F-40EF-9AF2-D2E3F2CB9976}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{DFDC4E24-CD6F-40EF-9AF2-D2E3F2CB9976}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{DFDC4E24-CD6F-40EF-9AF2-D2E3F2CB9976}.Release|Any CPU.Build.0 = Release|Any CPU
 		{D2CFB436-054B-4795-8B47-40452CD8B143}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{D2CFB436-054B-4795-8B47-40452CD8B143}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D2CFB436-054B-4795-8B47-40452CD8B143}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -78,10 +74,13 @@ Global
 		{60897FE6-CD56-4352-B3A8-DE9A38AA551D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{60897FE6-CD56-4352-B3A8-DE9A38AA551D}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{60897FE6-CD56-4352-B3A8-DE9A38AA551D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9194D736-D70F-4C02-A38B-F7C0DB38788B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9194D736-D70F-4C02-A38B-F7C0DB38788B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9194D736-D70F-4C02-A38B-F7C0DB38788B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9194D736-D70F-4C02-A38B-F7C0DB38788B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{A0A37466-E91D-4199-ABD2-679F8A3A9731} = {BC1E10B1-10E1-456F-9496-6DA354303160}
-		{DFDC4E24-CD6F-40EF-9AF2-D2E3F2CB9976} = {BC1E10B1-10E1-456F-9496-6DA354303160}
 		{D2CFB436-054B-4795-8B47-40452CD8B143} = {BC1E10B1-10E1-456F-9496-6DA354303160}
 		{C57C60D9-A8CC-4055-A8F3-D4DBB13156B4} = {59E39671-6EFC-4EE2-B70F-DF6955451C7C}
 		{BD73C6EC-E726-4B73-9F7B-F10E06B2D6C3} = {59E39671-6EFC-4EE2-B70F-DF6955451C7C}
@@ -91,5 +90,6 @@ Global
 		{B2AE5013-780F-4387-970E-F7BAD9D26332} = {39547434-F68A-4275-8482-B1EB3CFC8F02}
 		{454B7D73-55D4-4AD2-B8BD-25B0D4A0AD94} = {BC1E10B1-10E1-456F-9496-6DA354303160}
 		{60897FE6-CD56-4352-B3A8-DE9A38AA551D} = {39547434-F68A-4275-8482-B1EB3CFC8F02}
+		{9194D736-D70F-4C02-A38B-F7C0DB38788B} = {BC1E10B1-10E1-456F-9496-6DA354303160}
 	EndGlobalSection
 EndGlobal

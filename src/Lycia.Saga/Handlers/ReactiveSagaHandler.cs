@@ -1,5 +1,6 @@
 using Lycia.Messaging;
 using Lycia.Saga.Abstractions;
+using Lycia.Saga.Handlers.Abstractions;
 
 namespace Lycia.Saga.Handlers;
 
@@ -8,7 +9,7 @@ namespace Lycia.Saga.Handlers;
 /// Implements business logic for a saga message without managing stateful saga data.
 /// Use this as a base for choreography saga steps that react to incoming events.
 /// </summary>
-public abstract class ReactiveSagaHandler<TMessage> :   
+public abstract class ReactiveSagaHandler<TMessage> :  
     ISagaHandler<TMessage>
     where TMessage : IMessage
 {

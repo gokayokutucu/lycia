@@ -131,7 +131,7 @@ public class SagaContext<TMessage, TSagaData>(
     : SagaContext<TMessage>(sagaId, currentStep, handlerTypeOfCurrentStep, eventBus, sagaStore, sagaIdGenerator,
             compensationCoordinator),
         ISagaContext<TMessage, TSagaData>
-    where TSagaData : SagaData
+    where TSagaData : new()
     where TMessage : IMessage
 {
     private readonly IEventBus _eventBus = eventBus;
@@ -305,7 +305,7 @@ internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
     ConcurrentDictionary<(Type StepType, Guid MessageId), IMessage> stepMessages)
     : ISagaContext<TStepAdapter, TSagaDataAdapter>
     where TStepAdapter : IMessage
-    where TSagaDataAdapter : SagaData
+    where TSagaDataAdapter : new()
 {
     // Not used by ISagaContext methods but part of constructor signature
 

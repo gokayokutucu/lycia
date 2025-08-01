@@ -32,7 +32,7 @@ public interface ISagaContext<TInitialMessage>
 }
 
 public interface ISagaContext<TInitialMessage, TSagaData> : ISagaContext<TInitialMessage>
-    where TSagaData : SagaData
+    where TSagaData : new()
     where TInitialMessage : IMessage
 {
     TSagaData Data { get; }

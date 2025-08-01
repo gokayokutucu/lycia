@@ -1,6 +1,6 @@
 using Lycia.Messaging;
 
-namespace Lycia.Saga.Abstractions;
+namespace Lycia.Saga.Handlers.Abstractions;
 
 public interface ISagaCompensationHandler<in TMessage> where TMessage : IMessage
 {

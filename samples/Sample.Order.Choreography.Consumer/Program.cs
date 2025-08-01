@@ -8,4 +8,4 @@ builder.Services
     .AddSagasFromCurrentAssembly();
 
 var host = builder.Build();
-host.Run();
+await host.RunAsync();

@@ -12,6 +12,7 @@ using Lycia.Infrastructure.Dispatching;
 using Lycia.Messaging.Enums;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Handlers;
+using Lycia.Saga.Handlers.Abstractions;
 using Lycia.Tests.Helpers;
 using Lycia.Tests.Messages;
 using Microsoft.Extensions.DependencyInjection;

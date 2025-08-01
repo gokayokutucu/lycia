@@ -21,7 +21,7 @@ public class InMemorySagaStore(
     ISagaCompensationCoordinator compensationCoordinator) : ISagaStore
 {
     // Stores saga data per sagaId
-    private readonly ConcurrentDictionary<Guid, SagaData> _sagaData = new();
+    private readonly ConcurrentDictionary<Guid, object> _sagaData = new();
 
     // Stores step logs per sagaId with composite key "stepTypeName_handlerTypeFullName"
     private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<string, SagaStepMetadata>> _stepLogs = new();
@@ -33,9 +33,9 @@ public class InMemorySagaStore(
         var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
 
         stepDict.TryGetValue(stepKey, out var existingMeta);
-        
+
         var messageTypeName = SagaStoreLogicHelper.GetMessageTypeName(stepType);
-            
+
         var metadata = SagaStepMetadata.Build(
             status: status,
             messageId: messageId,
@@ -43,9 +43,10 @@ public class InMemorySagaStore(
             messageTypeName: messageTypeName,
             applicationId: "InMemory",
             payload: payload);
-            
+
         // State transition validation
-        var result = SagaStepHelper.ValidateSagaStepTransition(messageId, parentMessageId, status, stepDict.Values, stepKey, metadata, existingMeta);
+        var result = SagaStepHelper.ValidateSagaStepTransition(messageId, parentMessageId, status, stepDict.Values,
+            stepKey, metadata, existingMeta);
 
         switch (result.ValidationResult)
         {
@@ -68,7 +69,6 @@ public class InMemorySagaStore(
         return Task.CompletedTask;
     }
 
-    
 
     /// <summary>
     /// Checks if the step with specified stepType and handlerType is completed.
@@ -104,8 +104,8 @@ public class InMemorySagaStore(
 
         return Task.FromResult(StepStatus.None);
     }
-    
-    public Task<KeyValuePair<(string stepType, string handlerType, string messageId), SagaStepMetadata>?> 
+
+    public Task<KeyValuePair<(string stepType, string handlerType, string messageId), SagaStepMetadata>?>
         GetSagaHandlerStepAsync(Guid sagaId, Guid messageId)
     {
         if (_stepLogs.TryGetValue(sagaId, out var steps))
@@ -117,7 +117,7 @@ public class InMemorySagaStore(
                     var (stepTypeName, handlerTypeName, msgId) = SagaStoreLogicHelper.ParseStepKey(kvp.Key);
                     if (msgId == messageId.ToString())
                     {
-                        return Task.FromResult<KeyValuePair<(string, string, string), SagaStepMetadata>?>( 
+                        return Task.FromResult<KeyValuePair<(string, string, string), SagaStepMetadata>?>(
                             new KeyValuePair<(string, string, string), SagaStepMetadata>(
                                 (stepTypeName, handlerTypeName, msgId), kvp.Value));
                     }
@@ -128,6 +128,7 @@ public class InMemorySagaStore(
                 }
             }
         }
+
         return Task.FromResult<KeyValuePair<(string, string, string), SagaStepMetadata>?>(null);
     }
 
@@ -168,22 +169,24 @@ public class InMemorySagaStore(
                 new Dictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>());
     }
 
-    public Task<SagaData?> LoadSagaDataAsync(Guid sagaId)
+    public Task<TSagaData?> LoadSagaDataAsync<TSagaData>(Guid sagaId)
+        where TSagaData : class
     {
         _sagaData.TryGetValue(sagaId, out var data);
-        return Task.FromResult(data);
+        return Task.FromResult(data as TSagaData);
     }
 
-    public Task SaveSagaDataAsync(Guid sagaId, SagaData data)
+    public Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data)
     {
+        if (data is null) return Task.CompletedTask;
         _sagaData[sagaId] = data;
         return Task.CompletedTask;
     }
 
-    public Task<ISagaContext<TStep, TSagaData>> LoadContextAsync<TStep, TSagaData>(Guid sagaId, TStep message,
+    public Task<ISagaContext<TMessage, TSagaData>> LoadContextAsync<TMessage, TSagaData>(Guid sagaId, TMessage message,
         Type handlerType)
-        where TSagaData : SagaData, new()
-        where TStep : IMessage
+        where TMessage : IMessage
+        where TSagaData : new()
     {
         if (!_sagaData.TryGetValue(sagaId, out var data))
         {
@@ -191,7 +194,7 @@ public class InMemorySagaStore(
             _sagaData[sagaId] = data;
         }
 
-        ISagaContext<TStep, TSagaData> context = new SagaContext<TStep, TSagaData>(
+        ISagaContext<TMessage, TSagaData> context = new SagaContext<TMessage, TSagaData>(
             sagaId: sagaId,
             currentStep: message,
             handlerTypeOfCurrentStep: handlerType,

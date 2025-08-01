@@ -1,5 +1,6 @@
 using Lycia.Messaging;
 using Lycia.Saga.Abstractions;
+using Lycia.Saga.Handlers.Abstractions;
 
 namespace Lycia.Saga.Handlers;
 
@@ -9,10 +10,11 @@ namespace Lycia.Saga.Handlers;
 /// Use this as a base for coordinated saga starters.
 /// </summary>
 public abstract class StartCoordinatedSagaHandler<TMessage, TResponse, TSagaData> :
-    ISagaStartHandler<TMessage, TSagaData>
+    ISagaStartHandler<TMessage, TSagaData>,
+    IResponseSagaHandler<TResponse>
     where TMessage : IMessage
     where TResponse : IResponse<TMessage>
-    where TSagaData : SagaData, new()
+    where TSagaData : new()
 {
     protected ISagaContext<TMessage, TSagaData> Context { get; private set; } = null!;
 
@@ -22,34 +24,44 @@ public abstract class StartCoordinatedSagaHandler<TMessage, TResponse, TSagaData
     }
 
     public abstract Task HandleStartAsync(TMessage message);
-    
+
     protected async Task HandleAsyncInternal(TMessage message)
     {
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
-            await HandleStartAsync(message);  // Actual business logic
+            await HandleStartAsync(message); // Actual business logic
         }
         catch (Exception)
         {
             await Context.MarkAsFailed<TMessage>();
         }
     }
-    
+
     protected async Task CompensateAsyncInternal(TMessage message)
     {
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
-            await CompensateStartAsync(message);  // Actual business logic
+            await CompensateStartAsync(message); // Actual business logic
         }
         catch (Exception)
         {
             await Context.MarkAsCompensationFailed<TMessage>();
         }
     }
-    
-    public virtual Task CompensateStartAsync(TMessage message)    
+
+    public virtual Task CompensateStartAsync(TMessage message)
+    {
+        return Task.CompletedTask;
+    }
+
+    public virtual Task HandleSuccessResponseAsync(TResponse response)
+    {
+        return Task.CompletedTask;
+    }
+
+    public virtual Task HandleFailResponseAsync(TResponse response, FailResponse fail)
     {
         return Task.CompletedTask;
     }
