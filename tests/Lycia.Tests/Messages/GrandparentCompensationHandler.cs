@@ -1,4 +1,5 @@
 using Lycia.Saga.Abstractions;
+using Lycia.Saga.Handlers.Abstractions;
 
 namespace Lycia.Tests.Messages;
 

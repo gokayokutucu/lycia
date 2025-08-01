@@ -10,6 +10,7 @@ using Lycia.Saga.Abstractions;
 using Lycia.Saga.Exceptions;
 using Lycia.Saga.Extensions;
 using Lycia.Saga.Handlers;
+using Lycia.Saga.Handlers.Abstractions;
 using Lycia.Tests.Helpers;
 using Lycia.Tests.Sagas;
 using Microsoft.Extensions.Configuration;

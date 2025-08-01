@@ -4,6 +4,7 @@ using Lycia.Messaging;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Common;
 using Lycia.Saga.Handlers;
+using Lycia.Saga.Handlers.Abstractions;
 using Lycia.Saga.Helpers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -148,6 +149,7 @@ public static class SagaHandlerRegistrationExtensions
                     i.GetGenericTypeDefinition() == typeof(ISagaHandler<,>) ||
                     i.GetGenericTypeDefinition() == typeof(ISagaStartHandler<,>) ||
                     i.GetGenericTypeDefinition() == typeof(ISagaCompensationHandler<>) ||
+                    i.GetGenericTypeDefinition() == typeof(IResponseSagaHandler<>) ||                    
                     i.GetGenericTypeDefinition() == typeof(ISuccessResponseHandler<>) ||
                     i.GetGenericTypeDefinition() == typeof(IFailResponseHandler<>)
                 )))
@@ -176,8 +178,7 @@ public static class SagaHandlerRegistrationExtensions
         return GetGenericBaseType(type, typeof(StartReactiveSagaHandler<>)) != null
                || GetGenericBaseType(type, typeof(ReactiveSagaHandler<>)) != null
                || GetGenericBaseType(type, typeof(StartCoordinatedSagaHandler<,,>)) != null
-               || GetGenericBaseType(type, typeof(CoordinatedSagaHandler<,,>)) != null
-               || GetGenericBaseType(type, typeof(ResponseSagaHandler<,>)) != null;
+               || GetGenericBaseType(type, typeof(CoordinatedSagaHandler<,,>)) != null;
     }
 
     /// <summary>
@@ -195,6 +196,7 @@ public static class SagaHandlerRegistrationExtensions
              || i.GetGenericTypeDefinition() == typeof(ISagaHandler<,>)
              || i.GetGenericTypeDefinition() == typeof(ISagaStartHandler<,>)
              || i.GetGenericTypeDefinition() == typeof(ISagaCompensationHandler<>)
+             || i.GetGenericTypeDefinition() == typeof(IResponseSagaHandler<>)
              || i.GetGenericTypeDefinition() == typeof(ISuccessResponseHandler<>)
              || i.GetGenericTypeDefinition() == typeof(IFailResponseHandler<>)));
     }
@@ -228,6 +230,7 @@ public static class SagaHandlerRegistrationExtensions
                          || i.GetGenericTypeDefinition() == typeof(ISagaHandler<,>)
                          || i.GetGenericTypeDefinition() == typeof(ISagaStartHandler<,>)
                          || i.GetGenericTypeDefinition() == typeof(ISagaCompensationHandler<>)
+                         || i.GetGenericTypeDefinition() == typeof(IResponseSagaHandler<>)
                          || i.GetGenericTypeDefinition() == typeof(ISuccessResponseHandler<>)
                          || i.GetGenericTypeDefinition() == typeof(IFailResponseHandler<>)));
 
