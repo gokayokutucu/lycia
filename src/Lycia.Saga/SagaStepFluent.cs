@@ -28,7 +28,7 @@ public class ReactiveSagaStepFluent<TStep, TInitialMessage>(
     public async Task ThenMarkAsCompensated()
     {
         await operation();
-        await context.MarkAsCompensated<TInitialMessage>();
+        await context.CompensateAndBubbleUp<TInitialMessage>();
     }
 
     public async Task ThenMarkAsCompensationFailed()
@@ -60,7 +60,7 @@ public class CoordinatedSagaStepFluent<TStep, TSagaData>(
     public async Task ThenMarkAsCompensated()
     {
         await operation();
-        await context.MarkAsCompensated<TStep>();
+        await context.CompensateAndBubbleUp<TStep>();
     }
 
     public async Task ThenMarkAsCompensationFailed()

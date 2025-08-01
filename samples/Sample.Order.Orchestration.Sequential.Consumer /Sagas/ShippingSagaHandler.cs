@@ -1,9 +1,12 @@
 using Lycia.Saga.Handlers;
 using Sample.Shared.Messages.Events;
+using Sample.Shared.Messages.Responses;
+using Sample.Shared.SagaStates;
 
-namespace Sample.Order.Choreography.Consumer.Sagas;
+namespace Sample.Order.Orchestration.Sequential.Consumer_.Sagas;
 
-public class ShipOrderSagaHandler : ReactiveSagaHandler<OrderCreatedEvent>
+public class ShippingSagaHandler : 
+    CoordinatedSagaHandler<OrderCreatedEvent, ShippedOrderResponse, CreateOrderSagaData>
 {
     public override async Task HandleAsync(OrderCreatedEvent command)
     {
@@ -11,7 +14,7 @@ public class ShipOrderSagaHandler : ReactiveSagaHandler<OrderCreatedEvent>
         {
             // Simulated logic
             const bool stockAvailable = true; // Simulate failure
-            
+
             if (!stockAvailable)
             {
                 await Context.MarkAsFailed<OrderCreatedEvent>();

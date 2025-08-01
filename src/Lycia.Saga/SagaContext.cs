@@ -86,6 +86,18 @@ public class SagaContext<TMessage>(
         return eventBus.Publish(@event, HandlerTypeOfCurrentStep, SagaId);
     }
 
+    public Task MarkAsCompensated<TStep>() where TStep : IMessage
+    {
+        return sagaStore.LogStepAsync(sagaId, CurrentStep.MessageId, CurrentStep.ParentMessageId, typeof(TStep),
+            StepStatus.Compensated, HandlerTypeOfCurrentStep, CurrentStep);
+    }
+
+    public async Task CompensateAndBubbleUp<TStep>() where TStep : IMessage
+    {
+        // Step log should be in the compensation coordinator
+        await compensationCoordinator.CompensateParentAsync(SagaId, typeof(TStep),  HandlerTypeOfCurrentStep, CurrentStep);
+    }
+
     public Task MarkAsComplete<TStep>() where TStep : IMessage
     {
         return SagaStore.LogStepAsync(SagaId, CurrentStep.MessageId, CurrentStep.ParentMessageId, typeof(TStep),
@@ -97,12 +109,6 @@ public class SagaContext<TMessage>(
     {
         // Step log should be in the compensation coordinator
         await compensationCoordinator.CompensateAsync(SagaId, typeof(TStep), HandlerTypeOfCurrentStep, CurrentStep);
-    }
-
-    public async Task MarkAsCompensated<TStep>() where TStep : IMessage
-    {
-        // Step log should be in the compensation coordinator
-        await compensationCoordinator.CompensateParentAsync(SagaId, typeof(TStep),  HandlerTypeOfCurrentStep, CurrentStep);
     }
 
     public Task MarkAsCompensationFailed<TStep>() where TStep : IMessage
@@ -266,7 +272,13 @@ internal class StepSpecificSagaContextAdapter<TMessage>(
         await compensationCoordinator.CompensateAsync(SagaId, typeof(TStep1), HandlerTypeOfCurrentStep, CurrentStep);
     }
 
-    public async Task MarkAsCompensated<TStep1>() where TStep1 : IMessage
+    public Task MarkAsCompensated<TStep1>() where TStep1 : IMessage
+    {
+        return sagaStore.LogStepAsync(SagaId, CurrentStep.MessageId, CurrentStep.ParentMessageId, typeof(TStep1),
+            StepStatus.Compensated, HandlerTypeOfCurrentStep, CurrentStep);
+    }
+
+    public async Task CompensateAndBubbleUp<TStep1>() where TStep1 : IMessage
     {
         // Step log should be in the compensation coordinator
         await compensationCoordinator.CompensateParentAsync(SagaId, typeof(TStep1), HandlerTypeOfCurrentStep, CurrentStep);
@@ -355,6 +367,12 @@ internal class StepSpecificSagaContextAdapter<TStepAdapter, TSagaDataAdapter>(
     }
 
     public Task MarkAsCompensated<TMarkStep>() where TMarkStep : IMessage
+    {
+        return sagaStore.LogStepAsync(SagaId, StepAdapter.MessageId, StepAdapter.MessageId, typeof(TMarkStep),
+            StepStatus.Compensated, HandlerTypeOfCurrentStep, StepAdapter);
+    }
+
+    public Task CompensateAndBubbleUp<TMarkStep>() where TMarkStep : IMessage
     {
         // Step log should be in the compensation coordinator
         return compensationCoordinator.CompensateParentAsync(SagaId, typeof(TMarkStep), HandlerTypeOfCurrentStep, StepAdapter);

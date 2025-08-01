@@ -23,7 +23,7 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\..\samples\Sample.Order.Choreography.Consumer\Sample.Order.Choreography.Consumer.csproj" />
+      <ProjectReference Include="..\..\samples\Sample.Order.Orchestration.Sequential.Consumer \Sample.Order.Orchestration.Sequential.Consumer .csproj" />
       <ProjectReference Include="..\..\samples\Sample.Shared\Sample.Shared.csproj" />
       <ProjectReference Include="..\..\src\Lycia.Extensions\Lycia.Extensions.csproj" />
       <ProjectReference Include="..\..\src\Lycia.Infrastructure\Lycia.Infrastructure.csproj" />

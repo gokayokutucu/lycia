@@ -8,7 +8,7 @@ namespace Sample.Order.Orchestration.Consumer.Sagas;
 public class ShippingSagaHandler :
     CoordinatedSagaHandler<ShipOrderCommand, OrderShippedResponse, CreateOrderSagaData>
 {
-    protected override async Task HandleAsync(ShipOrderCommand message)
+    public override async Task HandleAsync(ShipOrderCommand message)
     {
         // Shipping logic
         await Context.Publish(new OrderShippedResponse

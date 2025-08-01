@@ -22,7 +22,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.IntegrationTests", "t
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Tests", "tests\Lycia.Tests\Lycia.Tests.csproj", "{B2AE5013-780F-4387-970E-F7BAD9D26332}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Order.Choreography.Consumer", "samples\Sample.Order.Choreography.Consumer\Sample.Order.Choreography.Consumer.csproj", "{454B7D73-55D4-4AD2-B8BD-25B0D4A0AD94}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Order.Orchestration.Sequential.Consumer ", "samples\Sample.Order.Orchestration.Sequential.Consumer \Sample.Order.Orchestration.Sequential.Consumer .csproj", "{454B7D73-55D4-4AD2-B8BD-25B0D4A0AD94}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Tests.Helpers", "tests\Lycia.Tests.Helpers\Lycia.Tests.Helpers.csproj", "{60897FE6-CD56-4352-B3A8-DE9A38AA551D}"
 EndProject

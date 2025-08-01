@@ -3,14 +3,14 @@ using Sample.Shared.Messages.Commands;
 using Sample.Shared.Messages.Responses;
 using Sample.Shared.SagaStates;
 
-namespace Sample.Order.Orchestration.Consumer.Sagas;
+namespace Sample.Order.Orchestration.Sequential.Consumer_.Sagas;
 
 public class InventorySagaHandler : 
-    CoordinatedSagaHandler<ReserveInventoryCommand, InventoryReservedResponse, CreateOrderSagaData>
+    CoordinatedSagaHandler<ReserveInventoryCommand, CreateOrderSagaData>
 {
     public override async Task HandleAsync(ReserveInventoryCommand message)
     {
-        await Context.Publish(new InventoryReservedResponse
+        await Context.Send(new ProcessPaymentCommand
         {
             OrderId = message.OrderId,
             ParentMessageId = message.MessageId

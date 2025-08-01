@@ -1,14 +1,17 @@
+using Lycia.Messaging;
 using Lycia.Saga.Handlers;
 using Sample.Shared.Messages.Commands;
 using Sample.Shared.Messages.Events;
+using Sample.Shared.Messages.Responses;
+using Sample.Shared.SagaStates;
 
-namespace Sample.Order.Choreography.Consumer.Sagas;
+namespace Sample.Order.Orchestration.Sequential.Consumer_.Sagas;
 
 /// <summary>
 /// Handles the start of the order process in a reactive saga flow and emits an OrderCreatedEvent.
 /// </summary>
 public class CreateOrderSagaHandler :
-    StartReactiveSagaHandler<CreateOrderCommand>
+    StartCoordinatedSagaHandler<CreateOrderCommand, OrderCreatedResponse, CreateOrderSagaData>
 {
     /// <summary>
     /// For test purposes, we can check if the compensation was called.
@@ -21,7 +24,6 @@ public class CreateOrderSagaHandler :
         {
             OrderId = command.OrderId,
         });
-        await Context.MarkAsComplete<CreateOrderCommand>();
     }
 
     public override async Task CompensateStartAsync(CreateOrderCommand message)
@@ -41,5 +43,22 @@ public class CreateOrderSagaHandler :
             // Optionally: rethrow or store for manual retry
             throw; // Or suppress and log for retry system
         }
+    }
+    
+    public override async Task HandleSuccessResponseAsync(OrderCreatedResponse response)
+    {
+        // Order created, reserve inventory
+        await Context.Send(new ReserveInventoryCommand
+        {
+            OrderId = response.OrderId,
+            ParentMessageId = response.MessageId
+        });
+        await Context.MarkAsComplete<OrderCreatedResponse>();
+    }
+    
+    public override Task HandleFailResponseAsync(OrderCreatedResponse response, FailResponse fail)
+    {
+        // Order could not be created, mark the saga as failed, log, or start compensation
+        return Context.MarkAsFailed<CreateOrderCommand>();
     }
 }
