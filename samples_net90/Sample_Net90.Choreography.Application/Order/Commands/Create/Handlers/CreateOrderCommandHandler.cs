@@ -12,9 +12,9 @@ public class CreateOrderCommandHandler(IEventBus eventBus, IMapper mapper, ILogg
     public async Task<CreateOrderCommandResult> Handle(CreateOrderCommand request, CancellationToken cancellationToken)
     {
         var command = mapper.Map<CreateOrderSagaCommand>(request);
-
+        command.OrderId = Guid.CreateVersion7();
         await eventBus.Send(command);
 
-        return mapper.Map<CreateOrderCommandResult>(null);
+        return CreateOrderCommandResult.Create(command.OrderId);
     }
 }

@@ -2,12 +2,7 @@
 
 namespace Sample_Net90.Choreography.Domain.Entities;
 
-public sealed record Customer (
-    Guid Id,
-        Guid By,
-        DateTime At,
-        CRUD Action,
-        bool IsDeleted,
+public sealed record Customer(Guid Id, Guid By, DateTime At, CRUD Action, bool IsDeleted,
     string FirstName,
     string LastName,
     string Email,

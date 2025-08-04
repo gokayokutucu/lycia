@@ -2,7 +2,8 @@
 
 public interface IStockRepository
 {
+    Task<bool> IsReserved(Guid reservationId);
     Task<bool> IsStockAvailableAsync(Guid productId, int quantity);
-    Task ReleaseStockAsync(Guid orderId, Guid productId, int quantity);
-    Task ReserveStockAsync(Guid orderId, Guid productId, int quantity, int minutes = 15);
+    Task ReleaseStockAsync(Guid reservationId);
+    Task ReserveStockAsync(Domain.Entities.Stock stock, DateTime until);
 }

@@ -2,12 +2,7 @@
 
 namespace Sample_Net90.Choreography.Domain.Entities;
 
-public sealed record Address(
-    Guid Id,
-        Guid By,
-        DateTime At,
-        CRUD Action,
-        bool IsDeleted,
+public sealed record Address(Guid Id, Guid By, DateTime At, CRUD Action, bool IsDeleted,
     Guid CustomerId,
     string Country,
     string State,

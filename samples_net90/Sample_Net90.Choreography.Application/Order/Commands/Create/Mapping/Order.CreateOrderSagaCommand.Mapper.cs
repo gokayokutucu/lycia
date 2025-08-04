@@ -8,8 +8,8 @@ public class OrderToCreateOrderSagaCommandMapper : IRegister
     public void Register(TypeAdapterConfig config)
     {
         config.NewConfig<Domain.Entities.Order, CreateOrderSagaCommand>()
-            .Map(to => to.CustomerId, from => from.CustomerId)
-            .Map(to => to.Products, from => from.Products)
+            //.Map(to => to.CustomerId, from => from.CustomerId)
+            //.Map(to => to.Products, from => from.Products)
             ;
     }
 }
