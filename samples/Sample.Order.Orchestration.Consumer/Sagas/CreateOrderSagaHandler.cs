@@ -8,7 +8,7 @@ using Sample.Shared.SagaStates;
 namespace Sample.Order.Orchestration.Consumer.Sagas;
 
 public class CreateOrderSagaHandler :
-    StartCoordinatedSagaHandler<CreateOrderCommand, OrderCreatedResponse, CreateOrderSagaData>,
+    StartCoordinatedResponsiveSagaHandler<CreateOrderCommand, OrderCreatedResponse, CreateOrderSagaData>,
     IResponseSagaHandler<InventoryReservedResponse>,
     IResponseSagaHandler<PaymentSucceededResponse>,
     IResponseSagaHandler<OrderShippedResponse>

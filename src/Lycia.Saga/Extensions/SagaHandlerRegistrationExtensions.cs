@@ -177,8 +177,10 @@ public static class SagaHandlerRegistrationExtensions
     {
         return GetGenericBaseType(type, typeof(StartReactiveSagaHandler<>)) != null
                || GetGenericBaseType(type, typeof(ReactiveSagaHandler<>)) != null
-               || GetGenericBaseType(type, typeof(StartCoordinatedSagaHandler<,,>)) != null
-               || GetGenericBaseType(type, typeof(CoordinatedSagaHandler<,,>)) != null;
+               || GetGenericBaseType(type, typeof(StartCoordinatedSagaHandler<,>)) != null
+               || GetGenericBaseType(type, typeof(StartCoordinatedResponsiveSagaHandler<,,>)) != null
+               || GetGenericBaseType(type, typeof(CoordinatedResponsiveSagaHandler<,,>)) != null
+               || GetGenericBaseType(type, typeof(CoordinatedSagaHandler<,>)) != null;
     }
 
     /// <summary>

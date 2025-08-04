@@ -1,11 +1,11 @@
-using Lycia.Saga.Abstractions;
 using Lycia.Saga.Handlers;
-using Sample.Shared.Messages.Events;
+using Lycia.Tests.Messages;
+using Lycia.Tests.SagaStates;
 
 namespace Lycia.Tests.Sagas;
 
 public class ShipOrderForCompensationSagaHandler :
-    ReactiveSagaHandler<OrderCreatedEvent>
+    CoordinatedSagaHandler<OrderCreatedEvent, CreateOrderSagaData>
 {
     /// <summary>
     /// For test purposes, we can check if the compensation was called.

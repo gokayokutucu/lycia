@@ -1,9 +1,10 @@
 using Lycia.Saga.Handlers;
-using Sample.Shared.Messages.Events;
+using Lycia.Tests.Messages;
+using Lycia.Tests.SagaStates;
 
 namespace Lycia.Tests.Sagas;
 
-public class SwallowingSagaHandler : ReactiveSagaHandler<OrderCreatedEvent>
+public class SwallowingSagaHandler : CoordinatedSagaHandler<OrderCreatedEvent, SampleSagaData>
 {
     public override Task HandleAsync(OrderCreatedEvent message)
     {

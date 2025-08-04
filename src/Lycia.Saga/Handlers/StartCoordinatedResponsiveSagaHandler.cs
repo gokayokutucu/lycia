@@ -4,14 +4,11 @@ using Lycia.Saga.Handlers.Abstractions;
 
 namespace Lycia.Saga.Handlers;
 
-/// <summary>
-/// Represents the starting point of an orchestration-based saga.
-/// Handles the initial message in a coordinated saga and initializes saga state.
-/// Use this as a base for coordinated saga starters.
-/// </summary>
-public abstract class StartCoordinatedSagaHandler<TMessage, TSagaData> :
-    ISagaStartHandler<TMessage, TSagaData>
+public abstract class StartCoordinatedResponsiveSagaHandler<TMessage, TResponse, TSagaData> :
+    ISagaStartHandler<TMessage, TSagaData>,
+    IResponseSagaHandler<TResponse>
     where TMessage : IMessage
+    where TResponse : IResponse<TMessage>
     where TSagaData : new()
 {
     protected ISagaContext<TMessage, TSagaData> Context { get; private set; } = null!;
@@ -50,6 +47,16 @@ public abstract class StartCoordinatedSagaHandler<TMessage, TSagaData> :
     }
 
     public virtual Task CompensateStartAsync(TMessage message)
+    {
+        return Task.CompletedTask;
+    }
+
+    public virtual Task HandleSuccessResponseAsync(TResponse response)
+    {
+        return Task.CompletedTask;
+    }
+
+    public virtual Task HandleFailResponseAsync(TResponse response, FailResponse fail)
     {
         return Task.CompletedTask;
     }

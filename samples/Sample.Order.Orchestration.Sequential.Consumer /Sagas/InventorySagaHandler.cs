@@ -4,12 +4,22 @@ using Sample.Shared.Messages.Responses;
 using Sample.Shared.SagaStates;
 
 namespace Sample.Order.Orchestration.Sequential.Consumer_.Sagas;
-
 public class InventorySagaHandler : 
     CoordinatedSagaHandler<ReserveInventoryCommand, CreateOrderSagaData>
 {
     public override async Task HandleAsync(ReserveInventoryCommand message)
     {
+        // Simulate inventory reservation
+        var inventoryReserved = true; // Simulate logic
+        
+        if (!inventoryReserved)
+        {
+            // Inventory reservation failed
+            await Context.MarkAsFailed<ReserveInventoryCommand>();
+            return;
+        }
+        
+        // Inventory reserved, proceed to payment
         await Context.Send(new ProcessPaymentCommand
         {
             OrderId = message.OrderId,
@@ -18,9 +28,10 @@ public class InventorySagaHandler :
         await Context.MarkAsComplete<ReserveInventoryCommand>();
     }
 
-    public override Task CompensateAsync(ReserveInventoryCommand message)
+    public override async Task CompensateAsync(ReserveInventoryCommand message)
     {
+        // Compensation logic: release reserved inventory
         Context.Data.InventoryCompensated = true;
-        return Task.CompletedTask;
+        await Context.CompensateAndBubbleUp<ReserveInventoryCommand>();
     }
 }

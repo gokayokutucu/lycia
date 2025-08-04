@@ -130,9 +130,11 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
                 : null;
 
         if (handlerGenericDef == typeof(StartReactiveSagaHandler<>) ||
-            handlerGenericDef == typeof(StartCoordinatedSagaHandler<,,>) ||
+            handlerGenericDef == typeof(StartCoordinatedSagaHandler<,>) ||
+            handlerGenericDef == typeof(StartCoordinatedResponsiveSagaHandler<,,>) ||
             handlerGenericDef == typeof(ReactiveSagaHandler<>) ||
-            handlerGenericDef == typeof(CoordinatedSagaHandler<,,>))
+            handlerGenericDef == typeof(CoordinatedResponsiveSagaHandler<,,>) ||
+            handlerGenericDef == typeof(CoordinatedSagaHandler<,>))
         {
             // Use "CompensateAsyncInternal" for these base types
             compensationDelegate =
@@ -181,14 +183,24 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
     {
         var initializeMethod = handlerTypeActual.GetMethod("Initialize");
         object? contextInstance = null;
-        if (handlerGenericDef == typeof(CoordinatedSagaHandler<,,>) ||
-            handlerGenericDef == typeof(StartCoordinatedSagaHandler<,,>))
+        if (handlerGenericDef == typeof(CoordinatedSagaHandler<,>) || handlerGenericDef == typeof(StartCoordinatedSagaHandler<,>))
         {
+            // [TMessage, TSagaData]
+            var genericArgs = handlerBaseType!.GetGenericArguments();
+            var msgType = genericArgs[0];
+            var sagaDataType = genericArgs[1];
+            var loadedSagaData = await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", sagaDataType, sagaId);
+            var contextType = typeof(SagaContext<,>).MakeGenericType(msgType, sagaDataType);
+            contextInstance = Activator.CreateInstance(contextType, sagaId, messageObject,
+                handlerTypeActual, loadedSagaData, eventBus, sagaStore, sagaIdGenerator, this);
+        }
+        else if (handlerGenericDef == typeof(CoordinatedResponsiveSagaHandler<,,>) || handlerGenericDef == typeof(StartCoordinatedResponsiveSagaHandler<,,>))
+        {
+            // [TMessage, TResponse, TSagaData]
             var genericArgs = handlerBaseType!.GetGenericArguments();
             var msgType = genericArgs[0];
             var sagaDataType = genericArgs[2];
-            var loadedSagaData =
-                await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", sagaDataType, sagaId);
+            var loadedSagaData = await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", sagaDataType, sagaId);
             var contextType = typeof(SagaContext<,>).MakeGenericType(msgType, sagaDataType);
             contextInstance = Activator.CreateInstance(contextType, sagaId, messageObject,
                 handlerTypeActual, loadedSagaData, eventBus, sagaStore, sagaIdGenerator, this);
