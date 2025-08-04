@@ -1,11 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace Sample_Net90.Choreography.Application.Payment.Commands.Process;
+﻿namespace Sample_Net90.Choreography.Application.Payment.Commands.Process;
 
 public sealed class ProcessPaymentCommandResult
 {
 }
+// This class is intentionally left empty as it serves as a placeholder for the result of the ProcessPaymentCommand.

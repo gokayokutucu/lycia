@@ -4,9 +4,9 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Sample_Net90.Choreography.Application.Payment.Commands.Refund
+namespace Sample_Net90.Choreography.Application.Payment.Commands.Refund.Handlers
 {
-    internal class Class1
+    internal class RefundPaymentCommandHandler
     {
     }
 }

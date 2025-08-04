@@ -8,8 +8,8 @@ public sealed class CreateOrderCommandToCreateOrderSagaCommandMapper : IRegister
     public void Register(TypeAdapterConfig config)
     {
         config.NewConfig<CreateOrderCommand, CreateOrderSagaCommand>()
-            .Map(to => to.CustomerId, from => from.CustomerId)
-            .Map(to => to.Products, from => from.Cart)
+            //.Map(to => to.CustomerId, from => from.CustomerId)
+            //.Map(to => to.Products, from => from.Cart)
             ;
     }
 }

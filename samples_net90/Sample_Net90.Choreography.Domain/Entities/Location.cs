@@ -2,12 +2,7 @@
 
 namespace Sample_Net90.Choreography.Domain.Entities;
 
-public sealed record StockLocation(
-    Guid Id,
-        Guid By,
-        DateTime At,
-        CRUD Action,
-        bool IsDeleted,
+public sealed record StockLocation(Guid Id, Guid By, DateTime At, CRUD Action, bool IsDeleted,
     string Warehouse,
     string Zone,
     string Block,
