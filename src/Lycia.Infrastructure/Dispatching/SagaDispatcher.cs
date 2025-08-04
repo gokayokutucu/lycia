@@ -94,7 +94,8 @@ public class SagaDispatcher(
 
         // Only ISagaStartHandler gets a new SagaId if needed
         var handlerType = handler!.GetType();
-        var isStartHandler = handlerType.IsSubclassOfRawGeneric(typeof(ISagaStartHandler<>));
+        var isStartHandler = handlerType.IsSubclassOfRawGeneric(typeof(ISagaStartHandler<>)) ||
+                             handlerType.IsSubclassOfRawGeneric(typeof(ISagaStartHandler<,>));
 
         if (sagaIdProp != null && sagaIdProp.GetValue(message) is Guid value && value != Guid.Empty)
         {
@@ -113,18 +114,47 @@ public class SagaDispatcher(
             throw new InvalidOperationException("Missing SagaId on a non-starting message.");
         }
 
-        // Coordinated (with SagaData)
-        if (handlerType.IsSubclassOfRawGenericBase(typeof(CoordinatedSagaHandler<,,>)) ||
-            handlerType.IsSubclassOfRawGenericBase(typeof(StartCoordinatedSagaHandler<,,>)))
+        // Coordinated (with SagaData and Responsive)
+        if (handlerType.IsSubclassOfRawGenericBase(typeof(CoordinatedSagaHandler<,>)) ||
+            handlerType.IsSubclassOfRawGenericBase(typeof(CoordinatedResponsiveSagaHandler<,,>)) ||
+            handlerType.IsSubclassOfRawGenericBase(typeof(StartCoordinatedResponsiveSagaHandler<,,>)) ||
+            handlerType.IsSubclassOfRawGenericBase(typeof(StartCoordinatedSagaHandler<,>)))
         {
-            var genericArgs = handlerType.BaseType?.GetGenericArguments();
-            var msgType = genericArgs?[0];
-            var sagaDataType = genericArgs?[2];
+            // Retrieve correct generic arguments 
+            var genericBase = handlerType;
+            while (genericBase is { IsGenericType: false })
+                genericBase = genericBase.BaseType;
 
-            // Create SagaContext with loaded SagaData: SagaContext<msgType, sagaDataType>
-            var contextType = typeof(SagaContext<,>).MakeGenericType(msgType!, sagaDataType!);
+            if (genericBase == null)
+                throw new InvalidOperationException("No generic base found for saga handler.");
+
+            // Find the generic type definition
+            var genericDef = genericBase.GetGenericTypeDefinition();
+
+            Type? msgType = null;
+            Type? sagaDataType = null;
+
+            if (genericDef == typeof(CoordinatedSagaHandler<,>) || genericDef == typeof(StartCoordinatedSagaHandler<,>))
+            {
+                // [TMessage, TSagaData]
+                msgType = genericBase.GetGenericArguments()[0];
+                sagaDataType = genericBase.GetGenericArguments()[1];
+            }
+            else if (genericDef == typeof(CoordinatedResponsiveSagaHandler<,,>) || genericDef == typeof(StartCoordinatedResponsiveSagaHandler<,,>))
+            {
+                // [TMessage, TResponse, TSagaData]
+                msgType = genericBase.GetGenericArguments()[0];
+                sagaDataType = genericBase.GetGenericArguments()[2];
+            }
+            else
+            {
+                throw new InvalidOperationException("Handler is not a recognized coordinated saga handler type.");
+            }
+
+            // Create context and invoke handler
+            var contextType = typeof(SagaContext<,>).MakeGenericType(msgType, sagaDataType);
             var loadedSagaData =
-                await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", sagaDataType!, sagaId);
+                await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", sagaDataType, sagaId!);
             var contextInstance = Activator.CreateInstance(contextType,
                 sagaId,
                 message,

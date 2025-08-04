@@ -1,6 +1,6 @@
 using Lycia.Saga.Handlers;
-using Sample.Shared.Messages.Commands;
-using Sample.Shared.Messages.Events;
+using Lycia.Tests.Messages;
+using Lycia.Tests.SagaStates;
 
 namespace Lycia.Tests.Sagas;
 
@@ -8,7 +8,7 @@ namespace Lycia.Tests.Sagas;
 /// Handles the start of the order process in a reactive saga flow and emits an OrderCreatedEvent.
 /// </summary>
 public class CreateOrderSagaHandler :
-    StartReactiveSagaHandler<CreateOrderCommand>
+    StartCoordinatedSagaHandler<CreateOrderCommand, CreateOrderSagaData>
 {
     /// <summary>
     /// For test purposes, we can check if the compensation was called.

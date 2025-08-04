@@ -144,7 +144,7 @@ public class RedisSagaStoreIntegrationTests : IAsyncLifetime
     public async Task SaveSagaData_And_LoadSagaData_Works()
     {
         var sagaId = Guid.NewGuid();
-        var data = new DummyStore{ };
+        var data = new DummyStore{};
 
         var sagaStoreOptions = new SagaStoreOptions
         {
@@ -162,7 +162,10 @@ public class RedisSagaStoreIntegrationTests : IAsyncLifetime
         loaded.Should().BeEquivalentTo(data);
     }
 
-    private class DummyStore{}
+    private class DummyStore
+    {
+        public string SomeField { get; set; } = "test";
+    }
     
     private class DummyStep : EventBase
     {

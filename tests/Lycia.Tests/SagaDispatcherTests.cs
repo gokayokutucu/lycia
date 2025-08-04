@@ -5,20 +5,17 @@ using Lycia.Infrastructure.Eventing;
 using Lycia.Infrastructure.Stores;
 using Lycia.Messaging;
 using Lycia.Messaging.Enums;
-using Lycia.Saga;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Exceptions;
 using Lycia.Saga.Extensions;
 using Lycia.Saga.Handlers;
 using Lycia.Saga.Handlers.Abstractions;
 using Lycia.Tests.Helpers;
+using Lycia.Tests.Messages;
 using Lycia.Tests.Sagas;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
-using Moq.Protected;
-using Sample.Shared.Messages.Commands;
-using Sample.Shared.Messages.Events;
 
 namespace Lycia.Tests;
 

@@ -10,4 +10,5 @@ public class CreateOrderSagaData
     public bool InventoryCompensated { get; set; }
     public bool ShippingCompensated { get; set; }
     public bool PaymentIrreversible { get; set; }
+    public bool ShippingReversed { get; set; }
 }

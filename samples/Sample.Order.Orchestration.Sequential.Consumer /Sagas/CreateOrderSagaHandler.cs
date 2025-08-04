@@ -11,7 +11,7 @@ namespace Sample.Order.Orchestration.Sequential.Consumer_.Sagas;
 /// Handles the start of the order process in a reactive saga flow and emits an OrderCreatedEvent.
 /// </summary>
 public class CreateOrderSagaHandler :
-    StartCoordinatedSagaHandler<CreateOrderCommand, OrderCreatedResponse, CreateOrderSagaData>
+    StartCoordinatedSagaHandler<CreateOrderCommand, CreateOrderSagaData>
 {
     /// <summary>
     /// For test purposes, we can check if the compensation was called.
@@ -20,10 +20,11 @@ public class CreateOrderSagaHandler :
     
     public override async Task HandleStartAsync(CreateOrderCommand command)
     {
-        await Context.Publish(new OrderCreatedEvent
+        await Context.SendWithTracking(new ReserveInventoryCommand
         {
             OrderId = command.OrderId,
-        });
+        })
+        .ThenMarkAsComplete();
     }
 
     public override async Task CompensateStartAsync(CreateOrderCommand message)
@@ -43,22 +44,5 @@ public class CreateOrderSagaHandler :
             // Optionally: rethrow or store for manual retry
             throw; // Or suppress and log for retry system
         }
-    }
-    
-    public override async Task HandleSuccessResponseAsync(OrderCreatedResponse response)
-    {
-        // Order created, reserve inventory
-        await Context.Send(new ReserveInventoryCommand
-        {
-            OrderId = response.OrderId,
-            ParentMessageId = response.MessageId
-        });
-        await Context.MarkAsComplete<OrderCreatedResponse>();
-    }
-    
-    public override Task HandleFailResponseAsync(OrderCreatedResponse response, FailResponse fail)
-    {
-        // Order could not be created, mark the saga as failed, log, or start compensation
-        return Context.MarkAsFailed<CreateOrderCommand>();
     }
 }
