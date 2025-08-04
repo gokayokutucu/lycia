@@ -6,7 +6,7 @@ using Sample.Shared.SagaStates;
 namespace Sample.Order.Orchestration.Consumer.Sagas;
 
 public class InventorySagaHandler : 
-    CoordinatedSagaHandler<ReserveInventoryCommand, InventoryReservedResponse, CreateOrderSagaData>
+    CoordinatedResponsiveSagaHandler<ReserveInventoryCommand, InventoryReservedResponse, CreateOrderSagaData>
 {
     public override async Task HandleAsync(ReserveInventoryCommand message)
     {

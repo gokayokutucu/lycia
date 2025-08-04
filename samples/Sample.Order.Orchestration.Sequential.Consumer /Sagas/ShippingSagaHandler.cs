@@ -6,27 +6,28 @@ using Sample.Shared.SagaStates;
 namespace Sample.Order.Orchestration.Sequential.Consumer_.Sagas;
 
 public class ShippingSagaHandler : 
-    CoordinatedSagaHandler<OrderCreatedEvent, ShippedOrderResponse, CreateOrderSagaData>
+    CoordinatedSagaHandler<PaymentProcessedEvent, CreateOrderSagaData>
 {
-    public override async Task HandleAsync(OrderCreatedEvent command)
+    public override async Task HandleAsync(PaymentProcessedEvent message)
     {
-        try
-        {
-            // Simulated logic
-            const bool stockAvailable = true; // Simulate failure
+        // Simulate shipping step
+        var shipped = true; // Simulate logic
 
-            if (!stockAvailable)
-            {
-                await Context.MarkAsFailed<OrderCreatedEvent>();
-                return;
-            }
-
-            await Context.MarkAsComplete<OrderCreatedEvent>();
-        }
-        catch (Exception ex)
+        if (!shipped)
         {
-            Console.WriteLine($"🚨 Shipping failed: {ex.Message}");
-            await Context.MarkAsFailed<OrderCreatedEvent>();
+            // Shipping failed
+            await Context.MarkAsFailed<PaymentProcessedEvent>();
+            return;
         }
+
+        // Shipping succeeded, complete the saga or trigger next step if needed
+        await Context.MarkAsComplete<PaymentProcessedEvent>();
+    }
+
+    public override async Task CompensateAsync(PaymentProcessedEvent message)
+    {
+        // Compensation logic: recall shipment, notify customer, etc.
+        Context.Data.ShippingReversed = true;
+        await Context.CompensateAndBubbleUp<PaymentProcessedEvent>();
     }
 }
