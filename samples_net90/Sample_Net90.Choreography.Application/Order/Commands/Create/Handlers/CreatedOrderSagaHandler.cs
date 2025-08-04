@@ -7,7 +7,7 @@ using Sample_Net90.Choreography.Domain.Sagas.Order.CreateOrder.Events;
 
 namespace Sample_Net90.Choreography.Application.Order.Commands.Create;
 
-public sealed class CreateOrderSagaHandler (ILogger<CreateOrderSagaHandler> logger, IMapper mapper, IOrderRepository orderRepository)
+public sealed class CreateOrderSagaHandler(ILogger<CreateOrderSagaHandler> logger, IMapper mapper, IOrderRepository orderRepository)
     : StartReactiveSagaHandler<CreateOrderSagaCommand>
 {
     public override async Task HandleStartAsync(CreateOrderSagaCommand message)
@@ -20,7 +20,7 @@ public sealed class CreateOrderSagaHandler (ILogger<CreateOrderSagaHandler> logg
             var id = await orderRepository.CreateAsync(order);
             logger.LogInformation("CreateOrderSagaHandler => HandleStartAsync => Order created with ID: {OrderId}", id);
 
-            order.Id = id;
+            order = order with { Id = id };
             var orderCreatedEvent = mapper.Map<OrderCreatedSagaEvent>(order);
             await Context.PublishWithTracking(orderCreatedEvent).ThenMarkAsComplete();
             logger.LogInformation("CreateOrderSagaHandler => HandleStartAsync => OrderCreatedSagaEvent published successfully and CreateOrderSagaCommand marked as complete for OrderId: {OrderId}", id);

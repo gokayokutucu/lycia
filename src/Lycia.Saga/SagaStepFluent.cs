@@ -1,5 +1,4 @@
 using Lycia.Messaging;
-using Lycia.Messaging.Enums;
 using Lycia.Saga.Abstractions;
 
 namespace Lycia.Saga;
@@ -44,7 +43,7 @@ public class CoordinatedSagaStepFluent<TStep, TSagaData>(
     Func<Task> operation,
     TStep @event)
     where TStep : IMessage
-    where TSagaData : SagaData
+    where TSagaData : new()
 {
     public async Task ThenMarkAsComplete()
     {

@@ -2,7 +2,7 @@ using Lycia.Saga.Handlers;
 using Sample.Shared.Messages.Commands;
 using Sample.Shared.Messages.Events;
 
-namespace Sample.Order.Consumer.Sagas;
+namespace Sample.Order.Choreography.Consumer.Sagas;
 
 /// <summary>
 /// Handles the start of the order process in a reactive saga flow and emits an OrderCreatedEvent.

@@ -1,5 +1,6 @@
 using Lycia.Messaging;
 using Lycia.Saga.Abstractions;
+using Lycia.Saga.Handlers.Abstractions;
 
 namespace Lycia.Saga.Handlers;
 
@@ -12,7 +13,7 @@ public abstract class CoordinatedSagaHandler<TMessage, TResponse, TSagaData> :
     ISagaHandler<TMessage, TSagaData>
     where TMessage : IMessage
     where TResponse : IResponse<TMessage>
-    where TSagaData : SagaData, new()
+    where TSagaData : new()
 {
     protected ISagaContext<TMessage, TSagaData> Context { get; private set; } = null!;
 
