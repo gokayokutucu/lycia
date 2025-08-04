@@ -201,7 +201,7 @@ public class RedisSagaStore(
         return result;
     }
 
-    public async Task<SagaData?> LoadSagaDataAsync(Guid sagaId)
+    public async Task<TSagaData?> LoadSagaDataAsync<TSagaData>(Guid sagaId) where TSagaData : class
     {
         var dataJson = await redisDb.StringGetAsync(SagaDataKey(sagaId));
         if (!dataJson.HasValue)
@@ -209,18 +209,17 @@ public class RedisSagaStore(
             return null;
         }
 
-        return JsonConvert.DeserializeObject<SagaData>(dataJson!);
+        return JsonConvert.DeserializeObject<TSagaData>(dataJson!);
     }
 
-    public async Task SaveSagaDataAsync(Guid sagaId, SagaData data)
+    public async Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data)
     {
         await redisDb.StringSetAsync(SagaDataKey(sagaId), JsonHelper.SerializeSafe(data));
     }
 
-    public async Task<ISagaContext<TStep, TSagaData>> LoadContextAsync<TStep, TSagaData>(Guid sagaId, TStep message,
-        Type handlerType)
-        where TSagaData : SagaData, new()
-        where TStep : IMessage
+    public async Task<ISagaContext<TMessage, TSagaData>> LoadContextAsync<TMessage, TSagaData>(Guid sagaId, TMessage message, Type handlerType) 
+        where TMessage : IMessage 
+        where TSagaData : new()
     {
         TSagaData data;
         var dataJson = await redisDb.StringGetAsync(SagaDataKey(sagaId));
@@ -234,7 +233,7 @@ public class RedisSagaStore(
             await SaveSagaDataAsync(sagaId, data);
         }
 
-        ISagaContext<TStep, TSagaData> context = new SagaContext<TStep, TSagaData>(
+        ISagaContext<TMessage, TSagaData> context = new SagaContext<TMessage, TSagaData>(
             sagaId: sagaId,
             currentStep: message,
             handlerTypeOfCurrentStep: handlerType,
@@ -246,6 +245,7 @@ public class RedisSagaStore(
         );
         return context;
     }
+
 
     private string? ApplicationId()
         => !string.IsNullOrWhiteSpace(_options.ApplicationId)

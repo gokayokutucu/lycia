@@ -1,7 +1,7 @@
 using Lycia.Saga.Handlers;
 using Sample.Shared.Messages.Events;
 
-namespace Sample.Order.Consumer.Sagas;
+namespace Sample.Order.Choreography.Consumer.Sagas;
 
 public class ShipOrderSagaHandler : ReactiveSagaHandler<OrderCreatedEvent>
 {
