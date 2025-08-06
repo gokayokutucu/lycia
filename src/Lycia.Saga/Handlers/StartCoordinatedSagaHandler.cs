@@ -12,7 +12,7 @@ namespace Lycia.Saga.Handlers;
 public abstract class StartCoordinatedSagaHandler<TMessage, TSagaData> :
     ISagaStartHandler<TMessage, TSagaData>
     where TMessage : IMessage
-    where TSagaData : new()
+    where TSagaData : SagaData
 {
     protected ISagaContext<TMessage, TSagaData> Context { get; private set; } = null!;
 

@@ -14,26 +14,29 @@ public interface ISagaContext<TInitialMessage>
     
     Task Publish<T>(T @event, Type? handlerType) where T : IEvent;
 
-    ReactiveSagaStepFluent<TInitialMessage> PublishWithTracking<TStep>(TStep nextEvent)
-        where TStep : IEvent;
+    ReactiveSagaStepFluent<TInitialMessage> PublishWithTracking<TNextStep>(TNextStep nextEvent)
+        where TNextStep : IEvent;
 
-    ReactiveSagaStepFluent<TInitialMessage> SendWithTracking<TStep>(TStep nextCommand)
-        where TStep : ICommand;
+    ReactiveSagaStepFluent<TInitialMessage> SendWithTracking<TNextStep>(TNextStep nextCommand)
+        where TNextStep : ICommand;
 
     Task Compensate<T>(T @event) where T : FailedEventBase;
 
     Task MarkAsComplete<TStep>() where TStep : IMessage;
     Task MarkAsFailed<TStep>() where TStep : IMessage;
+    Task MarkAsFailed<TStep>(Exception? ex) where TStep : IMessage;
+    Task MarkAsFailed<TStep>(FailResponse fail) where TStep : IMessage;
     Task MarkAsCompensated<TStep>() where TStep : IMessage;
     Task CompensateAndBubbleUp<TStep>() where TStep : IMessage;
-    Task MarkAsCompensationFailed<TStep>() where TStep : IMessage;
+    Task MarkAsCompensationFailed<TStep>() where TStep : IMessage;    
+    Task MarkAsCompensationFailed<TStep>(Exception? ex) where TStep : IMessage;
 
     Task<bool> IsAlreadyCompleted<T>() where T : IMessage;
     void RegisterStepMessage<TMessage>(TMessage message) where TMessage : IMessage;
 }
 
 public interface ISagaContext<TInitialMessage, TSagaData> : ISagaContext<TInitialMessage>
-    where TSagaData : new()
+    where TSagaData : SagaData
     where TInitialMessage : IMessage
 {
     TSagaData Data { get; }

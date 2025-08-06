@@ -16,6 +16,11 @@ public class FailResponse
     public string? ExceptionType { get; set; }
 
     /// <summary>
+    /// Detailed information about the exception that caused the saga to fail.
+    /// </summary>
+    public string? ExceptionDetail { get; set; }
+
+    /// <summary>
     /// Timestamp when the failure occurred.
     /// </summary>
     public DateTime OccurredAt { get; set; } = DateTime.UtcNow;
