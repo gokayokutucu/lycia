@@ -79,11 +79,9 @@ public class CreateOrderSagaHandler :
             Console.WriteLine("Payment irreversible! Compensation skipped.");
             return Task.CompletedTask;
         }
-        else
-        {
-            // Trigger compensation chains for payment(Call the InventorySagaHandler CompensateAsync method)
-            return Context.MarkAsFailed<ReserveInventoryCommand>();
-        }
+
+        // Trigger compensation chains for payment(Call the InventorySagaHandler CompensateAsync method)
+        return Context.MarkAsFailed<ReserveInventoryCommand>();
     }
 
     public async Task HandleSuccessResponseAsync(OrderShippedResponse response)

@@ -1,10 +1,8 @@
-using Lycia.Messaging.Enums;
 using Lycia.Messaging.Utility;
-using Newtonsoft.Json;
 
 namespace Lycia.Messaging;
 
-public class CommandBase: ICommand
+public abstract class CommandBase: ICommand
 {
     protected CommandBase()
     {
