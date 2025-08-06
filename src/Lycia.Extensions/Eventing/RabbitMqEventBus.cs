@@ -18,7 +18,7 @@ namespace Lycia.Extensions.Eventing;
 
 public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
 {
-    private const string XMesssageTtl = "x-message-ttl";
+    private const string XMessageTtl = "x-message-ttl";
     
     private readonly ConnectionFactory _factory;
     private readonly ILogger<RabbitMqEventBus> _logger;
@@ -100,7 +100,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
     {
         await EnsureChannelAsync(cancellationToken).ConfigureAwait(false);
         // routingKey equivalent to the exchange name in RabbitMQ terminology
-        var exchangeName = MessagingNamingHelper.GetExchangeName(typeof(TEvent)); // event.OrderCreatedEvent
+        var exchangeName = MessagingNamingHelper.GetExchangeName(typeof(TEvent)); // event.OrderCreatedEvent or response.OrderCreatedResponse
 
         if (_channel == null)
         {
@@ -191,7 +191,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             var dlqArgs = new Dictionary<string, object?>();
             if (_options.MessageTTL is { TotalMilliseconds: > 0 } ttl)
             {
-                dlqArgs[XMesssageTtl] = (int)ttl.TotalMilliseconds;
+                dlqArgs[XMessageTtl] = (int)ttl.TotalMilliseconds;
             }
             await _channel.QueueDeclareAsync(
                 queue: dlqName,
@@ -258,8 +258,8 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             var handlerType = kvp.Value.HandlerType;
             // Ensure queue and exchange exist and are bound before subscribing the consumer.
             // These operations are idempotent.
-            var exchangeName = MessagingNamingHelper.GetExchangeName(messageType); // e.g., "event.OrderCreatedEvent"
-            var routingKey = MessagingNamingHelper.GetTopicRoutingKey(messageType); // e.g., "event.OrderCreatedEvent.#"
+            var exchangeName = MessagingNamingHelper.GetExchangeName(messageType); // e.g., "event.OrderCreatedEvent" or "command.CreateOrderCommand" or "response.OrderCreatedResponse"
+            var routingKey = MessagingNamingHelper.GetTopicRoutingKey(messageType); // e.g., "event.OrderCreatedEvent.#" or "command.CreateOrderCommand.#" or "response.OrderCreatedResponse.#"
 
             var exchangeType = messageType.IsSubclassOf(typeof(EventBase))
                 ? ExchangeType.Topic
@@ -276,7 +276,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             var queueArgs = await DeclareDeadLetter(queueName, cancellationToken);
             if (_options?.MessageTTL is { TotalMilliseconds: > 0 } ttl)
             {
-                queueArgs[XMesssageTtl] = (int)ttl.TotalMilliseconds;
+                queueArgs[XMessageTtl] = (int)ttl.TotalMilliseconds;
             }
 
             await _channel.QueueDeclareAsync(
