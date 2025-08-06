@@ -52,7 +52,7 @@ public class RedisSagaStoreIntegrationTests : IAsyncLifetime
 
         // First set: Started
         await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Started, handlerType,
-            new { Value = 1 });
+            new { Value = 1 }, (SagaStepFailureInfo?)null);
 
         // CAS: Try to set again with the same status (idempotent, should succeed)
         var currentStatus = await store.GetStepStatusAsync(sagaId, messageId, stepType, handlerType);
@@ -60,20 +60,20 @@ public class RedisSagaStoreIntegrationTests : IAsyncLifetime
 
         // Move status to Completed (with correct previous value)
         await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType,
-            new { Value = 2 });
+            new { Value = 2 }, (SagaStepFailureInfo?)null);
         var afterCompleted = await store.GetStepStatusAsync(sagaId, messageId, stepType, handlerType);
         afterCompleted.Should().Be(StepStatus.Completed);
 
         // Try to update with an invalid previous status (e.g., try to set back to Started)
         Func<Task> invalidTransition = () =>
             store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Started, handlerType,
-                new { Value = 3 });
+                new { Value = 3 }, (SagaStepFailureInfo?)null);
 
         await invalidTransition.Should().ThrowAsync<SagaStepTransitionException>();
 
         // Update again with the correct status (idempotency test)
         await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType,
-            new { Value = 2 });
+            new { Value = 2 }, (SagaStepFailureInfo?)null);
         var finalStatus = await store.GetStepStatusAsync(sagaId, messageId, stepType, handlerType);
         finalStatus.Should().Be(StepStatus.Completed);
     }
@@ -98,14 +98,14 @@ public class RedisSagaStoreIntegrationTests : IAsyncLifetime
 
         // Act & Assert
         await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Started, handlerType,
-            new { Value = 123 });
+            new { Value = 123 }, (SagaStepFailureInfo?)null);
 
         (await store.GetStepStatusAsync(sagaId, messageId, stepType, handlerType))
             .Should().Be(StepStatus.Started);
 
         // Status transition test
         await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType,
-            new { Value = 456 });
+            new { Value = 456 }, (SagaStepFailureInfo?)null);
         (await store.GetStepStatusAsync(sagaId, messageId, stepType, handlerType))
             .Should().Be(StepStatus.Completed);
 
@@ -131,11 +131,11 @@ public class RedisSagaStoreIntegrationTests : IAsyncLifetime
 
         var store = new RedisSagaStore(_db, null!, null!, null!, sagaStoreOptions);
 
-        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType, null);
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType, null, (SagaStepFailureInfo?)null);
 
         // Attempt to revert to Started (illegal)
         Func<Task> act = () =>
-            store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Started, handlerType, null);
+            store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Started, handlerType, null, (SagaStepFailureInfo?)null);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
     }
@@ -144,7 +144,7 @@ public class RedisSagaStoreIntegrationTests : IAsyncLifetime
     public async Task SaveSagaData_And_LoadSagaData_Works()
     {
         var sagaId = Guid.NewGuid();
-        var data = new DummyStore{};
+        var data = new DummySagaData{};
 
         var sagaStoreOptions = new SagaStoreOptions
         {
@@ -156,13 +156,13 @@ public class RedisSagaStoreIntegrationTests : IAsyncLifetime
 
         await store.SaveSagaDataAsync(sagaId, data);
 
-        var loaded = await store.LoadSagaDataAsync<DummyStore>(sagaId);
+        var loaded = await store.LoadSagaDataAsync<DummySagaData>(sagaId);
 
         loaded.Should().NotBeNull();
         loaded.Should().BeEquivalentTo(data);
     }
 
-    private class DummyStore
+    private class DummySagaData : SagaData
     {
         public string SomeField { get; set; } = "test";
     }

@@ -3,7 +3,7 @@ using Sample.Shared.Messages.Commands;
 using Sample.Shared.Messages.Responses;
 using Sample.Shared.SagaStates;
 
-namespace Sample.Order.Orchestration.Consumer.Sagas;
+namespace Sample.Order.Choreography.Consumer.Sagas;
 
 public class ShippingSagaHandler :
     CoordinatedResponsiveSagaHandler<ShipOrderCommand, OrderShippedResponse, CreateOrderSagaData>
@@ -22,6 +22,6 @@ public class ShippingSagaHandler :
     public override Task CompensateAsync(ShipOrderCommand message)
     {
         Context.Data.ShippingCompensated = true; // Sample flag to indicate compensation
-        return Context.CompensateAndBubbleUp<ShipOrderCommand>();
+        return Task.CompletedTask;
     }
 }

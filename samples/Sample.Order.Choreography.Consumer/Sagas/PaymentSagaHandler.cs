@@ -1,14 +1,13 @@
 using Lycia.Saga.Handlers;
 using Sample.Shared.Messages.Commands;
-using Sample.Shared.Messages.Events;
 using Sample.Shared.Messages.Responses;
 using Sample.Shared.SagaStates;
 using Sample.Shared.Services;
 
-namespace Sample.Order.Orchestration.Sequential.Consumer_.Sagas;
+namespace Sample.Order.Choreography.Consumer.Sagas;
 
 public class PaymentSagaHandler :
-    CoordinatedSagaHandler<ProcessPaymentCommand, CreateOrderSagaData>
+    CoordinatedResponsiveSagaHandler<ProcessPaymentCommand, PaymentSucceededResponse, CreateOrderSagaData>
 {
     public override async Task HandleAsync(ProcessPaymentCommand message)
     {
@@ -26,17 +25,11 @@ public class PaymentSagaHandler :
         Context.Data.PaymentIrreversible = true;
 
         // Continue
-        await Context.Publish(new PaymentProcessedEvent
+        await Context.Publish(new PaymentSucceededResponse
         {
             OrderId = message.OrderId,
             ParentMessageId = message.MessageId
         });
         await Context.MarkAsComplete<ProcessPaymentCommand>();
-    }
-    
-    public override async Task CompensateAsync(ProcessPaymentCommand message)
-    {
-        // No business compensation required, but need to bubble up
-        await Context.CompensateAndBubbleUp<ProcessPaymentCommand>();
     }
 }
