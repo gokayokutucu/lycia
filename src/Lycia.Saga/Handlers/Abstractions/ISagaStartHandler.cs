@@ -11,7 +11,7 @@ public interface ISagaStartHandler<TMessage>
 
 public interface ISagaStartHandler<TMessage, TSagaData>
     where TMessage: IMessage
-    where TSagaData : new()
+    where TSagaData : SagaData
 {
     void Initialize(ISagaContext<TMessage, TSagaData> context);
 }

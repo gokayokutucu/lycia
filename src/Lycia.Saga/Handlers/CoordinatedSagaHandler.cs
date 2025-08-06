@@ -12,7 +12,7 @@ namespace Lycia.Saga.Handlers;
 public abstract class CoordinatedSagaHandler<TMessage, TSagaData> :
     ISagaHandler<TMessage, TSagaData>
     where TMessage : IMessage
-    where TSagaData : new()
+    where TSagaData : SagaData
 {
     protected ISagaContext<TMessage, TSagaData> Context { get; private set; } = null!;
 
@@ -28,9 +28,14 @@ public abstract class CoordinatedSagaHandler<TMessage, TSagaData> :
         {
             await HandleAsync(message);  // Actual business logic
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            await Context.MarkAsFailed<TMessage>();
+            await Context.MarkAsFailed<TMessage>(new FailResponse()
+            {
+                Reason = "Saga step failed",
+                ExceptionType = ex.GetType().Name,
+                ExceptionDetail = ex.ToString()
+            });
         }
     }
     
@@ -49,8 +54,6 @@ public abstract class CoordinatedSagaHandler<TMessage, TSagaData> :
 
     public abstract Task HandleAsync(TMessage message);
     
-    public virtual Task CompensateAsync(TMessage message)
-    {
-        return Task.CompletedTask;
-    }
+    public virtual Task CompensateAsync(TMessage message) => 
+        Context.CompensateAndBubbleUp<TMessage>();
 }

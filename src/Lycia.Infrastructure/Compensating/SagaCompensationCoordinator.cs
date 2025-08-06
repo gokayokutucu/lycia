@@ -17,13 +17,17 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
     : ISagaCompensationCoordinator
 {
     /// <summary>
-    /// Compensates the saga steps corresponding to the specified failed step type.
+    /// Executes the compensation logic for a specific saga step that has encountered an error.
     /// </summary>
-    /// <param name="sagaId">The identifier of the saga.</param>
-    /// <param name="failedStepType">The type of the failed step to compensate.</param>
-    /// <param name="handlerType"></param>
-    /// <param name="message"></param>
-    public async Task CompensateAsync(Guid sagaId, Type failedStepType, Type? handlerType, IMessage message)
+    /// <param name="sagaId">The unique identifier of the saga.</param>
+    /// <param name="failedStepType">The type of the saga step that failed and requires compensation.</param>
+    /// <param name="handlerType">The type of the compensation handler responsible for handling the step's failure.</param>
+    /// <param name="message">The message associated with the failed saga step.</param>
+    /// <param name="failInfo">Additional failure information related to the saga step.</param>
+    /// <returns>A task representing the asynchronous compensation operation.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when required services such as IEventBus or ISagaStore cannot be resolved.</exception>
+    public async Task CompensateAsync(Guid sagaId, Type failedStepType, Type? handlerType, IMessage message,
+        SagaStepFailureInfo? failInfo)
     {
         if (handlerType == null) return;
 
@@ -39,7 +43,7 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
             return;
 
         await sagaStore.LogStepAsync(sagaId, message.MessageId, message.ParentMessageId, failedStepType,
-            StepStatus.Failed, handlerType, message);
+            StepStatus.Failed, handlerType, message, failInfo);
 
         stepKeyValuePair = await sagaStore.GetSagaHandlerStepAsync(sagaId, message.MessageId);
         if (!stepKeyValuePair.HasValue) return;
@@ -80,7 +84,7 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
             return;
         // Log the step as failed before compensating
         await sagaStore.LogStepAsync(sagaId, message.MessageId, message.ParentMessageId, stepType,
-            StepStatus.Compensated, handlerType, message);
+            StepStatus.Compensated, handlerType, message, (Exception?)null);
 
         stepKeyValuePair = await sagaStore.GetSagaHandlerStepAsync(sagaId, message.MessageId);
         if (!stepKeyValuePair.HasValue) return;

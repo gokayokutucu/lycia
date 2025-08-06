@@ -5,6 +5,7 @@ using Lycia.Infrastructure.Eventing;
 using Lycia.Infrastructure.Stores;
 using Lycia.Messaging;
 using Lycia.Messaging.Enums;
+using Lycia.Saga;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Exceptions;
 using Lycia.Saga.Extensions;
@@ -84,13 +85,13 @@ public class SagaDispatcherTests
 
         // Log both steps to simulate the circular chain
         await store.LogStepAsync(fixedSagaId, parentEventId, failingEventId, typeof(ParentEvent), StepStatus.Completed,
-            typeof(ParentCompensationSagaHandler), parentEvent);
+            typeof(ParentCompensationSagaHandler), parentEvent, (SagaStepFailureInfo?)null);
 
 
         // Act & Assert: Expect an InvalidOperationException due to the circular parent chain
         await Assert.ThrowsAsync<SagaStepCircularChainException>(() =>
             store.LogStepAsync(fixedSagaId, failingEventId, parentEventId, typeof(FailingEvent), StepStatus.Failed,
-                typeof(FailingCompensationSagaHandler), failingEvent)
+                typeof(FailingCompensationSagaHandler), failingEvent, (SagaStepFailureInfo?)null)
         );
     }
 
@@ -210,7 +211,7 @@ public class SagaDispatcherTests
         };
         
         await store.LogStepAsync(fixedSagaId, startMessageId, Guid.Empty, typeof(CreateOrderCommand), StepStatus.Completed,
-            typeof(CreateOrderSagaHandler), command);
+            typeof(CreateOrderSagaHandler), command, (SagaStepFailureInfo?)null);
 
         // Act
         await dispatcher.DispatchAsync(command, handlerType: typeof(ShipOrderForCompensationSagaHandler), sagaId: fixedSagaId, CancellationToken.None);

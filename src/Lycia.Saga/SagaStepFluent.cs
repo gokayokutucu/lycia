@@ -39,7 +39,7 @@ public class CoordinatedSagaStepFluent<TInitialMessage, TSagaData>(
     ISagaContext<TInitialMessage, TSagaData> context,
     Func<Task> operation)
     where TInitialMessage : IMessage
-    where TSagaData : new()
+    where TSagaData : SagaData
 {
     public async Task ThenMarkAsComplete()
     {

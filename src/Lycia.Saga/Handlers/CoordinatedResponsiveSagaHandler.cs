@@ -8,7 +8,7 @@ public abstract class CoordinatedResponsiveSagaHandler<TMessage, TResponse, TSag
     ISagaHandler<TMessage, TSagaData>
     where TMessage : IMessage
     where TResponse : IResponse<TMessage>
-    where TSagaData : new()
+    where TSagaData : SagaData
 {
     protected ISagaContext<TMessage, TSagaData> Context { get; private set; } = null!;
 
@@ -45,8 +45,6 @@ public abstract class CoordinatedResponsiveSagaHandler<TMessage, TResponse, TSag
 
     public abstract Task HandleAsync(TMessage message);
     
-    public virtual Task CompensateAsync(TMessage message)
-    {
-        return Task.CompletedTask;
-    }
+    public virtual Task CompensateAsync(TMessage message) => 
+        Context.CompensateAndBubbleUp<TMessage>();
 }

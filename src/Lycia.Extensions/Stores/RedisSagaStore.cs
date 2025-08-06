@@ -30,8 +30,15 @@ public class RedisSagaStore(
     private static string SagaDataKey(Guid sagaId) => $"saga:data:{sagaId}";
     private static string StepLogKey(Guid sagaId) => $"saga:steps:{sagaId}";
 
+    public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
+        Type handlerType, object? payload, Exception? exception)
+    {
+        return LogStepAsync(sagaId, messageId, parentMessageId, stepType, status, handlerType, payload, 
+            new SagaStepFailureInfo("Exception occurred", exception?.GetType().Name, exception?.ToString()  ));
+    }
+    
     public async Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
-        Type handlerType, object? payload)
+        Type handlerType, object? payload, SagaStepFailureInfo? failureInfo)
     {
         var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
         var applicationId = ApplicationId();
@@ -53,7 +60,7 @@ public class RedisSagaStore(
                 : null;
 
             var metadata = SagaStepMetadata.Build(status, messageId, parentMessageId, messageTypeName, applicationId,
-                payload);
+                payload, failureInfo);
 
             var result = SagaStepHelper.ValidateSagaStepTransition(messageId, parentMessageId, status,
                 existingSteps.Values, stepKey, metadata, existingMeta);
@@ -201,37 +208,98 @@ public class RedisSagaStore(
         return result;
     }
 
-    public async Task<TSagaData?> LoadSagaDataAsync<TSagaData>(Guid sagaId) where TSagaData : class
+    public async Task<IMessage?> LoadSagaStepMessageAsync(Guid sagaId, Type stepType)
+    {
+        var redisStepLogKey = StepLogKey(sagaId);
+        var entries = await redisDb.HashGetAllAsync(redisStepLogKey);
+
+        foreach (var entry in entries)
+        {
+            try
+            {
+                var key = (string)entry.Name!;
+                var (stepTypeName, _, _) = SagaStoreLogicHelper.ParseStepKey(key);
+                if (stepTypeName == stepType.FullName)
+                {
+                    var type = Type.GetType(stepTypeName);
+                    if (type == null)
+                        continue;
+                    var messageObject = JsonConvert.DeserializeObject(entry.Value!, type);
+                    return messageObject as IMessage;
+                }
+            }
+            catch
+            {
+                // Ignore malformed keys
+            }
+        }
+        return null;
+    }
+
+    public async Task<IMessage?> LoadSagaStepMessageAsync(Guid sagaId, Guid messageId)
+    {
+        var redisStepLogKey = StepLogKey(sagaId);
+        var entries = await redisDb.HashGetAllAsync(redisStepLogKey);
+
+        foreach (var entry in entries)
+        {
+            try
+            {
+                var key = (string)entry.Name!;
+                var (stepTypeName, _, msgId) = SagaStoreLogicHelper.ParseStepKey(key);
+                if (msgId == messageId.ToString())
+                {
+                    var type = Type.GetType(stepTypeName);
+                    if (type == null)
+                        continue;
+                    var messageObject = JsonConvert.DeserializeObject(entry.Value!, type);
+                    return messageObject as IMessage;
+                }
+            }
+            catch
+            {
+                // Ignore malformed keys
+            }
+        }
+        return null;
+    }
+
+    public async Task<TSagaData> LoadSagaDataAsync<TSagaData>(Guid sagaId) 
+        where TSagaData : SagaData, new()
     {
         var dataJson = await redisDb.StringGetAsync(SagaDataKey(sagaId));
-        if (!dataJson.HasValue)
-        {
-            return null;
-        }
-
-        return JsonConvert.DeserializeObject<TSagaData>(dataJson!);
+        if (dataJson.HasValue) return JsonConvert.DeserializeObject<TSagaData>(dataJson!)!;
+        // Return a new instance if nothing is found
+        var emptyData = new TSagaData();
+        await SaveSagaDataAsync(sagaId, emptyData);
+        return emptyData;
     }
 
     public async Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data)
+        where TSagaData : SagaData
     {
+        if (data is null) return;
+        data.SagaId = sagaId;
+        
         await redisDb.StringSetAsync(SagaDataKey(sagaId), JsonHelper.SerializeSafe(data));
     }
 
     public async Task<ISagaContext<TMessage, TSagaData>> LoadContextAsync<TMessage, TSagaData>(Guid sagaId, TMessage message, Type handlerType) 
         where TMessage : IMessage 
-        where TSagaData : new()
+        where TSagaData : SagaData
     {
-        TSagaData data;
+        TSagaData? data = null;
         var dataJson = await redisDb.StringGetAsync(SagaDataKey(sagaId));
         if (dataJson.HasValue)
         {
-            data = JsonConvert.DeserializeObject<TSagaData>(dataJson!) ?? new TSagaData();
+            data = JsonConvert.DeserializeObject<TSagaData>(dataJson!);
         }
-        else
-        {
-            data = new TSagaData();
-            await SaveSagaDataAsync(sagaId, data);
-        }
+        
+        if (data == null)
+            throw new InvalidOperationException(
+                $"SagaData instance could not be loaded or created. " +
+                $"Please ensure a non-null state is available for saga: {sagaId}");
+
 
         ISagaContext<TMessage, TSagaData> context = new SagaContext<TMessage, TSagaData>(
             sagaId: sagaId,

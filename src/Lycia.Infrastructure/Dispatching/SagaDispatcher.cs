@@ -155,6 +155,7 @@ public class SagaDispatcher(
             var contextType = typeof(SagaContext<,>).MakeGenericType(msgType, sagaDataType);
             var loadedSagaData =
                 await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", sagaDataType, sagaId!);
+            
             var contextInstance = Activator.CreateInstance(contextType,
                 sagaId,
                 message,
