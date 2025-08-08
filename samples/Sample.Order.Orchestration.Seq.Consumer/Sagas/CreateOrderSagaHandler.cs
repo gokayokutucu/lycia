@@ -5,7 +5,7 @@ using Sample.Shared.Messages.Events;
 using Sample.Shared.Messages.Responses;
 using Sample.Shared.SagaStates;
 
-namespace Sample.Order.Orchestration.Sequential.Consumer_.Sagas;
+namespace Sample.Order.Orchestration.Seq.Consumer.Sagas;
 
 /// <summary>
 /// Handles the start of the order process in a reactive saga flow and emits an OrderCreatedEvent.

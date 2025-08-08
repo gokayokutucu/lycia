@@ -33,10 +33,10 @@ public class RedisSagaStore(
     public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
         Type handlerType, object? payload, Exception? exception)
     {
-        return LogStepAsync(sagaId, messageId, parentMessageId, stepType, status, handlerType, payload, 
-            new SagaStepFailureInfo("Exception occurred", exception?.GetType().Name, exception?.ToString()  ));
+        return LogStepAsync(sagaId, messageId, parentMessageId, stepType, status, handlerType, payload,
+            new SagaStepFailureInfo("Exception occurred", exception?.GetType().Name, exception?.ToString()));
     }
-    
+
     public async Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
         Type handlerType, object? payload, SagaStepFailureInfo? failureInfo)
     {
@@ -179,7 +179,7 @@ public class RedisSagaStore(
             var (stepTypeName, handlerTypeName, msgId) = SagaStoreLogicHelper.ParseStepKey(key);
 
             if (msgId != messageId.ToString()) continue;
-            
+
             var metadata = JsonConvert.DeserializeObject<SagaStepMetadata>(entry.Value!)!;
             return new KeyValuePair<(string, string, string), SagaStepMetadata>(
                 (stepTypeName, handlerTypeName, msgId), metadata
@@ -219,20 +219,17 @@ public class RedisSagaStore(
             {
                 var key = (string)entry.Name!;
                 var (stepTypeName, _, _) = SagaStoreLogicHelper.ParseStepKey(key);
-                if (stepTypeName == stepType.FullName)
-                {
-                    var type = Type.GetType(stepTypeName);
-                    if (type == null)
-                        continue;
-                    var messageObject = JsonConvert.DeserializeObject(entry.Value!, type);
-                    return messageObject as IMessage;
-                }
+                if (stepTypeName != stepType.GetSimplifiedQualifiedName()) continue;
+                
+                var messageObject = JsonConvert.DeserializeObject(entry.Value!, stepType);
+                return messageObject as IMessage;
             }
             catch
             {
                 // Ignore malformed keys
             }
         }
+
         return null;
     }
 
@@ -261,10 +258,11 @@ public class RedisSagaStore(
                 // Ignore malformed keys
             }
         }
+
         return null;
     }
 
-    public async Task<TSagaData> LoadSagaDataAsync<TSagaData>(Guid sagaId) 
+    public async Task<TSagaData> LoadSagaDataAsync<TSagaData>(Guid sagaId)
         where TSagaData : SagaData, new()
     {
         var dataJson = await redisDb.StringGetAsync(SagaDataKey(sagaId));
@@ -280,12 +278,13 @@ public class RedisSagaStore(
     {
         if (data is null) return;
         data.SagaId = sagaId;
-        
-        await redisDb.StringSetAsync(SagaDataKey(sagaId), JsonHelper.SerializeSafe(data));
+        // Set the saga data in Redis, applying TTL/expiration if configured in options
+        await redisDb.StringSetAsync(SagaDataKey(sagaId), JsonHelper.SerializeSafe(data), _options.StepLogTtl);
     }
 
-    public async Task<ISagaContext<TMessage, TSagaData>> LoadContextAsync<TMessage, TSagaData>(Guid sagaId, TMessage message, Type handlerType) 
-        where TMessage : IMessage 
+    public async Task<ISagaContext<TMessage, TSagaData>> LoadContextAsync<TMessage, TSagaData>(Guid sagaId,
+        TMessage message, Type handlerType)
+        where TMessage : IMessage
         where TSagaData : SagaData
     {
         TSagaData? data = null;
@@ -294,7 +293,7 @@ public class RedisSagaStore(
         {
             data = JsonConvert.DeserializeObject<TSagaData>(dataJson!);
         }
-        
+
         if (data == null)
             throw new InvalidOperationException(
                 $"SagaData instance could not be loaded or created. " +

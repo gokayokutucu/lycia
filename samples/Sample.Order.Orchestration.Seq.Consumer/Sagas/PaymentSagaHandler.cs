@@ -5,7 +5,7 @@ using Sample.Shared.Messages.Responses;
 using Sample.Shared.SagaStates;
 using Sample.Shared.Services;
 
-namespace Sample.Order.Orchestration.Sequential.Consumer_.Sagas;
+namespace Sample.Order.Orchestration.Seq.Consumer.Sagas;
 
 public class PaymentSagaHandler :
     CoordinatedSagaHandler<ProcessPaymentCommand, CreateOrderSagaData>

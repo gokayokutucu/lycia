@@ -1,11 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk.Worker">
 
     <PropertyGroup>
-        <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
-        <LangVersion>preview</LangVersion>
+        <TargetFramework>net9.0</TargetFramework>
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
-        <UserSecretsId>dotnet-Sample.Order.Consumer-17b60e53-9dbf-4a0a-8f65-3496a2ad4fa2</UserSecretsId>
+        <UserSecretsId>dotnet-Sample.Order.Orchestration.Seq.Consumer-bf4303bd-106b-45f2-a034-1ba1ee4089b7</UserSecretsId>
     </PropertyGroup>
 
     <ItemGroup>
@@ -14,6 +13,7 @@
 
     <ItemGroup>
       <ProjectReference Include="..\..\src\Lycia.Extensions\Lycia.Extensions.csproj" />
+      <ProjectReference Include="..\..\src\Lycia.Saga\Lycia.Saga.csproj" />
       <ProjectReference Include="..\Sample.Shared\Sample.Shared.csproj" />
     </ItemGroup>
 </Project>

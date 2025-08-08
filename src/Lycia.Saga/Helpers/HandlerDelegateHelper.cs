@@ -6,13 +6,13 @@ namespace Lycia.Saga.Helpers;
 
 public static class HandlerDelegateHelper
 {
-    private static readonly ConcurrentDictionary<(Type HandlerType, string MethodName), Func<object, object, Task>> DelegateCache = new();
+    private static readonly ConcurrentDictionary<(Type HandlerType, string MethodName, Type MessageType), Func<object, object, Task>> DelegateCache = new();
 
     // Handles both real handlers and proxy/mock types (e.g., Moq) by searching for the method in both the class and its interfaces.
     // This is needed because proxies may implement the method only via interface, not directly on the proxy class.
     public static Func<object, object, Task> GetHandlerDelegate(Type handlerType, string methodName, Type messageType)
     {
-        var key = (handlerType, methodName);
+        var key = (handlerType, methodName, messageType);
         if (DelegateCache.TryGetValue(key, out var dlg))
             return dlg;
 
@@ -32,16 +32,25 @@ public static class HandlerDelegateHelper
         }
 
         if (method == null)
-            throw new InvalidOperationException($"Method '{methodName}' not found on {handlerType.FullName}");
+            throw new InvalidOperationException($"Method '{methodName}({messageType.FullName})' not found on {handlerType.FullName}.");
 
         var handlerParam = Expression.Parameter(typeof(object), "handler");
         var messageParam = Expression.Parameter(typeof(object), "message");
 
-        // Add type checks to ensure the parameters are of the correct types
+        var expectedTypeConst = Expression.Constant(messageType, typeof(Type));
+        var actualTypeExpr = Expression.Call(messageParam, typeof(object).GetMethod(nameof(object.GetType))!);
+        var invalidCastCtor = typeof(InvalidCastException).GetConstructor([typeof(string)])!;
+        var errorMsg = Expression.Call(
+            typeof(string).GetMethod(nameof(string.Format), [typeof(string), typeof(object), typeof(object)])!,
+            Expression.Constant("HandlerDelegateHelper: cannot cast message. Expected={0}, Actual={1}"),
+            expectedTypeConst,
+            Expression.Convert(actualTypeExpr, typeof(object))
+        );
+
         var body = Expression.Block(
             Expression.IfThen(
                 Expression.Not(Expression.TypeIs(messageParam, messageType)),
-                Expression.Throw(Expression.New(typeof(InvalidCastException)))
+                Expression.Throw(Expression.New(invalidCastCtor, errorMsg))
             ),
             Expression.Call(
                 Expression.Convert(handlerParam, method.DeclaringType!),

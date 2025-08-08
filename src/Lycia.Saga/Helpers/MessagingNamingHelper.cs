@@ -1,4 +1,5 @@
 using Lycia.Messaging;
+using Lycia.Saga.Extensions;
 
 namespace Lycia.Saga.Helpers;
 
@@ -56,7 +57,7 @@ public static class MessagingNamingHelper
         {
             prefix = "command";
         }
-        else if (IsResponseBase(messageType))
+        else if (messageType.IsSubclassOfResponseBase())
         {
             prefix = "response";
         }
@@ -93,7 +94,7 @@ public static class MessagingNamingHelper
         {
             prefix = "command";
         }
-        else if (IsResponseBase(messageType))
+        else if (messageType.IsSubclassOfResponseBase())
         {
             prefix = "response";
         }
@@ -125,7 +126,7 @@ public static class MessagingNamingHelper
         {
             prefix = "command";
         }
-        else if (IsResponseBase(messageType))
+        else if (messageType.IsSubclassOfResponseBase())
         {
             prefix = "response";
         }
@@ -135,17 +136,5 @@ public static class MessagingNamingHelper
         }
 
         return $"{prefix}.{messageType.Name}";
-    }
-
-    private static bool IsResponseBase(Type? type)
-    {
-        while (type != null && type != typeof(object))
-        {
-            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(ResponseBase<>))
-                return true;
-            type = type.BaseType;
-        }
-
-        return false;
     }
 }

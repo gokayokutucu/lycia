@@ -12,6 +12,7 @@ using Lycia.Saga.Helpers;
 
 using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Helpers;
+using Lycia.Saga.Extensions;
 using Constants = Lycia.Extensions.Configurations.Constants;
 
 namespace Lycia.Extensions.Eventing;
@@ -116,7 +117,15 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             autoDelete: false,
             arguments: null, cancellationToken: cancellationToken);
 
-        sagaId ??= @event.SagaId; // Ensure sagaId is not null, use a new Guid if not provided
+         // Ensure sagaId is not null, use a new Guid if not provided
+        if (@event.SagaId is null)
+        {
+            @event.SagaId = sagaId;
+        }
+        else
+        {
+            sagaId = @event.SagaId;
+        }
 
         var headers = RabbitMqEventBusHelper.BuildMessageHeaders(@event, sagaId, typeof(TEvent), Constants.EventTypeHeader);
         var properties = new BasicProperties
@@ -167,7 +176,11 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             Persistent = true,
             Headers = headers
         };
-
+        
+        if (command.SagaId is null || command.SagaId == Guid.Empty) 
+        {
+            command.SagaId = sagaId;
+        }
         var json = JsonHelper.SerializeSafe(command);
         var body = Encoding.UTF8.GetBytes(json);
 
@@ -261,7 +274,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             var exchangeName = MessagingNamingHelper.GetExchangeName(messageType); // e.g., "event.OrderCreatedEvent" or "command.CreateOrderCommand" or "response.OrderCreatedResponse"
             var routingKey = MessagingNamingHelper.GetTopicRoutingKey(messageType); // e.g., "event.OrderCreatedEvent.#" or "command.CreateOrderCommand.#" or "response.OrderCreatedResponse.#"
 
-            var exchangeType = messageType.IsSubclassOf(typeof(EventBase))
+            var exchangeType = messageType.IsSubclassOf(typeof(EventBase)) || messageType.IsSubclassOfResponseBase()
                 ? ExchangeType.Topic
                 : ExchangeType.Direct;
             

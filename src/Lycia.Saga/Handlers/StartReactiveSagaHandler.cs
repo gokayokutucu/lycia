@@ -13,9 +13,9 @@ public abstract class StartReactiveSagaHandler<TMessage> :
     ISagaStartHandler<TMessage>
     where TMessage : IMessage
 {
-    protected ISagaContext<TMessage> Context { get; private set; } = null!;
+    protected ISagaContext<IMessage> Context { get; private set; } = null!;
 
-    public void Initialize(ISagaContext<TMessage> context)
+    public void Initialize(ISagaContext<IMessage> context)
     {
         Context = context;
     }

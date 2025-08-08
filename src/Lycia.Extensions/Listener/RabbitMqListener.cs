@@ -21,7 +21,7 @@ public class RabbitMqListener(
 
         var sagaDispatcher = scope.ServiceProvider.GetRequiredService<ISagaDispatcher>();
         
-        await foreach (var (body, messageType, handlerType) in eventBus.ConsumeAsync(autoAck: true, cancellationToken:stoppingToken))
+        await foreach (var (body, messageType, handlerType) in eventBus.ConsumeAsync(autoAck: false, cancellationToken:stoppingToken))
         {
             if (stoppingToken.IsCancellationRequested)
                 break;
@@ -71,7 +71,7 @@ public class RabbitMqListener(
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error while processing message of type {MessageType}", messageType?.Name);
+                logger.LogError(ex, "Error while processing message of type {MessageType}", messageType.Name);
                 // Optional: DLQ/retry/metrics logic.
             }
         }

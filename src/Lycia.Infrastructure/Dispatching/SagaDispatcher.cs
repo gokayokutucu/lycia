@@ -26,7 +26,7 @@ public class SagaDispatcher(
             // log null handlerType
             return;
         }
-        
+
         var handler = serviceProvider.GetRequiredService(handlerType);
         await InvokeHandlerAsync(handler, message, sagaId, cancellationToken: cancellationToken);
     }
@@ -128,35 +128,23 @@ public class SagaDispatcher(
             if (genericBase == null)
                 throw new InvalidOperationException("No generic base found for saga handler.");
 
-            // Find the generic type definition
-            var genericDef = genericBase.GetGenericTypeDefinition();
+            var initializeMethod = handlerType.GetMethod("Initialize")
+                                   ?? throw new InvalidOperationException(
+                                       $"Initialize method not found on {handlerType.Name}");
+            var initParam = initializeMethod.GetParameters().FirstOrDefault()?.ParameterType
+                            ?? throw new InvalidOperationException("Initialize parameter type not found.");
 
-            Type? msgType = null;
-            Type? sagaDataType = null;
 
-            if (genericDef == typeof(CoordinatedSagaHandler<,>) || genericDef == typeof(StartCoordinatedSagaHandler<,>))
-            {
-                // [TMessage, TSagaData]
-                msgType = genericBase.GetGenericArguments()[0];
-                sagaDataType = genericBase.GetGenericArguments()[1];
-            }
-            else if (genericDef == typeof(CoordinatedResponsiveSagaHandler<,,>) || genericDef == typeof(StartCoordinatedResponsiveSagaHandler<,,>))
-            {
-                // [TMessage, TResponse, TSagaData]
-                msgType = genericBase.GetGenericArguments()[0];
-                sagaDataType = genericBase.GetGenericArguments()[2];
-            }
-            else
-            {
-                throw new InvalidOperationException("Handler is not a recognized coordinated saga handler type.");
-            }
+            // Use the exact generic args expected by Initialize, e.g. ISagaContext<IMessage, TSagaData>
+            var initArgs = initParam.GetGenericArguments();
+            var initMsgArg = initArgs[0];
+            var initDataArg = initArgs[1];
 
-            // Create context and invoke handler
-            var contextType = typeof(SagaContext<,>).MakeGenericType(msgType, sagaDataType);
+            var contextType = typeof(SagaContext<,>).MakeGenericType(initMsgArg, initDataArg);
             var loadedSagaData =
-                await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", sagaDataType, sagaId!);
-            
-            var contextInstance = Activator.CreateInstance(contextType,
+                await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", initDataArg, sagaId!);
+            var contextInstance = Activator.CreateInstance(
+                contextType,
                 sagaId,
                 message,
                 handlerType,
@@ -165,8 +153,8 @@ public class SagaDispatcher(
                 sagaStore,
                 sagaIdGenerator,
                 compensationCoordinator);
-            var initializeMethod = handlerType.GetMethod("Initialize");
-            initializeMethod?.Invoke(handler, [contextInstance]);
+
+            initializeMethod.Invoke(handler, [contextInstance!]);
 
             await HandleSagaAsync(message, handler, handlerType);
             return;
@@ -176,12 +164,19 @@ public class SagaDispatcher(
         if (handlerType.IsSubclassOfRawGenericBase(typeof(ReactiveSagaHandler<>)) ||
             handlerType.IsSubclassOfRawGenericBase(typeof(StartReactiveSagaHandler<>)))
         {
-            var genericArgs = handlerType.BaseType?.GetGenericArguments();
-            var msgType = genericArgs?[0];
+            var initializeMethod = handlerType.GetMethod("Initialize")
+                                   ?? throw new InvalidOperationException(
+                                       $"Initialize method not found on {handlerType.Name}");
+            var initParam = initializeMethod.GetParameters().FirstOrDefault()?.ParameterType
+                            ?? throw new InvalidOperationException("Initialize parameter type not found.");
+            object? contextInstance;
 
-            var contextType = typeof(SagaContext<>).MakeGenericType(msgType!);
-            var contextInstance =
-                Activator.CreateInstance(contextType,
+            if (initParam.IsGenericType && initParam.GetGenericTypeDefinition() == typeof(ISagaContext<>))
+            {
+                var initMsgArg = initParam.GetGenericArguments()[0];
+                var contextType = typeof(SagaContext<>).MakeGenericType(initMsgArg);
+                contextInstance = Activator.CreateInstance(
+                    contextType,
                     sagaId,
                     message,
                     handlerType,
@@ -189,13 +184,36 @@ public class SagaDispatcher(
                     sagaStore,
                     sagaIdGenerator,
                     compensationCoordinator);
-            var initializeMethod = handlerType.GetMethod("Initialize");
-            initializeMethod?.Invoke(handler, [contextInstance]);
+            }
+            else if (initParam.IsGenericType && initParam.GetGenericTypeDefinition() == typeof(ISagaContext<,>))
+            {
+                // Unexpected for reactive, but handle defensively
+                var initArgs = initParam.GetGenericArguments();
+                var contextType = typeof(SagaContext<,>).MakeGenericType(initArgs[0], initArgs[1]);
+                var loadedSagaData =
+                    await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", initArgs[1], sagaId!);
+                contextInstance = Activator.CreateInstance(
+                    contextType,
+                    sagaId,
+                    message,
+                    handlerType,
+                    loadedSagaData,
+                    eventBus,
+                    sagaStore,
+                    sagaIdGenerator,
+                    compensationCoordinator);
+            }
+            else
+            {
+                throw new InvalidOperationException($"Unsupported Initialize parameter type: {initParam}");
+            }
+
+            initializeMethod.Invoke(handler, new[] { contextInstance! });
 
             await HandleSagaAsync(message, handler, handlerType);
         }
     }
-    
+
     private async Task HandleSagaAsync(IMessage message, object? handler, Type handlerType)
     {
         if (handler == null) return;
@@ -205,8 +223,12 @@ public class SagaDispatcher(
         {
             var sagaId = GetSagaId(message);
 
+            var methodName = message.GetType().IsSuccessResponse()
+                ? "HandleSuccessResponseAsync"
+                : "HandleAsyncInternal";
+
             var delegateMethod =
-                HandlerDelegateHelper.GetHandlerDelegate(handlerType, "HandleAsyncInternal", message.GetType());
+                HandlerDelegateHelper.GetHandlerDelegate(handlerType, methodName, message.GetType());
             await delegateMethod(handler, message);
 
             await ValidateSagaStepCompletionAsync(message, handlerType, sagaId);
