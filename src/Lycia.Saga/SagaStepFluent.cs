@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Lycia.Messaging;
 using Lycia.Saga.Abstractions;
 
@@ -9,6 +10,12 @@ public class ReactiveSagaStepFluent<TInitialMessage>(
     Func<Task> operation)
     where TInitialMessage : IMessage
 {
+    public static object Create(Type stepType, object context, Func<Task> operation)
+    {
+        var open = typeof(ReactiveSagaStepFluent<>);
+        var closed = open.MakeGenericType(stepType);
+        return Activator.CreateInstance(closed, context, operation)!;
+    }
     
     public async Task ThenMarkAsComplete()
     {
@@ -35,12 +42,27 @@ public class ReactiveSagaStepFluent<TInitialMessage>(
     }
 }
 
+public interface ICoordinatedSagaStepFluent
+{
+    Task ThenMarkAsComplete();
+    Task ThenMarkAsFailed(FailResponse fail);
+    Task ThenMarkAsCompensated();
+    Task ThenMarkAsCompensationFailed();
+}
+
 public class CoordinatedSagaStepFluent<TInitialMessage, TSagaData>(
     ISagaContext<TInitialMessage, TSagaData> context,
-    Func<Task> operation)
+    Func<Task> operation) : ICoordinatedSagaStepFluent
     where TInitialMessage : IMessage
     where TSagaData : SagaData
 {
+    public static object Create(Type stepType, Type sagaDataType, object context, Func<Task> operation)
+    {
+        var open = typeof(CoordinatedSagaStepFluent<,>);
+        var closed = open.MakeGenericType(stepType, sagaDataType);
+        return Activator.CreateInstance(closed, context, operation)!;
+    }
+    
     public async Task ThenMarkAsComplete()
     {
         await operation();

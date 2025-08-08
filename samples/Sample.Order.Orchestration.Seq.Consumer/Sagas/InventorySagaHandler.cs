@@ -3,7 +3,7 @@ using Sample.Shared.Messages.Commands;
 using Sample.Shared.Messages.Responses;
 using Sample.Shared.SagaStates;
 
-namespace Sample.Order.Orchestration.Sequential.Consumer_.Sagas;
+namespace Sample.Order.Orchestration.Seq.Consumer.Sagas;
 public class InventorySagaHandler : 
     CoordinatedSagaHandler<ReserveInventoryCommand, CreateOrderSagaData>
 {

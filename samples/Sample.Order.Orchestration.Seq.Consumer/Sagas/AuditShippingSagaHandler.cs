@@ -2,7 +2,7 @@ using Lycia.Saga.Handlers;
 using Sample.Shared.Messages.Events;
 using Sample.Shared.SagaStates;
 
-namespace Sample.Order.Orchestration.Sequential.Consumer_.Sagas;
+namespace Sample.Order.Orchestration.Seq.Consumer.Sagas;
 
 public class AuditShippingSagaHandler : 
     CoordinatedSagaHandler<PaymentProcessedEvent, CreateOrderSagaData>
