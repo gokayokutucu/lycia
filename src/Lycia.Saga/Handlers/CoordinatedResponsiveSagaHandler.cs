@@ -10,9 +10,9 @@ public abstract class CoordinatedResponsiveSagaHandler<TMessage, TResponse, TSag
     where TResponse : IResponse<TMessage>
     where TSagaData : SagaData
 {
-    protected ISagaContext<TMessage, TSagaData> Context { get; private set; } = null!;
+    protected ISagaContext<IMessage, TSagaData> Context { get; private set; } = null!;
 
-    public void Initialize(ISagaContext<TMessage, TSagaData> context)
+    public void Initialize(ISagaContext<IMessage, TSagaData> context)
     {
         Context = context;
     }

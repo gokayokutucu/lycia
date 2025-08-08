@@ -7,7 +7,7 @@ using Sample.Shared.Services;
 namespace Sample.Order.Orchestration.Consumer.Sagas;
 
 public class PaymentSagaHandler :
-    CoordinatedResponsiveSagaHandler<ProcessPaymentCommand, PaymentSucceededResponse, CreateOrderSagaData>
+    CoordinatedSagaHandler<ProcessPaymentCommand, CreateOrderSagaData>
 {
     public override async Task HandleAsync(ProcessPaymentCommand message)
     {

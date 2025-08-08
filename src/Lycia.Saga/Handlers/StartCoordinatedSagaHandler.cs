@@ -14,9 +14,9 @@ public abstract class StartCoordinatedSagaHandler<TMessage, TSagaData> :
     where TMessage : IMessage
     where TSagaData : SagaData
 {
-    protected ISagaContext<TMessage, TSagaData> Context { get; private set; } = null!;
+    protected ISagaContext<IMessage, TSagaData> Context { get; private set; } = null!;
 
-    public void Initialize(ISagaContext<TMessage, TSagaData> context)
+    public void Initialize(ISagaContext<IMessage, TSagaData> context)
     {
         Context = context;
     }

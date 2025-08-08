@@ -6,7 +6,7 @@ using Sample.Shared.SagaStates;
 namespace Sample.Order.Orchestration.Consumer.Sagas;
 
 public class ShippingSagaHandler :
-    CoordinatedResponsiveSagaHandler<ShipOrderCommand, OrderShippedResponse, CreateOrderSagaData>
+    CoordinatedSagaHandler<ShipOrderCommand, CreateOrderSagaData>
 {
     public override async Task HandleAsync(ShipOrderCommand message)
     {

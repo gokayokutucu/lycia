@@ -41,9 +41,9 @@ public interface ISagaContext<TInitialMessage, TSagaData> : ISagaContext<TInitia
 {
     TSagaData Data { get; }
 
-    new CoordinatedSagaStepFluent<TInitialMessage, TSagaData> PublishWithTracking<TNextStep>(TNextStep nextEvent)
+    new ICoordinatedSagaStepFluent PublishWithTracking<TNextStep>(TNextStep nextEvent)
         where TNextStep : IEvent;
 
-    new CoordinatedSagaStepFluent<TInitialMessage, TSagaData> SendWithTracking<TNextStep>(TNextStep nextCommand)
+    new ICoordinatedSagaStepFluent SendWithTracking<TNextStep>(TNextStep nextCommand)
         where TNextStep : ICommand;
 }

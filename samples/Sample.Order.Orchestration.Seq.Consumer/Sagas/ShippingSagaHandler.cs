@@ -3,7 +3,7 @@ using Sample.Shared.Messages.Events;
 using Sample.Shared.Messages.Responses;
 using Sample.Shared.SagaStates;
 
-namespace Sample.Order.Orchestration.Sequential.Consumer_.Sagas;
+namespace Sample.Order.Orchestration.Seq.Consumer.Sagas;
 
 public class ShippingSagaHandler : 
     CoordinatedSagaHandler<PaymentProcessedEvent, CreateOrderSagaData>
