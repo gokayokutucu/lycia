@@ -117,16 +117,6 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             autoDelete: false,
             arguments: null, cancellationToken: cancellationToken);
 
-         // Ensure sagaId is not null, use a new Guid if not provided
-        if (@event.SagaId is null)
-        {
-            @event.SagaId = sagaId;
-        }
-        else
-        {
-            sagaId = @event.SagaId;
-        }
-
         var headers = RabbitMqEventBusHelper.BuildMessageHeaders(@event, sagaId, typeof(TEvent), Constants.EventTypeHeader);
         var properties = new BasicProperties
         {
@@ -177,10 +167,6 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             Headers = headers
         };
         
-        if (command.SagaId is null || command.SagaId == Guid.Empty) 
-        {
-            command.SagaId = sagaId;
-        }
         var json = JsonHelper.SerializeSafe(command);
         var body = Encoding.UTF8.GetBytes(json);
 

@@ -37,6 +37,7 @@ public class SagaContext<TInitialMessage>(
     {
         var commandType = command.GetType();
         StepMessages[(commandType, command.MessageId)] = command;
+        command.SetSagaId(SagaId);
         return eventBus.Send(command, HandlerTypeOfCurrentStep, SagaId);
     }
 
@@ -44,6 +45,7 @@ public class SagaContext<TInitialMessage>(
     {
         var eventType = @event.GetType();
         StepMessages[(eventType, @event.MessageId)] = @event;
+        @event.SetSagaId(SagaId);
         return eventBus.Publish(@event, HandlerTypeOfCurrentStep, SagaId);
     }
 
@@ -51,6 +53,7 @@ public class SagaContext<TInitialMessage>(
     {
         var eventType = @event.GetType();
         StepMessages[(eventType, @event.MessageId)] = @event;
+        @event.SetSagaId(SagaId);
         return eventBus.Publish(@event, handlerType, SagaId);
     }
 
@@ -316,18 +319,21 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
     public Task Send<T>(T command) where T : ICommand
     {
         stepMessages[(typeof(T), command.MessageId)] = command;
+        command.SetSagaId(SagaId);
         return eventBus.Send(command, HandlerTypeOfCurrentStep, sagaId);
     }
 
     public Task Publish<T>(T @event) where T : IEvent
     {
         stepMessages[(typeof(T), @event.MessageId)] = @event;
+        @event.SetSagaId(SagaId);
         return eventBus.Publish(@event, HandlerTypeOfCurrentStep, sagaId);
     }
 
     public Task Publish<T>(T @event, Type? handlerType) where T : IEvent
     {
         stepMessages[(typeof(T), @event.MessageId)] = @event;
+        @event.SetSagaId(SagaId);
         return eventBus.Publish(@event, handlerType, SagaId);
     }
 
