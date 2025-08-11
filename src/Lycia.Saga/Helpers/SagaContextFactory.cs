@@ -14,7 +14,7 @@ public static class SagaContextFactory
     /// Creates the proper SagaContext instance (SagaContext&lt;T&gt; or SagaContext&lt;T, TSagaData&gt;)
     /// based on the handler's Initialize(...) parameter type. Then invokes Initialize(handler, context).
     /// </summary>
-    public static async Task<(MethodInfo initializeMethod, object contextInstance)> InitializeForHandlerAsync(
+    public static async Task InitializeForHandlerAsync(
         object handler,
         Guid sagaId,
         object currentMessage,
@@ -26,14 +26,15 @@ public static class SagaContextFactory
         if (handler is null) throw new ArgumentNullException(nameof(handler));
 
         var handlerType = handler.GetType();
-        var initializeMethod = handlerType.GetMethod("Initialize")
-                              ?? throw new InvalidOperationException($"Initialize method not found on {handlerType.Name}");
+        var initializeMethod = handlerType.GetMethod("Initialize");
+        
+        if(initializeMethod is null) return;
 
         // We rely on the exact Initialize(...) parameter type: ISagaContext<T> or ISagaContext<T,TSagaData>
-        var initParamType = initializeMethod.GetParameters().FirstOrDefault()?.ParameterType
+        var initParamType = initializeMethod?.GetParameters().FirstOrDefault()?.ParameterType
                             ?? throw new InvalidOperationException("Initialize parameter type not found.");
-
-        object contextInstance;
+        
+        object? contextInstance;
 
         if (initParamType.IsGenericType && initParamType.GetGenericTypeDefinition() == typeof(ISagaContext<,>))
         {
@@ -82,7 +83,5 @@ public static class SagaContextFactory
 
         // Actually call Initialize(handler, context)
         initializeMethod.Invoke(handler, [contextInstance]);
-
-        return (initializeMethod, contextInstance);
     }
 }
