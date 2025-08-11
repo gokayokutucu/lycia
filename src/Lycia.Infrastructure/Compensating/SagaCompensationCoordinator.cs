@@ -1,4 +1,3 @@
-using System.Reflection;
 using Lycia.Infrastructure.Extensions;
 using Lycia.Messaging;
 using Lycia.Messaging.Enums;
@@ -39,7 +38,8 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
             throw new InvalidOperationException("ISagaStore not resolved.");
 
         var stepKeyValuePair = await sagaStore.GetSagaHandlerStepAsync(sagaId, message.MessageId);
-        if (IsStepAlreadyInStatus(stepKeyValuePair, StepStatus.Failed, StepStatus.Compensated, StepStatus.CompensationFailed))
+        if (IsStepAlreadyInStatus(stepKeyValuePair, StepStatus.Failed, StepStatus.Compensated,
+                StepStatus.CompensationFailed))
             return;
 
         await sagaStore.LogStepAsync(sagaId, message.MessageId, message.ParentMessageId, failedStepType,
@@ -169,57 +169,20 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
         }
 
         // ---- CONTEXT INITIALIZATION ----
-        var (initializeMethod, contextInstance) = await InitializeSagaContext(sagaId, handlerTypeActual,
-            handlerGenericDef, handlerBaseType, sagaStore, messageObject, eventBus);
-
-        if (contextInstance != null && initializeMethod != null)
-            initializeMethod.Invoke(handler, [contextInstance]);
+        await SagaContextFactory.InitializeForHandlerAsync(
+            handler,
+            sagaId,
+            messageObject,
+            eventBus,
+            sagaStore,
+            sagaIdGenerator,
+            this
+        );
 
         // ---- INVOKE COMPENSATION ----
         // Invoke the compensation delegate asynchronously
         // This calls the appropriate compensation method on the handler
         await (Task)compensationDelegate.DynamicInvoke(handler, messageObject)!;
-    }
-
-    private async Task<(MethodInfo? initializeMethod, object? contextInstance)> InitializeSagaContext(Guid sagaId,
-        Type handlerTypeActual, Type? handlerGenericDef,
-        Type? handlerBaseType, ISagaStore sagaStore, object messageObject, IEventBus eventBus)
-    {
-        var initializeMethod = handlerTypeActual.GetMethod("Initialize");
-        object? contextInstance = null;
-        if (handlerGenericDef == typeof(CoordinatedSagaHandler<,>) || handlerGenericDef == typeof(StartCoordinatedSagaHandler<,>))
-        {
-            // [TMessage, TSagaData]
-            var genericArgs = handlerBaseType!.GetGenericArguments();
-            var msgType = genericArgs[0];
-            var sagaDataType = genericArgs[1];
-            var loadedSagaData = await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", sagaDataType, sagaId);
-            var contextType = typeof(SagaContext<,>).MakeGenericType(msgType, sagaDataType);
-            contextInstance = Activator.CreateInstance(contextType, sagaId, messageObject,
-                handlerTypeActual, loadedSagaData, eventBus, sagaStore, sagaIdGenerator, this);
-        }
-        else if (handlerGenericDef == typeof(CoordinatedResponsiveSagaHandler<,,>) || handlerGenericDef == typeof(StartCoordinatedResponsiveSagaHandler<,,>))
-        {
-            // [TMessage, TResponse, TSagaData]
-            var genericArgs = handlerBaseType!.GetGenericArguments();
-            var msgType = genericArgs[0];
-            var sagaDataType = genericArgs[2];
-            var loadedSagaData = await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", sagaDataType, sagaId);
-            var contextType = typeof(SagaContext<,>).MakeGenericType(msgType, sagaDataType);
-            contextInstance = Activator.CreateInstance(contextType, sagaId, messageObject,
-                handlerTypeActual, loadedSagaData, eventBus, sagaStore, sagaIdGenerator, this);
-        }
-        else if (handlerGenericDef == typeof(ReactiveSagaHandler<>) ||
-                 handlerGenericDef == typeof(StartReactiveSagaHandler<>))
-        {
-            var genericArgs = handlerBaseType!.GetGenericArguments();
-            var msgType = genericArgs[0];
-            var contextType = typeof(SagaContext<>).MakeGenericType(msgType);
-            contextInstance = Activator.CreateInstance(contextType, sagaId, messageObject,
-                handlerTypeActual, eventBus, sagaStore, sagaIdGenerator, this);
-        }
-
-        return (initializeMethod, contextInstance);
     }
 
     private object? FindCompensationHandler(Type? handlerType, Type stepType)
