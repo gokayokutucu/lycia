@@ -14,10 +14,10 @@ public interface ISagaContext<TInitialMessage>
     
     Task Publish<T>(T @event, Type? handlerType) where T : IEvent;
 
-    ReactiveSagaStepFluent<TInitialMessage> PublishWithTracking<TNextStep>(TNextStep nextEvent)
+    ISagaStepFluent PublishWithTracking<TNextStep>(TNextStep nextEvent)
         where TNextStep : IEvent;
 
-    ReactiveSagaStepFluent<TInitialMessage> SendWithTracking<TNextStep>(TNextStep nextCommand)
+    ISagaStepFluent SendWithTracking<TNextStep>(TNextStep nextCommand)
         where TNextStep : ICommand;
 
     Task Compensate<T>(T @event) where T : FailedEventBase;
@@ -41,9 +41,9 @@ public interface ISagaContext<TInitialMessage, TSagaData> : ISagaContext<TInitia
 {
     TSagaData Data { get; }
 
-    new ICoordinatedSagaStepFluent PublishWithTracking<TNextStep>(TNextStep nextEvent)
+    new ISagaStepFluent PublishWithTracking<TNextStep>(TNextStep nextEvent)
         where TNextStep : IEvent;
 
-    new ICoordinatedSagaStepFluent SendWithTracking<TNextStep>(TNextStep nextCommand)
+    new ISagaStepFluent SendWithTracking<TNextStep>(TNextStep nextCommand)
         where TNextStep : ICommand;
 }
