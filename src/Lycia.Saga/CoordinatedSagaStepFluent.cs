@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Lycia.Messaging;
 using Lycia.Saga.Abstractions;
 
@@ -7,7 +6,7 @@ namespace Lycia.Saga;
 // TInitialMessage is the type of message that the ISagaContext is primarily associated with.
 public class ReactiveSagaStepFluent<TInitialMessage>(
     ISagaContext<TInitialMessage> context,
-    Func<Task> operation)
+    Func<Task> operation) : ISagaStepFluent
     where TInitialMessage : IMessage
 {
     public static object Create(Type stepType, object context, Func<Task> operation)
@@ -42,17 +41,9 @@ public class ReactiveSagaStepFluent<TInitialMessage>(
     }
 }
 
-public interface ICoordinatedSagaStepFluent
-{
-    Task ThenMarkAsComplete();
-    Task ThenMarkAsFailed(FailResponse fail);
-    Task ThenMarkAsCompensated();
-    Task ThenMarkAsCompensationFailed();
-}
-
 public class CoordinatedSagaStepFluent<TInitialMessage, TSagaData>(
     ISagaContext<TInitialMessage, TSagaData> context,
-    Func<Task> operation) : ICoordinatedSagaStepFluent
+    Func<Task> operation) : ISagaStepFluent
     where TInitialMessage : IMessage
     where TSagaData : SagaData
 {
