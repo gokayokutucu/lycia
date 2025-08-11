@@ -34,7 +34,7 @@ public class SagaDispatcher(
     public async Task DispatchAsync<TMessage>(TMessage message, Type? handlerType, Guid? sagaId,
         CancellationToken cancellationToken) where TMessage : IMessage
     {
-        await DispatchByMessageTypeAsync(message, handlerType, sagaId, cancellationToken);
+             await DispatchByMessageTypeAsync(message, handlerType, sagaId, cancellationToken);
     }
 
     public async Task DispatchAsync<TMessage, TResponse>(TResponse message, Type? handlerType, Guid? sagaId,
@@ -113,105 +113,20 @@ public class SagaDispatcher(
             // Not a start handler and SagaId missing: throw!
             throw new InvalidOperationException("Missing SagaId on a non-starting message.");
         }
-
-        // Coordinated (with SagaData and Responsive)
-        if (handlerType.IsSubclassOfRawGenericBase(typeof(CoordinatedSagaHandler<,>)) ||
-            handlerType.IsSubclassOfRawGenericBase(typeof(CoordinatedResponsiveSagaHandler<,,>)) ||
-            handlerType.IsSubclassOfRawGenericBase(typeof(StartCoordinatedResponsiveSagaHandler<,,>)) ||
-            handlerType.IsSubclassOfRawGenericBase(typeof(StartCoordinatedSagaHandler<,>)))
-        {
-            // Retrieve correct generic arguments 
-            var genericBase = handlerType;
-            while (genericBase is { IsGenericType: false })
-                genericBase = genericBase.BaseType;
-
-            if (genericBase == null)
-                throw new InvalidOperationException("No generic base found for saga handler.");
-
-            var initializeMethod = handlerType.GetMethod("Initialize")
-                                   ?? throw new InvalidOperationException(
-                                       $"Initialize method not found on {handlerType.Name}");
-            var initParam = initializeMethod.GetParameters().FirstOrDefault()?.ParameterType
-                            ?? throw new InvalidOperationException("Initialize parameter type not found.");
-
-
-            // Use the exact generic args expected by Initialize, e.g. ISagaContext<IMessage, TSagaData>
-            var initArgs = initParam.GetGenericArguments();
-            var initMsgArg = initArgs[0];
-            var initDataArg = initArgs[1];
-
-            var contextType = typeof(SagaContext<,>).MakeGenericType(initMsgArg, initDataArg);
-            var loadedSagaData =
-                await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", initDataArg, sagaId!);
-            var contextInstance = Activator.CreateInstance(
-                contextType,
-                sagaId,
-                message,
-                handlerType,
-                loadedSagaData,
-                eventBus,
-                sagaStore,
-                sagaIdGenerator,
-                compensationCoordinator);
-
-            initializeMethod.Invoke(handler, [contextInstance!]);
-
-            await HandleSagaAsync(message, handler, handlerType);
-            return;
-        }
-
-        // Reactive (no SagaData)
-        if (handlerType.IsSubclassOfRawGenericBase(typeof(ReactiveSagaHandler<>)) ||
-            handlerType.IsSubclassOfRawGenericBase(typeof(StartReactiveSagaHandler<>)))
-        {
-            var initializeMethod = handlerType.GetMethod("Initialize")
-                                   ?? throw new InvalidOperationException(
-                                       $"Initialize method not found on {handlerType.Name}");
-            var initParam = initializeMethod.GetParameters().FirstOrDefault()?.ParameterType
-                            ?? throw new InvalidOperationException("Initialize parameter type not found.");
-            object? contextInstance;
-
-            if (initParam.IsGenericType && initParam.GetGenericTypeDefinition() == typeof(ISagaContext<>))
-            {
-                var initMsgArg = initParam.GetGenericArguments()[0];
-                var contextType = typeof(SagaContext<>).MakeGenericType(initMsgArg);
-                contextInstance = Activator.CreateInstance(
-                    contextType,
-                    sagaId,
-                    message,
-                    handlerType,
-                    eventBus,
-                    sagaStore,
-                    sagaIdGenerator,
-                    compensationCoordinator);
-            }
-            else if (initParam.IsGenericType && initParam.GetGenericTypeDefinition() == typeof(ISagaContext<,>))
-            {
-                // Unexpected for reactive, but handle defensively
-                var initArgs = initParam.GetGenericArguments();
-                var contextType = typeof(SagaContext<,>).MakeGenericType(initArgs[0], initArgs[1]);
-                var loadedSagaData =
-                    await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", initArgs[1], sagaId!);
-                contextInstance = Activator.CreateInstance(
-                    contextType,
-                    sagaId,
-                    message,
-                    handlerType,
-                    loadedSagaData,
-                    eventBus,
-                    sagaStore,
-                    sagaIdGenerator,
-                    compensationCoordinator);
-            }
-            else
-            {
-                throw new InvalidOperationException($"Unsupported Initialize parameter type: {initParam}");
-            }
-
-            initializeMethod.Invoke(handler, new[] { contextInstance! });
-
-            await HandleSagaAsync(message, handler, handlerType);
-        }
+        
+        if (!IsSupportedSagaHandler(handlerType)) return;
+        
+        await SagaContextFactory.InitializeForHandlerAsync(
+            handler,
+            sagaId!.Value,
+            message,
+            eventBus,
+            sagaStore,
+            sagaIdGenerator,
+            compensationCoordinator
+        );
+        
+        await HandleSagaAsync(message, handler, handlerType);
     }
 
     private async Task HandleSagaAsync(IMessage message, object? handler, Type handlerType)
@@ -268,6 +183,14 @@ public class SagaDispatcher(
             // throw new InvalidOperationException($"Step {stepTypeToCheck.Name} was not marked as completed/failed/compensated.");
         }
     }
+    
+    private static bool IsSupportedSagaHandler(Type t) =>
+        t.IsSubclassOfRawGenericBase(typeof(CoordinatedSagaHandler<,>)) ||
+        t.IsSubclassOfRawGenericBase(typeof(CoordinatedResponsiveSagaHandler<,,>)) ||
+        t.IsSubclassOfRawGenericBase(typeof(StartCoordinatedResponsiveSagaHandler<,,>)) ||
+        t.IsSubclassOfRawGenericBase(typeof(StartCoordinatedSagaHandler<,>)) ||
+        t.IsSubclassOfRawGenericBase(typeof(ReactiveSagaHandler<>)) ||
+        t.IsSubclassOfRawGenericBase(typeof(StartReactiveSagaHandler<>));
 
     private static bool IsSuccessResponse(Type type) =>
         type.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ISuccessResponse<>));
