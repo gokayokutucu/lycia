@@ -196,37 +196,90 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
         if (!startParentMessageId.HasValue || startParentMessageId.Value == Guid.Empty)
             return null;
 
-        // Build index once
-        var byMsgId = stepsSnapshot
-            .ToDictionary(
-                kvp => Guid.Parse(kvp.Key.messageId),
-                kvp => kvp);
+        var byMsgId = BuildByMessageIdIndex(stepsSnapshot);
 
         var currentId = startParentMessageId.Value;
-        for (int hop = 0; hop < Math.Max(1, maxHops); hop++)
+        var hopLimit = Math.Max(1, maxHops);
+
+        for (var hop = 0; hop < hopLimit; hop++)
         {
-            if (!byMsgId.TryGetValue(currentId, out var kv))
+            if (!TryGetEntry(byMsgId, currentId, out var kv))
                 return null;
 
-            var stepType = Type.GetType(kv.Key.stepType);
-            var handlerType = Type.GetType(kv.Key.handlerType);
-            
-            var handledByOrchestrator = IsOrchestratorHandler(handlerType);
-
-            // If not a response OR not handled by orchestrator => this is the logical parent
-            if (!stepType.IsSubclassOfResponseBase() || !handledByOrchestrator)
+            if (!ShouldSkipOrchestratorHop(kv, out var nextId) || !nextId.HasValue || nextId.Value == Guid.Empty)
                 return kv;
 
-            // Otherwise jump to parent above (grand parent)
-            var next = kv.Value.ParentMessageId;
-            if (!next.HasValue || next.Value == Guid.Empty)
-                return kv; // no parent above; return current
-
-            currentId = next.Value;
+            currentId = nextId.Value;
         }
 
-        // Hop limit reached; return last accessed (defensive)
-        return byMsgId.TryGetValue(currentId, out var last) ? last : (KeyValuePair<(string,string,string), SagaStepMetadata>?)null;
+        return TryGetEntry(byMsgId, currentId, out var last) ? last : (KeyValuePair<(string, string, string), SagaStepMetadata>?)null;
+    }
+
+    /// <summary>
+    /// Builds a duplicate-safe index keyed by MessageId. If multiple entries share the same messageId
+    /// (e.g., the same message handled by different handlers), prefers the one with the latest RecordedAt.
+    /// </summary>
+    private static Dictionary<Guid, KeyValuePair<(string stepType, string handlerType, string messageId), SagaStepMetadata>>
+        BuildByMessageIdIndex(IReadOnlyDictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata> stepsSnapshot)
+    {
+        var byMsgId = new Dictionary<Guid, KeyValuePair<(string stepType, string handlerType, string messageId), SagaStepMetadata>>();
+
+        foreach (var kvp in stepsSnapshot)
+        {
+            if (!Guid.TryParse(kvp.Key.messageId, out var mid))
+                continue; // ignore malformed ids defensively
+
+            if (byMsgId.TryGetValue(mid, out var existing))
+            {
+                var existingTs = existing.Value.RecordedAt;
+                var currentTs  = kvp.Value.RecordedAt;
+                if (currentTs >= existingTs)
+                    byMsgId[mid] = kvp; // prefer newer
+            }
+            else
+            {
+                byMsgId[mid] = kvp;
+            }
+        }
+
+        return byMsgId;
+    }
+
+    /// <summary>
+    /// Tries to get a step entry from the index by message id.
+    /// </summary>
+    private static bool TryGetEntry(
+        Dictionary<Guid, KeyValuePair<(string stepType, string handlerType, string messageId), SagaStepMetadata>> index,
+        Guid messageId,
+        out KeyValuePair<(string stepType, string handlerType, string messageId), SagaStepMetadata> entry)
+    {
+        return index.TryGetValue(messageId, out entry);
+    }
+
+    /// <summary>
+    /// Determines whether the current entry represents an orchestrator response hop that should be skipped.
+    /// If so, returns the next (grandparent) message id via <paramref name="nextParentId"/>.
+    /// </summary>
+    private static bool ShouldSkipOrchestratorHop(
+        KeyValuePair<(string stepType, string handlerType, string messageId), SagaStepMetadata> entry,
+        out Guid? nextParentId)
+    {
+        nextParentId = null;
+
+        var stepType = Type.GetType(entry.Key.stepType);
+        var handlerType = Type.GetType(entry.Key.handlerType);
+
+        // If the type cannot be resolved, do not skip; treat current as the logical parent.
+        if (stepType == null || handlerType == null)
+            return false;
+
+        var handledByOrchestrator = IsOrchestratorHandler(handlerType);
+        var isResponse = stepType.IsSubclassOfResponseBase();
+
+        if (!handledByOrchestrator || !isResponse) return false;
+        nextParentId = entry.Value.ParentMessageId;
+        return true;
+
     }
 
     private object? FindCompensationHandler(Type? handlerType, Type stepType)
