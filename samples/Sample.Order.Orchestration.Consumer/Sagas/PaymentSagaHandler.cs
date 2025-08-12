@@ -12,7 +12,7 @@ public class PaymentSagaHandler :
     public override async Task HandleAsync(ProcessPaymentCommand message)
     {
         // Simulate payment process
-        var paymentSucceeded = PaymentService.SimulatePayment();
+        var paymentSucceeded = PaymentService.SimulatePayment(false);
 
         if (!paymentSucceeded)
         {

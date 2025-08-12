@@ -34,11 +34,11 @@ public class CreateOrderSagaHandler :
         });
         await Context.MarkAsComplete<OrderCreatedResponse>();
     }
-    
+
     public override Task HandleFailResponseAsync(OrderCreatedResponse response, FailResponse fail)
     {
         // Order could not be created, mark the saga as failed, log, or start compensation
-        return Context.MarkAsFailed<CreateOrderCommand>();
+        return Task.CompletedTask;
     }
 
     public async Task HandleSuccessResponseAsync(InventoryReservedResponse response)
@@ -51,11 +51,11 @@ public class CreateOrderSagaHandler :
         });
         await Context.MarkAsComplete<InventoryReservedResponse>();
     }
-    
+
     public Task HandleFailResponseAsync(InventoryReservedResponse response, FailResponse fail)
     {
         // Inventory reservation failed, cancel the order or log
-        return Context.MarkAsFailed<ReserveInventoryCommand>();
+        return Task.CompletedTask;
     }
 
     public async Task HandleSuccessResponseAsync(PaymentSucceededResponse response)
@@ -68,7 +68,7 @@ public class CreateOrderSagaHandler :
         });
         await Context.MarkAsComplete<PaymentSucceededResponse>();
     }
-    
+
     public Task HandleFailResponseAsync(PaymentSucceededResponse response, FailResponse fail)
     {
         /* Payment failed, revert reservation, or cancel the order */
@@ -81,7 +81,7 @@ public class CreateOrderSagaHandler :
         }
 
         // Trigger compensation chains for payment(Call the InventorySagaHandler CompensateAsync method)
-        return Context.MarkAsFailed<ReserveInventoryCommand>();
+        return Task.CompletedTask;
     }
 
     public async Task HandleSuccessResponseAsync(OrderShippedResponse response)
@@ -96,6 +96,6 @@ public class CreateOrderSagaHandler :
     public Task HandleFailResponseAsync(OrderShippedResponse response, FailResponse fail)
     {
         // Shipping failed, notify the customer or start compensation
-        return Context.MarkAsFailed<ShipOrderCommand>();
+        return Task.CompletedTask;
     }
 }
