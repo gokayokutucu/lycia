@@ -221,8 +221,11 @@ public class RedisSagaStore(
                 var (stepTypeName, _, _) = SagaStoreLogicHelper.ParseStepKey(key);
                 if (stepTypeName != stepType.GetSimplifiedQualifiedName()) continue;
                 
-                var messageObject = JsonConvert.DeserializeObject(entry.Value!, stepType);
-                return messageObject as IMessage;
+                var meta = JsonConvert.DeserializeObject<SagaStepMetadata>(entry.Value!)!;
+                var payloadType = Type.GetType(meta.MessageTypeName);
+                if (payloadType == null) continue;
+
+                if (JsonConvert.DeserializeObject(meta.MessagePayload, payloadType) is IMessage messageObject) return messageObject;
             }
             catch
             {
@@ -243,15 +246,14 @@ public class RedisSagaStore(
             try
             {
                 var key = (string)entry.Name!;
-                var (stepTypeName, _, msgId) = SagaStoreLogicHelper.ParseStepKey(key);
-                if (msgId == messageId.ToString())
-                {
-                    var type = Type.GetType(stepTypeName);
-                    if (type == null)
-                        continue;
-                    var messageObject = JsonConvert.DeserializeObject(entry.Value!, type);
-                    return messageObject as IMessage;
-                }
+                var (_, _, msgId) = SagaStoreLogicHelper.ParseStepKey(key);
+                if (msgId != messageId.ToString()) continue;
+                
+                var meta = JsonConvert.DeserializeObject<SagaStepMetadata>(entry.Value!)!;
+                var payloadType = Type.GetType(meta.MessageTypeName);
+                if (payloadType == null) continue;
+
+                return JsonConvert.DeserializeObject(meta.MessagePayload, payloadType) as IMessage;
             }
             catch
             {
