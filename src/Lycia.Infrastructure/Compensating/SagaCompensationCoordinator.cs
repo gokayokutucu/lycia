@@ -1,4 +1,5 @@
 using Lycia.Infrastructure.Extensions;
+using Lycia.Infrastructure.Helpers;
 using Lycia.Messaging;
 using Lycia.Messaging.Enums;
 using Lycia.Saga.Abstractions;
@@ -85,23 +86,23 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
         // Log the step as failed before compensating
         await sagaStore.LogStepAsync(sagaId, message.MessageId, message.ParentMessageId, stepType,
             StepStatus.Compensated, handlerType, message, (Exception?)null);
-
-        stepKeyValuePair = await sagaStore.GetSagaHandlerStepAsync(sagaId, message.MessageId);
-        if (!stepKeyValuePair.HasValue) return;
+        
+        var steps = await sagaStore.GetSagaHandlerStepsAsync(sagaId);
+        
+        if (steps.All(kv => kv.Key.messageId != message.MessageId.ToString()))
+            return;
 
         // Get the parent message ID from the current message
         var parentMessageId = message.ParentMessageId;
         if (parentMessageId == Guid.Empty)
             return;
 
-        // Find the parent step in the saga steps(with MessageId)
-        var parentStepKeyValuePair = await sagaStore.GetSagaHandlerStepAsync(sagaId, message.ParentMessageId);
+        // Find the logical parent (may skip central orchestrator response hop)
+        var parentKvp = FindLogicalParentFromSnapshot(steps, parentMessageId);
+        if (!parentKvp.HasValue) return;
 
-        if (!parentStepKeyValuePair.HasValue) return;
-
-        var parentStep = parentStepKeyValuePair.Value;
-
-        var parentStepType = Type.GetType(parentStep.Key.stepType);
+        var parentStep = parentKvp.Value;
+        var parentStepType = Type.GetType(parentKvp.Value.Key.stepType);
         if (parentStepType == null)
             return;
 
@@ -185,6 +186,49 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
         await (Task)compensationDelegate.DynamicInvoke(handler, messageObject)!;
     }
 
+    // Optional: future-proof bounded climb
+    private static KeyValuePair<(string stepType, string handlerType, string messageId), SagaStepMetadata>?
+        FindLogicalParentFromSnapshot(
+            IReadOnlyDictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata> stepsSnapshot,
+            Guid? startParentMessageId,
+            int maxHops = 1) // 1 is sufficient for today; supports >1 for future use
+    {
+        if (!startParentMessageId.HasValue || startParentMessageId.Value == Guid.Empty)
+            return null;
+
+        // Build index once
+        var byMsgId = stepsSnapshot
+            .ToDictionary(
+                kvp => Guid.Parse(kvp.Key.messageId),
+                kvp => kvp);
+
+        var currentId = startParentMessageId.Value;
+        for (int hop = 0; hop < Math.Max(1, maxHops); hop++)
+        {
+            if (!byMsgId.TryGetValue(currentId, out var kv))
+                return null;
+
+            var stepType = Type.GetType(kv.Key.stepType);
+            var handlerType = Type.GetType(kv.Key.handlerType);
+            
+            var handledByOrchestrator = IsOrchestratorHandler(handlerType);
+
+            // If not a response OR not handled by orchestrator => this is the logical parent
+            if (!stepType.IsSubclassOfResponseBase() || !handledByOrchestrator)
+                return kv;
+
+            // Otherwise jump to parent above (grand parent)
+            var next = kv.Value.ParentMessageId;
+            if (!next.HasValue || next.Value == Guid.Empty)
+                return kv; // no parent above; return current
+
+            currentId = next.Value;
+        }
+
+        // Hop limit reached; return last accessed (defensive)
+        return byMsgId.TryGetValue(currentId, out var last) ? last : (KeyValuePair<(string,string,string), SagaStepMetadata>?)null;
+    }
+
     private object? FindCompensationHandler(Type? handlerType, Type stepType)
     {
         if (handlerType == null) return null;
@@ -209,4 +253,10 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
     {
         return stepKeyValuePair.HasValue && statuses.Contains(stepKeyValuePair.Value.Value.Status);
     }
+    
+    private static bool IsOrchestratorHandler(Type? t)
+        => t != null && (
+            t.IsSubclassOfRawGenericBase(typeof(StartCoordinatedResponsiveSagaHandler<,,>)) ||
+            t.IsSubclassOfRawGenericBase(typeof(StartCoordinatedSagaHandler<,>))
+        );
 }
