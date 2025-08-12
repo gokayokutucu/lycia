@@ -21,6 +21,6 @@ public class InventorySagaHandler :
     public override Task CompensateAsync(ReserveInventoryCommand message)
     {
         Context.Data.InventoryCompensated = true;
-        return Task.CompletedTask;
+        return Context.CompensateAndBubbleUp<ReserveInventoryCommand>();
     }
 }
