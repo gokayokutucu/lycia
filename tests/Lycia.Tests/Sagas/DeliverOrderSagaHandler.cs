@@ -6,12 +6,13 @@ namespace Lycia.Tests.Sagas;
 
 public class DeliverOrderSagaHandler : CoordinatedSagaHandler<OrderShippedEvent, CreateOrderSagaData>
 {
-    public override async Task HandleAsync(OrderShippedEvent command)
+    public override async Task HandleAsync(OrderShippedEvent command, CancellationToken cancellationToken = default)
     {
         // Simulate delivery logic
         await Context.PublishWithTracking(new OrderDeliveredEvent
         {
             OrderId = command.OrderId
-        }).ThenMarkAsComplete();
+        }, cancellationToken)
+            .ThenMarkAsComplete(cancellationToken);
     }
 }

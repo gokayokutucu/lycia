@@ -600,13 +600,13 @@ public class SagaDispatcherTests
     {
         public static bool CompensateCalled = false;
 
-        public override async Task HandleStartAsync(InitialCommand message)
+        public override async Task HandleStartAsync(InitialCommand message, CancellationToken cancellationToken = default)
         {
             var next = new ParentEvent { ParentMessageId = message.MessageId };
-            await Context.PublishWithTracking(next).ThenMarkAsComplete();
+            await Context.PublishWithTracking(next).ThenMarkAsComplete(cancellationToken);
         }
 
-        public override Task CompensateStartAsync(InitialCommand message)
+        public override Task CompensateStartAsync(InitialCommand message, CancellationToken cancellationToken = default)
         {
             CompensateCalled = true;
             return Task.CompletedTask;
@@ -617,13 +617,13 @@ public class SagaDispatcherTests
     {
         public static bool CompensateCalled = false;
 
-        public override Task HandleAsync(ParentEvent message)
+        public override Task HandleAsync(ParentEvent message, CancellationToken cancellationToken = default)
         {
             var fail = new FailingEvent { ParentMessageId = message.MessageId };
-            return Context.PublishWithTracking(fail).ThenMarkAsComplete();
+            return Context.PublishWithTracking(fail).ThenMarkAsComplete(cancellationToken);
         }
 
-        public override Task CompensateAsync(ParentEvent message)
+        public override Task CompensateAsync(ParentEvent message, CancellationToken cancellationToken = default)
         {
             CompensateCalled = true;
             return Task.CompletedTask;
@@ -634,18 +634,18 @@ public class SagaDispatcherTests
     {
         public static bool CompensateCalled = false;
 
-        public override Task HandleAsync(FailingEvent message)
+        public override Task HandleAsync(FailingEvent message, CancellationToken cancellationToken = default)
         {
             CompensateCalled = true;
             // Simulate a failure in the handler
             // Uncomment the next line to simulate a failure and trigger compensation
             // throw new Exception("Simulated failure in FailingCompensationSagaHandler");
-            Context.MarkAsComplete<FailingEvent>();
+            Context.MarkAsComplete<FailingEvent>(cancellationToken);
             return Task.CompletedTask;
         }
             //=> throw new InvalidOperationException("Fail!");
 
-        public override Task CompensateAsync(FailingEvent message)
+        public override Task CompensateAsync(FailingEvent message, CancellationToken cancellationToken = default)
         {
             CompensateCalled = true;
             throw new Exception("Compensation failed");

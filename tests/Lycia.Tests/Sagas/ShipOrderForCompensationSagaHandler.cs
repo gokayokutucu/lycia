@@ -12,7 +12,7 @@ public class ShipOrderForCompensationSagaHandler :
     /// </summary>
     public bool CompensateCalled { get; set; }
 
-    public override async Task HandleAsync(OrderCreatedEvent @event)
+    public override async Task HandleAsync(OrderCreatedEvent @event, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -33,16 +33,16 @@ public class ShipOrderForCompensationSagaHandler :
             
             //@event.TotalPrice = stockAvailable ? @event.TotalPrice : 0;
 
-            await Context.MarkAsFailed<OrderCreatedEvent>();
+            await Context.MarkAsFailed<OrderCreatedEvent>(cancellationToken);
         }
         catch (Exception ex)
         {
             Console.WriteLine($"🚨 Shipping failed: {ex.Message}");
-            await Context.MarkAsFailed<OrderCreatedEvent>();
+            await Context.MarkAsFailed<OrderCreatedEvent>(cancellationToken);
         }
     }
 
-    public override async Task CompensateAsync(OrderCreatedEvent message)
+    public override async Task CompensateAsync(OrderCreatedEvent message, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -52,16 +52,16 @@ public class ShipOrderForCompensationSagaHandler :
                 throw new InvalidOperationException("Total price must be greater than zero for compensation.");
             }
             
-            await Context.CompensateAndBubbleUp<OrderCreatedEvent>();
+            await Context.CompensateAndBubbleUp<OrderCreatedEvent>(cancellationToken);
         }
         catch (Exception ex)
         {
             // Log, notify, halt chain, etc.
             Console.WriteLine($"❌ Compensation failed: {ex.Message}");
 
-            await Context.MarkAsCompensationFailed<OrderCreatedEvent>();
+            await Context.MarkAsCompensationFailed<OrderCreatedEvent>(cancellationToken);
             // Optionally: rethrow or store for manual retry
-            //throw; // Or suppress and log for retry system
+            //throw; // Or suppress and log for the retry system
         }
     }
 }

@@ -19,63 +19,71 @@ public abstract class StartCoordinatedResponsiveSagaHandler<TMessage, TResponse,
         Context = context;
     }
 
-    public abstract Task HandleStartAsync(TMessage message);
+    public abstract Task HandleStartAsync(TMessage message, CancellationToken cancellationToken = default);
 
-    protected async Task HandleAsyncInternal(TMessage message)
+    protected async Task HandleAsyncInternal(TMessage message, CancellationToken cancellationToken = default)
     {
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
-            await HandleStartAsync(message); // Actual business logic
+            await HandleStartAsync(message, cancellationToken); // Actual business logic
         }
         catch (Exception)
         {
-            await Context.MarkAsFailed<TMessage>();
+            await Context.MarkAsFailed<TMessage>(cancellationToken);
         }
     }
 
-    protected async Task CompensateAsyncInternal(TMessage message)
+    protected async Task CompensateAsyncInternal(TMessage message, CancellationToken cancellationToken = default)
     {
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
-            await CompensateStartAsync(message); // Actual business logic
+            await CompensateStartAsync(message, cancellationToken); // Actual business logic
 
             // After custom compensation logic, invoke the fail handler for the failed step if needed
-            await InvokeFailedStepHandlerAsync(this, Context.Data, Context.SagaStore);
+            await InvokeFailedStepHandlerAsync(this, Context.Data, Context.SagaStore, cancellationToken);
         }
         catch (Exception)
         {
-            await Context.MarkAsCompensationFailed<TMessage>();
+            await Context.MarkAsCompensationFailed<TMessage>(cancellationToken);
         }
     }
 
-    public virtual Task CompensateStartAsync(TMessage message)
+    public virtual Task CompensateStartAsync(TMessage message, CancellationToken cancellationToken = default)
     {
         return Task.CompletedTask;
     }
 
-    public virtual Task HandleSuccessResponseAsync(TResponse response)
+    public virtual Task HandleSuccessResponseAsync(TResponse response, CancellationToken cancellationToken = default)
     {
         return Task.CompletedTask;
     }
 
-    public virtual Task HandleFailResponseAsync(TResponse response, FailResponse fail)
+    public virtual Task HandleFailResponseAsync(TResponse response, FailResponse fail, CancellationToken cancellationToken = default)
     {
         return Task.CompletedTask;
     }
+    
+    protected Task MarkAsComplete(CancellationToken cancellationToken = default) => Context.MarkAsComplete<TMessage>(cancellationToken);
+    protected Task MarkAsFailed(CancellationToken cancellationToken = default) => Context.MarkAsFailed<TMessage>(cancellationToken);
+    protected Task MarkAsCompensationFailed(CancellationToken cancellationToken = default) => Context.MarkAsCompensationFailed<TMessage>(cancellationToken);
+    protected Task<bool> IsAlreadyCompleted(CancellationToken cancellationToken = default) => Context.IsAlreadyCompleted<TMessage>(cancellationToken);
 
     /// <summary>
-    /// Finds and invokes the HandleFailResponseAsync method for the failed response type on the provided handler.
+    /// Handles the invocation of a failure handler for a specific failed step within a saga process.
     /// </summary>
-    /// <param name="handlerInstance">The saga handler instance.</param>
-    /// <param name="sagaData">The saga data containing failed step information.</param>
-    /// <param name="sagaStore">The saga store for loading the response instance.</param>
-    /// <returns>Awaitable task.</returns>
+    /// <param name="handlerInstance">The instance of the handler managing the saga.</param>
+    /// <param name="sagaData">The shared saga data containing details of the current state and failed step.</param>
+    /// <param name="sagaStore">The saga store used to manage persistence of saga state.</param>
+    /// <param name="cancellationToken">The cancellation token to observe during asynchronous operations, if provided.</param>
+    /// <returns>A task that represents the asynchronous operation.</returns>
+    /// <exception cref="InvalidOperationException">Thrown if there are issues identifying or invoking the failure handler for the failed step.</exception>
     private static async Task InvokeFailedStepHandlerAsync(
         object handlerInstance,
         SagaData sagaData,
-        ISagaStore sagaStore)
+        ISagaStore sagaStore,
+        CancellationToken cancellationToken = default)
     {
         // Determine which command type failed (e.g., ProcessPaymentCommand)
         var failedStepType = sagaData.FailedStepType;
@@ -105,15 +113,18 @@ public abstract class StartCoordinatedResponsiveSagaHandler<TMessage, TResponse,
 
             // Try to get the public handler first
             var method =
-                handlerType.GetMethod("HandleFailResponseAsync", [responseType, typeof(FailResponse)])
-                ?? TryToFindExplicitFailResponseHandler(handlerType, iface, responseType);
+                handlerType.GetMethod("HandleFailResponseAsync", [responseType, typeof(FailResponse), typeof(CancellationToken)
+                ])
+                ?? handlerType.GetMethod("HandleFailResponseAsync", [responseType, typeof(FailResponse)])
+                ?? TryToFindExplicitFailResponseHandler(handlerType, iface, responseType, expectCancellationToken: true)
+                ?? TryToFindExplicitFailResponseHandler(handlerType, iface, responseType, expectCancellationToken: false);
 
             if (method == null)
                 continue;
 
             // Try to load the real response from the store; if not present, synthesize one
-            var responseInstance = await sagaStore.LoadSagaStepMessageAsync(sagaData.SagaId, responseType)
-                                   ?? await CreateSyntheticResponseAsync(sagaStore, sagaData.SagaId, failedStepType, responseType);
+            var responseInstance = await sagaStore.LoadSagaStepMessageAsync(sagaData.SagaId, responseType, cancellationToken)
+                                   ?? await CreateSyntheticResponseAsync(sagaStore, sagaData.SagaId, failedStepType, responseType, cancellationToken);
             if (responseInstance is null)
                 continue;
 
@@ -123,8 +134,12 @@ public abstract class StartCoordinatedResponsiveSagaHandler<TMessage, TResponse,
                 OccurredAt = sagaData.FailedAt ?? DateTime.UtcNow
             };
 
-            // Invoke and await the Task result safely
-            var taskObj = method.Invoke(handlerInstance, [responseInstance, (object)fail]);
+            var pars = method.GetParameters();
+            object?[] args = pars.Length == 3
+                ? [responseInstance, fail, cancellationToken]
+                : [responseInstance, fail];
+
+            var taskObj = method.Invoke(handlerInstance, args);
             if (taskObj is Task task)
                 await task;
             else
@@ -134,10 +149,10 @@ public abstract class StartCoordinatedResponsiveSagaHandler<TMessage, TResponse,
         }
     }
 
-    private static async Task<object?> CreateSyntheticResponseAsync(ISagaStore sagaStore, Guid sagaId, Type failedCommandType, Type responseType)
+    private static async Task<object?> CreateSyntheticResponseAsync(ISagaStore sagaStore, Guid sagaId, Type failedCommandType, Type responseType, CancellationToken cancellationToken = default)
     {
         // If the failed command instance exists, use it to populate a minimal response
-        var failedCommand = await sagaStore.LoadSagaStepMessageAsync(sagaId, failedCommandType);
+        var failedCommand = await sagaStore.LoadSagaStepMessageAsync(sagaId, failedCommandType, cancellationToken);
         var resp = Activator.CreateInstance(responseType);
         if (resp is null)
             return null;
@@ -182,21 +197,35 @@ public abstract class StartCoordinatedResponsiveSagaHandler<TMessage, TResponse,
         try { p.SetValue(obj, value); } catch { /* ignore best-effort */ }
     }
 
-    private static MethodInfo? TryToFindExplicitFailResponseHandler(Type handlerType, Type iface, Type responseType)
+    private static MethodInfo? TryToFindExplicitFailResponseHandler(Type handlerType, Type iface, Type responseType, bool expectCancellationToken)
     {
         // Look for an explicit interface implementation of IResponseSagaHandler<T>.HandleFailResponseAsync
         var map = handlerType.GetInterfaceMap(iface);
-        for (int i = 0; i < map.InterfaceMethods.Length; i++)
+        for (var i = 0; i < map.InterfaceMethods.Length; i++)
         {
             var im = map.InterfaceMethods[i];
             if (!im.Name.EndsWith(".HandleFailResponseAsync", StringComparison.Ordinal)) continue;
             var tm = map.TargetMethods[i];
             var pars = tm.GetParameters();
-            if (pars.Length == 2 &&
-                pars[0].ParameterType.IsAssignableFrom(responseType) &&
-                pars[1].ParameterType == typeof(FailResponse))
+
+            if (expectCancellationToken)
             {
-                return tm;
+                if (pars.Length == 3 &&
+                    pars[0].ParameterType.IsAssignableFrom(responseType) &&
+                    pars[1].ParameterType == typeof(FailResponse) &&
+                    pars[2].ParameterType == typeof(CancellationToken))
+                {
+                    return tm;
+                }
+            }
+            else
+            {
+                if (pars.Length == 2 &&
+                    pars[0].ParameterType.IsAssignableFrom(responseType) &&
+                    pars[1].ParameterType == typeof(FailResponse))
+                {
+                    return tm;
+                }
             }
         }
 
