@@ -7,7 +7,7 @@ namespace Sample.Order.Orchestration.Seq.Consumer.Sagas;
 public class InventorySagaHandler : 
     CoordinatedSagaHandler<ReserveInventoryCommand, CreateOrderSagaData>
 {
-    public override async Task HandleAsync(ReserveInventoryCommand message)
+    public override async Task HandleAsync(ReserveInventoryCommand message, CancellationToken cancellationToken = default)
     {
         // Simulate inventory reservation
         var inventoryReserved = true; // Simulate logic
@@ -15,7 +15,7 @@ public class InventorySagaHandler :
         if (!inventoryReserved)
         {
             // Inventory reservation failed
-            await Context.MarkAsFailed<ReserveInventoryCommand>();
+            await Context.MarkAsFailed<ReserveInventoryCommand>(cancellationToken);
             return;
         }
         
@@ -24,14 +24,14 @@ public class InventorySagaHandler :
         {
             OrderId = message.OrderId,
             ParentMessageId = message.MessageId
-        });
-        await Context.MarkAsComplete<ReserveInventoryCommand>();
+        }, cancellationToken);
+        await Context.MarkAsComplete<ReserveInventoryCommand>(cancellationToken);
     }
 
-    public override async Task CompensateAsync(ReserveInventoryCommand message)
+    public override async Task CompensateAsync(ReserveInventoryCommand message, CancellationToken cancellationToken = default)
     {
         // Compensation logic: release reserved inventory
         Context.Data.InventoryCompensated = true;
-        await Context.CompensateAndBubbleUp<ReserveInventoryCommand>();
+        await Context.CompensateAndBubbleUp<ReserveInventoryCommand>(cancellationToken);
     }
 }

@@ -10,7 +10,7 @@ namespace Sample.Order.Orchestration.Seq.Consumer.Sagas;
 public class PaymentSagaHandler :
     CoordinatedSagaHandler<ProcessPaymentCommand, CreateOrderSagaData>
 {
-    public override async Task HandleAsync(ProcessPaymentCommand message)
+    public override async Task HandleAsync(ProcessPaymentCommand message, CancellationToken cancellationToken = default)
     {
         // Simulate payment process
         var paymentSucceeded = PaymentService.SimulatePayment();
@@ -18,7 +18,7 @@ public class PaymentSagaHandler :
         if (!paymentSucceeded)
         {
             // Payment failed, compensation chain is initiated
-            await Context.MarkAsFailed<ProcessPaymentCommand>();
+            await Context.MarkAsFailed<ProcessPaymentCommand>(cancellationToken);
             return;
         }
 
@@ -30,13 +30,13 @@ public class PaymentSagaHandler :
         {
             OrderId = message.OrderId,
             ParentMessageId = message.MessageId
-        });
-        await Context.MarkAsComplete<ProcessPaymentCommand>();
+        }, cancellationToken);
+        await Context.MarkAsComplete<ProcessPaymentCommand>(cancellationToken);
     }
     
-    public override async Task CompensateAsync(ProcessPaymentCommand message)
+    public override async Task CompensateAsync(ProcessPaymentCommand message, CancellationToken cancellationToken = default)
     {
         // No business compensation required, but need to bubble up
-        await Context.CompensateAndBubbleUp<ProcessPaymentCommand>();
+        await Context.CompensateAndBubbleUp<ProcessPaymentCommand>(cancellationToken);
     }
 }

@@ -33,31 +33,31 @@ public class SagaContext<TInitialMessage>(
         StepMessages[(messageStepType, message.MessageId)] = message;
     }
 
-    public Task Send<T>(T command, CancellationToken ct = default) where T : ICommand
+    public Task Send<T>(T command, CancellationToken cancellationToken = default) where T : ICommand
     {
         var commandType = command.GetType();
         StepMessages[(commandType, command.MessageId)] = command;
         command.SetSagaId(SagaId);
-        return eventBus.Send(command, HandlerTypeOfCurrentStep, SagaId, ct);
+        return eventBus.Send(command, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 
-    public Task Publish<T>(T @event, CancellationToken ct = default) where T : IEvent
+    public Task Publish<T>(T @event, CancellationToken cancellationToken = default) where T : IEvent
     {
         var eventType = @event.GetType();
         StepMessages[(eventType, @event.MessageId)] = @event;
         @event.SetSagaId(SagaId);
-        return eventBus.Publish(@event, HandlerTypeOfCurrentStep, SagaId, ct);
+        return eventBus.Publish(@event, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 
-    public Task Publish<T>(T @event, Type? handlerType, CancellationToken ct = default) where T : IEvent
+    public Task Publish<T>(T @event, Type? handlerType, CancellationToken cancellationToken = default) where T : IEvent
     {
         var eventType = @event.GetType();
         StepMessages[(eventType, @event.MessageId)] = @event;
         @event.SetSagaId(SagaId);
-        return eventBus.Publish(@event, handlerType, SagaId, ct);
+        return eventBus.Publish(@event, handlerType, SagaId, cancellationToken);
     }
 
-    public ISagaStepFluent PublishWithTracking<TNextStep>(TNextStep nextEvent, CancellationToken ct = default)
+    public ISagaStepFluent PublishWithTracking<TNextStep>(TNextStep nextEvent, CancellationToken cancellationToken = default)
         where TNextStep : IEvent
     {
         var nextEventType = nextEvent.GetType();
@@ -74,10 +74,10 @@ public class SagaContext<TInitialMessage>(
             CurrentStep.GetType(),
             adapterContext,
             Operation);
-        Task Operation() => Publish(nextEvent, null, ct);
+        Task Operation() => Publish(nextEvent, null, cancellationToken);
     }
 
-    public ISagaStepFluent SendWithTracking<TNextStep>(TNextStep nextCommand, CancellationToken ct = default)
+    public ISagaStepFluent SendWithTracking<TNextStep>(TNextStep nextCommand, CancellationToken cancellationToken = default)
         where TNextStep : ICommand
     {
         nextCommand.SetSagaId(SagaId);
@@ -92,43 +92,43 @@ public class SagaContext<TInitialMessage>(
             CurrentStep.GetType(),
             adapterContext,
             Operation);
-        Task Operation() => Send(nextCommand, ct);
+        Task Operation() => Send(nextCommand, cancellationToken);
     }
 
-    public Task Compensate<T>(T @event, CancellationToken ct = default) where T : FailedEventBase
+    public Task Compensate<T>(T @event, CancellationToken cancellationToken = default) where T : FailedEventBase
     {
         @event.SetSagaId(SagaId);
         // After setting the SagaId, store the event in the step messages
         StepMessages[(@event.GetType(), @event.MessageId)] = @event;
-        return eventBus.Publish(@event, HandlerTypeOfCurrentStep, SagaId, ct);
+        return eventBus.Publish(@event, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 
-    public virtual Task MarkAsCompensated<TStep>(CancellationToken ct = default) where TStep : IMessage
+    public virtual Task MarkAsCompensated<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage
     {
         return SagaStore.LogStepAsync(sagaId, CurrentStep.MessageId, CurrentStep.ParentMessageId, CurrentStep.GetType(),
-            StepStatus.Compensated, HandlerTypeOfCurrentStep, CurrentStep, (Exception?)null, ct);
+            StepStatus.Compensated, HandlerTypeOfCurrentStep, CurrentStep, (Exception?)null, cancellationToken);
     }
 
-    public virtual Task CompensateAndBubbleUp<TStep>(CancellationToken ct = default) where TStep : IMessage
+    public virtual Task CompensateAndBubbleUp<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage
     {
         // Step log should be in the compensation coordinator
         return Task.CompletedTask;
     }
 
-    public virtual Task MarkAsComplete<TStep>(CancellationToken ct = default) where TStep : IMessage
+    public virtual Task MarkAsComplete<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage
     {
         return SagaStore.LogStepAsync(SagaId, CurrentStep.MessageId, CurrentStep.ParentMessageId, CurrentStep.GetType(),
-            StepStatus.Completed, HandlerTypeOfCurrentStep, CurrentStep, (Exception?)null, ct);
+            StepStatus.Completed, HandlerTypeOfCurrentStep, CurrentStep, (Exception?)null, cancellationToken);
     }
 
 
-    public virtual async Task MarkAsFailed<TStep>(CancellationToken ct = default) where TStep : IMessage
+    public virtual async Task MarkAsFailed<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage
     {
         // Step log should be in the compensation coordinator
-        await MarkAsFailed<TStep>((Exception?)null, ct);
+        await MarkAsFailed<TStep>((Exception?)null, cancellationToken);
     }
 
-    public virtual async Task MarkAsFailed<TStep>(Exception? ex, CancellationToken ct = default) where TStep : IMessage
+    public virtual async Task MarkAsFailed<TStep>(Exception? ex, CancellationToken cancellationToken = default) where TStep : IMessage
     {
         // Step log should be in the compensation coordinator
         await MarkAsFailed<TStep>(new FailResponse
@@ -136,32 +136,32 @@ public class SagaContext<TInitialMessage>(
             Reason = "Saga step failed",
             ExceptionType = ex?.GetType().Name,
             ExceptionDetail = ex?.ToString()
-        }, ct);
+        }, cancellationToken);
     }
 
-    public virtual async Task MarkAsFailed<TStep>(FailResponse fail, CancellationToken ct = default) where TStep : IMessage
+    public virtual async Task MarkAsFailed<TStep>(FailResponse fail, CancellationToken cancellationToken = default) where TStep : IMessage
     {
         // Step log should be in the compensation coordinator
         await compensationCoordinator.CompensateAsync(SagaId, CurrentStep.GetType(), HandlerTypeOfCurrentStep, CurrentStep,
-            new SagaStepFailureInfo(fail.Reason, fail.ExceptionType, fail.ExceptionDetail));
+            new SagaStepFailureInfo(fail.Reason, fail.ExceptionType, fail.ExceptionDetail), cancellationToken);
     }
 
-    public virtual Task MarkAsCompensationFailed<TStep>(CancellationToken ct = default) where TStep : IMessage
+    public virtual Task MarkAsCompensationFailed<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage
     {
-        return MarkAsCompensationFailed<TStep>(null, ct);
+        return MarkAsCompensationFailed<TStep>(null, cancellationToken);
     }
 
-    public virtual Task MarkAsCompensationFailed<TStep>(Exception? ex, CancellationToken ct = default) where TStep : IMessage
+    public virtual Task MarkAsCompensationFailed<TStep>(Exception? ex, CancellationToken cancellationToken = default) where TStep : IMessage
     {
         return SagaStore.LogStepAsync(SagaId, CurrentStep.MessageId, CurrentStep.ParentMessageId, CurrentStep.GetType(),
-            StepStatus.CompensationFailed, HandlerTypeOfCurrentStep, CurrentStep, ex, ct);
+            StepStatus.CompensationFailed, HandlerTypeOfCurrentStep, CurrentStep, ex, cancellationToken);
     }
 
-    public Task<bool> IsAlreadyCompleted<T>(CancellationToken ct = default) where T : IMessage
+    public Task<bool> IsAlreadyCompleted<T>(CancellationToken cancellationToken = default) where T : IMessage
     {
         StepMessages.TryGetValue((CurrentStep.GetType(), CurrentStep.MessageId), out var stepMessage);
         if (stepMessage == null) throw new InvalidOperationException();
-        return SagaStore.IsStepCompletedAsync(SagaId, stepMessage.MessageId, CurrentStep.GetType(), HandlerTypeOfCurrentStep, ct);
+        return SagaStore.IsStepCompletedAsync(SagaId, stepMessage.MessageId, CurrentStep.GetType(), HandlerTypeOfCurrentStep, cancellationToken);
     }
 }
 
@@ -186,7 +186,7 @@ public class SagaContext<TInitialMessage, TSagaData>(
 
     public TSagaData Data { get; } = data;
 
-    public new ISagaStepFluent PublishWithTracking<TStep>(TStep nextEvent, CancellationToken ct = default)
+    public new ISagaStepFluent PublishWithTracking<TStep>(TStep nextEvent, CancellationToken cancellationToken = default)
         where TStep : IEvent
     {
         nextEvent.SetSagaId(SagaId);
@@ -209,10 +209,10 @@ public class SagaContext<TInitialMessage, TSagaData>(
             Operation);
 
         Task Operation() =>
-            Publish(nextEvent, null, ct); // Explicitly call base to ensure it's the intended IEventBus.Publish
+            Publish(nextEvent, null, cancellationToken); // Explicitly call base to ensure it's the intended IEventBus.Publish
     }
 
-    public new ISagaStepFluent SendWithTracking<TStep>(TStep nextCommand, CancellationToken ct = default)
+    public new ISagaStepFluent SendWithTracking<TStep>(TStep nextCommand, CancellationToken cancellationToken = default)
         where TStep : ICommand
     {
         nextCommand.SetSagaId(SagaId);
@@ -232,23 +232,23 @@ public class SagaContext<TInitialMessage, TSagaData>(
             Data.GetType(),
             adapterContext,
             Operation);
-        Task Operation() => Send(nextCommand, ct); // Explicitly call base
+        Task Operation() => Send(nextCommand, cancellationToken); // Explicitly call base
     }
 
-    public override async Task MarkAsComplete<TStep>(CancellationToken ct = default)
+    public override async Task MarkAsComplete<TStep>(CancellationToken cancellationToken = default)
     {
-        await _sagaStore.SaveSagaDataAsync(SagaId, Data, ct);
+        await _sagaStore.SaveSagaDataAsync(SagaId, Data, cancellationToken);
         await _sagaStore.LogStepAsync(SagaId, CurrentStep.MessageId, CurrentStep.ParentMessageId, CurrentStep.GetType(),
-            StepStatus.Completed, HandlerTypeOfCurrentStep, CurrentStep, (Exception?)null, ct);
+            StepStatus.Completed, HandlerTypeOfCurrentStep, CurrentStep, (Exception?)null, cancellationToken);
     }
 
-    public override Task MarkAsFailed<TStep>(CancellationToken ct = default)
+    public override Task MarkAsFailed<TStep>(CancellationToken cancellationToken = default)
     {
         // Mark the step as failed in the saga data for triggering the HandleFailResponseAsync in CoordinatedSagaHandler
-        return MarkAsFailed<TStep>((Exception?)null, ct);
+        return MarkAsFailed<TStep>((Exception?)null, cancellationToken);
     }
 
-    public override Task MarkAsFailed<TStep>(Exception? ex, CancellationToken ct = default)
+    public override Task MarkAsFailed<TStep>(Exception? ex, CancellationToken cancellationToken = default)
     {
         // Mark the step as failed in the saga data for triggering the HandleFailResponseAsync in CoordinatedSagaHandler
         return MarkAsFailed<TStep>(new FailResponse
@@ -256,45 +256,45 @@ public class SagaContext<TInitialMessage, TSagaData>(
             Reason = "Saga step failed",
             ExceptionType = ex?.GetType().Name,
             ExceptionDetail = ex?.ToString()
-        }, ct);
+        }, cancellationToken);
     }
 
-    public override async Task MarkAsFailed<TStep>(FailResponse fail, CancellationToken ct = default)
+    public override async Task MarkAsFailed<TStep>(FailResponse fail, CancellationToken cancellationToken = default)
     {
         // Mark the step as failed in the saga data for triggering the HandleFailResponseAsync in CoordinatedSagaHandler
         Data.FailedStepType = CurrentStep.GetType();
         Data.FailedHandlerType = HandlerTypeOfCurrentStep;
         Data.FailedAt = DateTime.UtcNow;
 
-        await _sagaStore.SaveSagaDataAsync(SagaId, Data, ct);
+        await _sagaStore.SaveSagaDataAsync(SagaId, Data, cancellationToken);
         await _compensationCoordinator.CompensateAsync(SagaId, CurrentStep.GetType(), HandlerTypeOfCurrentStep, CurrentStep,
-            new SagaStepFailureInfo(fail.Reason, fail.ExceptionType, fail.ExceptionDetail));
+            new SagaStepFailureInfo(fail.Reason, fail.ExceptionType, fail.ExceptionDetail), cancellationToken);
     }
 
-    public override async Task MarkAsCompensated<TStep>(CancellationToken ct = default)
+    public override async Task MarkAsCompensated<TStep>(CancellationToken cancellationToken = default)
     {
-        await _sagaStore.SaveSagaDataAsync(SagaId, Data, ct);
+        await _sagaStore.SaveSagaDataAsync(SagaId, Data, cancellationToken);
         await _sagaStore.LogStepAsync(SagaId, CurrentStep.MessageId, CurrentStep.ParentMessageId, CurrentStep.GetType(),
-            StepStatus.Compensated, HandlerTypeOfCurrentStep, CurrentStep, (Exception?)null, ct);
+            StepStatus.Compensated, HandlerTypeOfCurrentStep, CurrentStep, (Exception?)null, cancellationToken);
     }
 
-    public override Task MarkAsCompensationFailed<TStep>(CancellationToken ct = default)
+    public override Task MarkAsCompensationFailed<TStep>(CancellationToken cancellationToken = default)
     {
-        return MarkAsCompensationFailed<TStep>((Exception?)null, ct);
+        return MarkAsCompensationFailed<TStep>((Exception?)null, cancellationToken);
     }
 
-    public override async Task MarkAsCompensationFailed<TStep>(Exception? ex, CancellationToken ct = default)
+    public override async Task MarkAsCompensationFailed<TStep>(Exception? ex, CancellationToken cancellationToken = default)
     {
-        await _sagaStore.SaveSagaDataAsync(SagaId, Data, ct);
+        await _sagaStore.SaveSagaDataAsync(SagaId, Data, cancellationToken);
         await _sagaStore.LogStepAsync(SagaId, CurrentStep.MessageId, CurrentStep.ParentMessageId, CurrentStep.GetType(),
-            StepStatus.CompensationFailed, HandlerTypeOfCurrentStep, CurrentStep, ex, ct);
+            StepStatus.CompensationFailed, HandlerTypeOfCurrentStep, CurrentStep, ex, cancellationToken);
     }
 
-    public override async Task CompensateAndBubbleUp<TStep>(CancellationToken ct = default)
+    public override async Task CompensateAndBubbleUp<TStep>(CancellationToken cancellationToken = default)
     {
-        await _sagaStore.SaveSagaDataAsync(SagaId, Data, ct);
+        await _sagaStore.SaveSagaDataAsync(SagaId, Data, cancellationToken);
         await _compensationCoordinator.CompensateParentAsync(SagaId, CurrentStep.GetType(), HandlerTypeOfCurrentStep,
-            CurrentStep);
+            CurrentStep, cancellationToken);
     }
 }
 
@@ -315,25 +315,25 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
     public ISagaStore SagaStore => sagaStore;
     public Type HandlerTypeOfCurrentStep { get; } = handlerTypeOfCurrentStep;
 
-    public Task Send<T>(T command, CancellationToken ct = default) where T : ICommand
+    public Task Send<T>(T command, CancellationToken cancellationToken = default) where T : ICommand
     {
         stepMessages[(command.GetType(), command.MessageId)] = command;
         command.SetSagaId(SagaId);
-        return eventBus.Send(command, HandlerTypeOfCurrentStep, sagaId, ct);
+        return eventBus.Send(command, HandlerTypeOfCurrentStep, sagaId, cancellationToken);
     }
 
-    public Task Publish<T>(T @event, CancellationToken ct = default) where T : IEvent
+    public Task Publish<T>(T @event, CancellationToken cancellationToken = default) where T : IEvent
     {
         stepMessages[(@event.GetType(), @event.MessageId)] = @event;
         @event.SetSagaId(SagaId);
-        return eventBus.Publish(@event, HandlerTypeOfCurrentStep, sagaId, ct);
+        return eventBus.Publish(@event, HandlerTypeOfCurrentStep, sagaId, cancellationToken);
     }
 
-    public Task Publish<T>(T @event, Type? handlerType, CancellationToken ct = default) where T : IEvent
+    public Task Publish<T>(T @event, Type? handlerType, CancellationToken cancellationToken = default) where T : IEvent
     {
         stepMessages[(@event.GetType(), @event.MessageId)] = @event;
         @event.SetSagaId(SagaId);
-        return eventBus.Publish(@event, handlerType, SagaId, ct);
+        return eventBus.Publish(@event, handlerType, SagaId, cancellationToken);
     }
 
     /// <summary>
@@ -341,9 +341,9 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
     /// </summary>
     /// <typeparam name="TNextStep">The type of the next event in the saga flow.</typeparam>
     /// <param name="nextEvent">The event to publish, representing the next step of the saga.</param>
-    /// <param name="ct">A cancellation token to observe while awaiting the operation.</param>
+    /// <param name="cancellationToken">A cancellation token to observe while awaiting the operation.</param>
     /// <returns>An instance of <see cref="ISagaStepFluent"/> that allows fluent chaining of saga operations.</returns>
-    public ISagaStepFluent PublishWithTracking<TNextStep>(TNextStep nextEvent, CancellationToken ct = default)
+    public ISagaStepFluent PublishWithTracking<TNextStep>(TNextStep nextEvent, CancellationToken cancellationToken = default)
         where TNextStep : IEvent
     {
         nextEvent.SetSagaId(SagaId);
@@ -360,7 +360,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
             nextStepContext,
             Operation);
 
-        Task Operation() => Publish(nextEvent, null, ct);
+        Task Operation() => Publish(nextEvent, null, cancellationToken);
     }
 
     /// <summary>
@@ -370,9 +370,9 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
     /// </summary>
     /// <typeparam name="TStep">The type of the command to be sent and tracked.</typeparam>
     /// <param name="nextCommand">The command instance to be sent and tracked.</param>
-    /// <param name="ct">The token to monitor for cancellation requests.</param>
+    /// <param name="cancellationToken">The token to monitor for cancellation requests.</param>
     /// <returns>An instance of <see cref="ISagaStepFluent"/> for fluent continuation of the Saga workflow.</returns>
-    public ISagaStepFluent SendWithTracking<TStep>(TStep nextCommand, CancellationToken ct = default)
+    public ISagaStepFluent SendWithTracking<TStep>(TStep nextCommand, CancellationToken cancellationToken = default)
         where TStep : ICommand
     {
         nextCommand.SetSagaId(SagaId);
@@ -390,29 +390,29 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
             nextStepContext,
             Operation);
 
-        Task Operation() => Send(nextCommand, ct);
+        Task Operation() => Send(nextCommand, cancellationToken);
     }
 
-    public Task Compensate<T>(T @event, CancellationToken ct = default) where T : FailedEventBase
+    public Task Compensate<T>(T @event, CancellationToken cancellationToken = default) where T : FailedEventBase
     {
         @event.SetSagaId(SagaId);
         stepMessages[(@event.GetType(), @event.MessageId)] = @event;
-        return eventBus.Publish(@event, HandlerTypeOfCurrentStep, SagaId, ct);
+        return eventBus.Publish(@event, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 
-    public Task MarkAsComplete<TAdapterStep>(CancellationToken ct = default) where TAdapterStep : IMessage
+    public Task MarkAsComplete<TAdapterStep>(CancellationToken cancellationToken = default) where TAdapterStep : IMessage
     {
         return sagaStore.LogStepAsync(SagaId, CurrentStep.MessageId, CurrentStep.ParentMessageId, CurrentStep.GetType(),
-            StepStatus.Completed, HandlerTypeOfCurrentStep, CurrentStep, (SagaStepFailureInfo?)null, ct);
+            StepStatus.Completed, HandlerTypeOfCurrentStep, CurrentStep, (SagaStepFailureInfo?)null, cancellationToken);
     }
 
-    public Task MarkAsFailed<TAdapterStep>(CancellationToken ct = default) where TAdapterStep : IMessage
+    public Task MarkAsFailed<TAdapterStep>(CancellationToken cancellationToken = default) where TAdapterStep : IMessage
     {
         // Step log should be in the compensation coordinator
-        return MarkAsFailed<TAdapterStep>((Exception?)null, ct);
+        return MarkAsFailed<TAdapterStep>((Exception?)null, cancellationToken);
     }
 
-    public Task MarkAsFailed<TAdapterStep>(Exception? ex, CancellationToken ct = default) where TAdapterStep : IMessage
+    public Task MarkAsFailed<TAdapterStep>(Exception? ex, CancellationToken cancellationToken = default) where TAdapterStep : IMessage
     {
         // Step log should be in the compensation coordinator
         return MarkAsFailed<TAdapterStep>(new FailResponse
@@ -420,44 +420,44 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
             Reason = "Saga step failed",
             ExceptionType = ex?.GetType().Name,
             ExceptionDetail = ex?.ToString()
-        }, ct);
+        }, cancellationToken);
     }
 
-    public async Task MarkAsFailed<TAdapterStep>(FailResponse fail, CancellationToken ct = default) where TAdapterStep : IMessage
+    public async Task MarkAsFailed<TAdapterStep>(FailResponse fail, CancellationToken cancellationToken = default) where TAdapterStep : IMessage
     {
         // Step log should be in the compensation coordinator
         await compensationCoordinator.CompensateAsync(SagaId, CurrentStep.GetType(), HandlerTypeOfCurrentStep,
-            CurrentStep, new SagaStepFailureInfo(fail.Reason, fail.ExceptionType, fail.ExceptionDetail));
+            CurrentStep, new SagaStepFailureInfo(fail.Reason, fail.ExceptionType, fail.ExceptionDetail), cancellationToken);
     }
 
-    public Task MarkAsCompensated<TAdapterStep>(CancellationToken ct = default) where TAdapterStep : IMessage
+    public Task MarkAsCompensated<TAdapterStep>(CancellationToken cancellationToken = default) where TAdapterStep : IMessage
     {
         return sagaStore.LogStepAsync(SagaId, CurrentStep.MessageId, CurrentStep.ParentMessageId, CurrentStep.GetType(),
-            StepStatus.Compensated, HandlerTypeOfCurrentStep, CurrentStep, (SagaStepFailureInfo?)null, ct);
+            StepStatus.Compensated, HandlerTypeOfCurrentStep, CurrentStep, (SagaStepFailureInfo?)null, cancellationToken);
     }
 
-    public Task CompensateAndBubbleUp<TAdapterStep>(CancellationToken ct = default) where TAdapterStep : IMessage
+    public Task CompensateAndBubbleUp<TAdapterStep>(CancellationToken cancellationToken = default) where TAdapterStep : IMessage
     {
         // Step log should be in the compensation coordinator
         return Task.CompletedTask;
     }
 
-    public Task MarkAsCompensationFailed<TAdapterStep>(CancellationToken ct = default) where TAdapterStep : IMessage
+    public Task MarkAsCompensationFailed<TAdapterStep>(CancellationToken cancellationToken = default) where TAdapterStep : IMessage
     {
-        return MarkAsCompensationFailed<TAdapterStep>((Exception?)null, ct);
+        return MarkAsCompensationFailed<TAdapterStep>((Exception?)null, cancellationToken);
     }
 
-    public Task MarkAsCompensationFailed<TAdapterStep>(Exception? ex, CancellationToken ct = default) where TAdapterStep : IMessage
+    public Task MarkAsCompensationFailed<TAdapterStep>(Exception? ex, CancellationToken cancellationToken = default) where TAdapterStep : IMessage
     {
         return sagaStore.LogStepAsync(SagaId, CurrentStep.MessageId, CurrentStep.ParentMessageId, CurrentStep.GetType(),
-            StepStatus.CompensationFailed, HandlerTypeOfCurrentStep, CurrentStep, ex, ct);
+            StepStatus.CompensationFailed, HandlerTypeOfCurrentStep, CurrentStep, ex, cancellationToken);
     }
 
-    public Task<bool> IsAlreadyCompleted<TAdapterStep>(CancellationToken ct = default) where TAdapterStep : IMessage
+    public Task<bool> IsAlreadyCompleted<TAdapterStep>(CancellationToken cancellationToken = default) where TAdapterStep : IMessage
     {
         stepMessages.TryGetValue((CurrentStep.GetType(), CurrentStep.MessageId), out var stepMessage);
         if (stepMessage == null) throw new InvalidOperationException();
-        return sagaStore.IsStepCompletedAsync(SagaId, stepMessage.MessageId, CurrentStep.GetType(), HandlerTypeOfCurrentStep, ct);
+        return sagaStore.IsStepCompletedAsync(SagaId, stepMessage.MessageId, CurrentStep.GetType(), HandlerTypeOfCurrentStep, cancellationToken);
     }
 
     /// <summary>
@@ -515,27 +515,27 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
     public Type HandlerTypeOfCurrentStep { get; } = handlerTypeOfCurrentStep;
     public TSagaDataAdapter Data => data;
 
-    public Task Send<T>(T command, CancellationToken ct = default) where T : ICommand
+    public Task Send<T>(T command, CancellationToken cancellationToken = default) where T : ICommand
     {
         stepMessages[(command.GetType(), command.MessageId)] = command;
-        return eventBus.Send(command, HandlerTypeOfCurrentStep, sagaId, ct);
+        return eventBus.Send(command, HandlerTypeOfCurrentStep, sagaId, cancellationToken);
     }
 
-    public Task Publish<T>(T @event, CancellationToken ct = default) where T : IEvent
+    public Task Publish<T>(T @event, CancellationToken cancellationToken = default) where T : IEvent
     {
         stepMessages[(@event.GetType(), @event.MessageId)] = @event;
-        return eventBus.Publish(@event, HandlerTypeOfCurrentStep, sagaId, ct);
+        return eventBus.Publish(@event, HandlerTypeOfCurrentStep, sagaId, cancellationToken);
     }
 
-    public Task Publish<T>(T @event, Type? handlerType, CancellationToken ct = default) where T : IEvent
+    public Task Publish<T>(T @event, Type? handlerType, CancellationToken cancellationToken = default) where T : IEvent
     {
         stepMessages[(@event.GetType(), @event.MessageId)] = @event;
-        return eventBus.Publish(@event, handlerType, sagaId, ct);
+        return eventBus.Publish(@event, handlerType, sagaId, cancellationToken);
     }
 
     // Explicit interface implementation for ISagaContext<TStepAdapter>'s tracking methods
     ISagaStepFluent ISagaContext<TCurrentStepAdapter>.PublishWithTracking<TReactiveStep>(
-        TReactiveStep nextEvent, CancellationToken ct)
+        TReactiveStep nextEvent, CancellationToken cancellationToken)
     {
         nextEvent.SetSagaId(SagaId);
         nextEvent.SetParentMessageId(StepAdapter.MessageId); // Assuming Adapter has a MessageId property
@@ -552,11 +552,11 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
             nextStepContext,
             Operation);
 
-        Task Operation() => Publish(nextEvent, null, ct); // Calls this adapter's Publish
+        Task Operation() => Publish(nextEvent, null, cancellationToken); // Calls this adapter's Publish
     }
 
     ISagaStepFluent ISagaContext<TCurrentStepAdapter>.SendWithTracking<TReactiveStep>(
-        TReactiveStep nextCommand, CancellationToken ct)
+        TReactiveStep nextCommand, CancellationToken cancellationToken)
     {
         nextCommand.SetSagaId(SagaId);
         nextCommand.SetParentMessageId(StepAdapter.MessageId); // Assuming Adapter has a MessageId property
@@ -573,12 +573,12 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
             nextStepContext,
             Operation);
 
-        Task Operation() => Send(nextCommand, ct); // Calls this adapter's Send
+        Task Operation() => Send(nextCommand, cancellationToken); // Calls this adapter's Send
     }
 
     // 'new' methods for ISagaContext<TStepAdapter, TSagaDataAdapter>
     public ISagaStepFluent PublishWithTracking<TNextStep>(
-        TNextStep nextEvent, CancellationToken ct = default)
+        TNextStep nextEvent, CancellationToken cancellationToken = default)
         where TNextStep : IEvent
     {
         nextEvent.SetSagaId(SagaId);
@@ -597,11 +597,11 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
             Data.GetType(),
             nextStepContext,
             Operation);
-        Task Operation() => Publish(nextEvent, null, ct); // Calls this adapter's Publish
+        Task Operation() => Publish(nextEvent, null, cancellationToken); // Calls this adapter's Publish
     }
 
     public ISagaStepFluent SendWithTracking<TNextStep>(
-        TNextStep nextCommand, CancellationToken ct = default)
+        TNextStep nextCommand, CancellationToken cancellationToken = default)
         where TNextStep : ICommand
     {
         nextCommand.SetSagaId(SagaId);
@@ -621,32 +621,32 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
             nextStepContext,
             Operation);
 
-        Task Operation() => Send(nextCommand, ct); // Calls this adapter's Send
+        Task Operation() => Send(nextCommand, cancellationToken); // Calls this adapter's Send
     }
 
     // Assuming FailedEventBase is accessible here or defined appropriately
-    public Task Compensate<T>(T @event, CancellationToken ct = default) where T : FailedEventBase
+    public Task Compensate<T>(T @event, CancellationToken cancellationToken = default) where T : FailedEventBase
     {
         @event.SetSagaId(SagaId);
         // After setting the SagaId, store the event in the step messages
         stepMessages[(@event.GetType(), @event.MessageId)] = @event;
-        return eventBus.Publish(@event, HandlerTypeOfCurrentStep, SagaId, ct);
+        return eventBus.Publish(@event, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 
-    public async Task MarkAsComplete<TMarkStep>(CancellationToken ct = default) where TMarkStep : IMessage
+    public async Task MarkAsComplete<TMarkStep>(CancellationToken cancellationToken = default) where TMarkStep : IMessage
     {
-        await sagaStore.SaveSagaDataAsync(SagaId, Data, ct);
+        await sagaStore.SaveSagaDataAsync(SagaId, Data, cancellationToken);
         await sagaStore.LogStepAsync(SagaId, StepAdapter.MessageId, StepAdapter.ParentMessageId, StepAdapter.GetType(),
-            StepStatus.Completed, HandlerTypeOfCurrentStep, StepAdapter, (Exception?)null, ct);
+            StepStatus.Completed, HandlerTypeOfCurrentStep, StepAdapter, (Exception?)null, cancellationToken);
     }
 
-    public Task MarkAsFailed<TMarkStep>(CancellationToken ct = default) where TMarkStep : IMessage
+    public Task MarkAsFailed<TMarkStep>(CancellationToken cancellationToken = default) where TMarkStep : IMessage
     {
         // Mark the step as failed in the saga data for triggering the HandleFailResponseAsync in CoordinatedSagaHandler
-        return MarkAsFailed<TMarkStep>((Exception?)null, ct);
+        return MarkAsFailed<TMarkStep>((Exception?)null, cancellationToken);
     }
 
-    public Task MarkAsFailed<TMarkStep>(Exception? ex, CancellationToken ct = default) where TMarkStep : IMessage
+    public Task MarkAsFailed<TMarkStep>(Exception? ex, CancellationToken cancellationToken = default) where TMarkStep : IMessage
     {
         // Mark the step as failed in the saga data for triggering the HandleFailResponseAsync in CoordinatedSagaHandler
         return MarkAsFailed<TMarkStep>(new FailResponse
@@ -654,52 +654,52 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
             Reason = "Saga step failed",
             ExceptionType = ex?.GetType().Name,
             ExceptionDetail = ex?.ToString()
-        }, ct);
+        }, cancellationToken);
     }
 
-    public async Task MarkAsFailed<TMarkStep>(FailResponse fail, CancellationToken ct = default) where TMarkStep : IMessage
+    public async Task MarkAsFailed<TMarkStep>(FailResponse fail, CancellationToken cancellationToken = default) where TMarkStep : IMessage
     {
         // Mark the step as failed in the saga data for triggering the HandleFailResponseAsync in CoordinatedSagaHandler
         Data.FailedStepType = StepAdapter.GetType();
         Data.FailedHandlerType = HandlerTypeOfCurrentStep;
         Data.FailedAt = DateTime.UtcNow;
 
-        await sagaStore.SaveSagaDataAsync(SagaId, Data, ct);
+        await sagaStore.SaveSagaDataAsync(SagaId, Data, cancellationToken);
         // Step log should be in the compensation coordinator
         await compensationCoordinator.CompensateAsync(SagaId, StepAdapter.GetType(), HandlerTypeOfCurrentStep, StepAdapter,
-            new SagaStepFailureInfo(fail.Reason, fail.ExceptionType, fail.ExceptionDetail));
+            new SagaStepFailureInfo(fail.Reason, fail.ExceptionType, fail.ExceptionDetail), cancellationToken);
     }
 
-    public async Task MarkAsCompensated<TMarkStep>(CancellationToken ct = default) where TMarkStep : IMessage
+    public async Task MarkAsCompensated<TMarkStep>(CancellationToken cancellationToken = default) where TMarkStep : IMessage
     {
-        await sagaStore.SaveSagaDataAsync(SagaId, Data, ct);
+        await sagaStore.SaveSagaDataAsync(SagaId, Data, cancellationToken);
         await sagaStore.LogStepAsync(SagaId, StepAdapter.MessageId, StepAdapter.ParentMessageId, StepAdapter.GetType(),
-            StepStatus.Compensated, HandlerTypeOfCurrentStep, StepAdapter, (Exception?)null, ct);
+            StepStatus.Compensated, HandlerTypeOfCurrentStep, StepAdapter, (Exception?)null, cancellationToken);
     }
 
-    public async Task CompensateAndBubbleUp<TMarkStep>(CancellationToken ct = default) where TMarkStep : IMessage
+    public async Task CompensateAndBubbleUp<TMarkStep>(CancellationToken cancellationToken = default) where TMarkStep : IMessage
     {
-        await sagaStore.SaveSagaDataAsync(SagaId, Data, ct);
+        await sagaStore.SaveSagaDataAsync(SagaId, Data, cancellationToken);
         // Step log should be in the compensation coordinator
         await compensationCoordinator.CompensateParentAsync(SagaId, StepAdapter.GetType(), HandlerTypeOfCurrentStep,
-            StepAdapter);
+            StepAdapter, cancellationToken);
     }
 
-    public Task MarkAsCompensationFailed<TMarkStep>(CancellationToken ct = default) where TMarkStep : IMessage
+    public Task MarkAsCompensationFailed<TMarkStep>(CancellationToken cancellationToken = default) where TMarkStep : IMessage
     {
-        return MarkAsCompensationFailed<TMarkStep>((Exception?)null, ct);
+        return MarkAsCompensationFailed<TMarkStep>((Exception?)null, cancellationToken);
     }
 
-    public Task MarkAsCompensationFailed<TMarkStep>(Exception? ex, CancellationToken ct = default) where TMarkStep : IMessage
+    public Task MarkAsCompensationFailed<TMarkStep>(Exception? ex, CancellationToken cancellationToken = default) where TMarkStep : IMessage
     {
         return sagaStore.LogStepAsync(SagaId, StepAdapter.MessageId, StepAdapter.ParentMessageId, StepAdapter.GetType(),
-            StepStatus.CompensationFailed, HandlerTypeOfCurrentStep, StepAdapter, ex, ct);
+            StepStatus.CompensationFailed, HandlerTypeOfCurrentStep, StepAdapter, ex, cancellationToken);
     }
 
-    public Task<bool> IsAlreadyCompleted<TMarkStep>(CancellationToken ct = default) where TMarkStep : IMessage
+    public Task<bool> IsAlreadyCompleted<TMarkStep>(CancellationToken cancellationToken = default) where TMarkStep : IMessage
     {
         return sagaStore.IsStepCompletedAsync(SagaId, StepAdapter.MessageId, StepAdapter.GetType(),
-            HandlerTypeOfCurrentStep, ct);
+            HandlerTypeOfCurrentStep, cancellationToken);
     }
 
     /// <summary>

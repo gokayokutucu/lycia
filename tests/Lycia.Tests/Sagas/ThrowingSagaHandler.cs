@@ -6,7 +6,7 @@ namespace Lycia.Tests.Sagas;
 
 public class ThrowingSagaHandler : CoordinatedSagaHandler<OrderCreatedEvent, SampleSagaData>
 {
-    public override async Task HandleAsync(OrderCreatedEvent message)
+    public override async Task HandleAsync(OrderCreatedEvent message, CancellationToken cancellationToken = default)
     {
         throw new InvalidOperationException("Intentional test exception");
     }

@@ -6,16 +6,16 @@ namespace Lycia.Tests.Sagas;
 
 public class AuditOrderSagaHandler : CoordinatedSagaHandler<OrderCreatedEvent, CreateOrderSagaData>
 {
-    public override Task HandleAsync(OrderCreatedEvent message)
+    public override Task HandleAsync(OrderCreatedEvent message, CancellationToken cancellationToken = default)
     {
         try
         {
-            return Context.MarkAsComplete<OrderCreatedEvent>();
+            return Context.MarkAsComplete<OrderCreatedEvent>(cancellationToken);
         }
         catch (Exception e)
         {
             Console.WriteLine($"🚨 Audit failed: {e.Message}");
-            return Context.MarkAsFailed<OrderCreatedEvent>();
+            return Context.MarkAsFailed<OrderCreatedEvent>(cancellationToken);
         }
     }
 }

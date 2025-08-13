@@ -20,40 +20,40 @@ public abstract class StartReactiveSagaHandler<TMessage> :
         Context = context;
     }
 
-    public abstract Task HandleStartAsync(TMessage message);
+    public abstract Task HandleStartAsync(TMessage message, CancellationToken cancellationToken = default);
     
-    protected async Task HandleAsyncInternal(TMessage message)
+    protected async Task HandleAsyncInternal(TMessage message, CancellationToken cancellationToken = default)
     {
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
-            await HandleStartAsync(message);  // Actual business logic
+            await HandleStartAsync(message, cancellationToken);  // Actual business logic
         }
         catch (Exception)
         {
-            await Context.MarkAsFailed<TMessage>();
+            await Context.MarkAsFailed<TMessage>(cancellationToken);
         }
     }
     
-    protected async Task CompensateAsyncInternal(TMessage message)
+    protected async Task CompensateAsyncInternal(TMessage message, CancellationToken cancellationToken = default)
     {
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
-            await CompensateStartAsync(message);  // Actual business logic
+            await CompensateStartAsync(message, cancellationToken);  // Actual business logic
         }
         catch (Exception)
         {
-            await Context.MarkAsCompensationFailed<TMessage>();
+            await Context.MarkAsCompensationFailed<TMessage>(cancellationToken);
         }
     }
     
-    public virtual Task CompensateStartAsync(TMessage message)    
+    public virtual Task CompensateStartAsync(TMessage message, CancellationToken cancellationToken = default)    
     {
         return Task.CompletedTask;
     }
-    protected Task MarkAsComplete() => Context.MarkAsComplete<TMessage>();
-    protected Task MarkAsFailed() => Context.MarkAsFailed<TMessage>();
-    protected Task MarkAsCompensationFailed() => Context.MarkAsCompensationFailed<TMessage>();
-    protected Task<bool> IsAlreadyCompleted() => Context.IsAlreadyCompleted<TMessage>();
+    protected Task MarkAsComplete(CancellationToken cancellationToken = default) => Context.MarkAsComplete<TMessage>(cancellationToken);
+    protected Task MarkAsFailed(CancellationToken cancellationToken = default) => Context.MarkAsFailed<TMessage>(cancellationToken);
+    protected Task MarkAsCompensationFailed(CancellationToken cancellationToken = default) => Context.MarkAsCompensationFailed<TMessage>(cancellationToken);
+    protected Task<bool> IsAlreadyCompleted(CancellationToken cancellationToken = default) => Context.IsAlreadyCompleted<TMessage>(cancellationToken);
 }

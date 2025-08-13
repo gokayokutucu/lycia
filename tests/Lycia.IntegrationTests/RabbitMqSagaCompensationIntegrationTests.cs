@@ -605,7 +605,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
     // Dummy handler that always throws (simulates saga failure and compensation path)
     private class FailingSagaHandler : ReactiveSagaHandler<TestSagaCommand>
     {
-        public override Task HandleAsync(TestSagaCommand message)
+        public override Task HandleAsync(TestSagaCommand message, CancellationToken cancellationToken = default)
         {
             throw new InvalidOperationException("Intentional failure for test.");
         }
@@ -616,12 +616,12 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
 internal class DummySagaCompensationCoordinator : ISagaCompensationCoordinator
 {
     public Task CompensateAsync(Guid sagaId, Type failedStepType, Type? handlerType, IMessage message,
-        SagaStepFailureInfo? failInfo)
+        SagaStepFailureInfo? failInfo, CancellationToken cancellationToken = default)
     {
         throw new NotImplementedException();
     }
 
-    public Task CompensateParentAsync(Guid sagaId, Type stepType, Type handlerType, IMessage message)
+    public Task CompensateParentAsync(Guid sagaId, Type stepType, Type handlerType, IMessage message, CancellationToken cancellationToken = default)
     {
         throw new NotImplementedException();
     }

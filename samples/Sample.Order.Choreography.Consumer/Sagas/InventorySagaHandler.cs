@@ -1,26 +1,28 @@
 using Lycia.Saga.Handlers;
-using Sample.Shared.Messages.Commands;
-using Sample.Shared.Messages.Responses;
-using Sample.Shared.SagaStates;
+using Lycia.Saga.Handlers.Abstractions;
+using Sample.Shared.Messages.Events;
 
 namespace Sample.Order.Choreography.Consumer.Sagas;
 
-public class InventorySagaHandler : 
-    CoordinatedResponsiveSagaHandler<ReserveInventoryCommand, InventoryReservedResponse, CreateOrderSagaData>
+public class InventorySagaHandler :
+    ReactiveSagaHandler<OrderCreatedEvent>,
+    ISagaCompensationHandler<PaymentFailedEvent>
 {
-    public override async Task HandleAsync(ReserveInventoryCommand message)
+    public override async Task HandleAsync(OrderCreatedEvent evt, CancellationToken cancellationToken = default)
     {
-        await Context.Publish(new InventoryReservedResponse
+        // Reserve inventory
+        await Context.Publish(new InventoryReservedEvent
         {
-            OrderId = message.OrderId,
-            ParentMessageId = message.MessageId
-        });
-        await Context.MarkAsComplete<ReserveInventoryCommand>();
+            OrderId = evt.OrderId,
+            ParentMessageId = evt.MessageId
+        }, cancellationToken);
+        await Context.MarkAsComplete<OrderCreatedEvent>(cancellationToken);
     }
 
-    public override Task CompensateAsync(ReserveInventoryCommand message)
+    public Task CompensateAsync(PaymentFailedEvent failed, CancellationToken cancellationToken = default)
     {
-        Context.Data.InventoryCompensated = true;
+        // Release reserved stock
+        // Optionally publish InventoryReleasedEvent
         return Task.CompletedTask;
     }
 }

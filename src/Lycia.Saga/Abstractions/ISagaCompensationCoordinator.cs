@@ -4,6 +4,6 @@ namespace Lycia.Saga.Abstractions;
 
 public interface ISagaCompensationCoordinator
 {
-    Task CompensateAsync(Guid sagaId, Type failedStepType, Type? handlerType, IMessage message, SagaStepFailureInfo? failInfo);
-    Task CompensateParentAsync(Guid sagaId, Type stepType, Type handlerType, IMessage message);
+    Task CompensateAsync(Guid sagaId, Type failedStepType, Type? handlerType, IMessage message, SagaStepFailureInfo? failInfo, CancellationToken cancellationToken = default);
+    Task CompensateParentAsync(Guid sagaId, Type stepType, Type handlerType, IMessage message, CancellationToken cancellationToken = default);
 }

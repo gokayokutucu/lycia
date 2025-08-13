@@ -1,27 +1,41 @@
 using Lycia.Saga.Handlers;
-using Sample.Shared.Messages.Commands;
-using Sample.Shared.Messages.Responses;
-using Sample.Shared.SagaStates;
+using Lycia.Saga.Handlers.Abstractions;
+using Sample.Shared.Messages.Events;
+using Sample.Shared.Services;
 
 namespace Sample.Order.Choreography.Consumer.Sagas;
 
 public class ShippingSagaHandler :
-    CoordinatedResponsiveSagaHandler<ShipOrderCommand, OrderShippedResponse, CreateOrderSagaData>
+    ReactiveSagaHandler<PaymentSucceededEvent>,
+    ISagaCompensationHandler<OrderShippingFailedEvent>
 {
-    public override async Task HandleAsync(ShipOrderCommand message)
+    public override async Task HandleAsync(PaymentSucceededEvent evt, CancellationToken cancellationToken = default)
     {
-        // Shipping logic
-        await Context.Publish(new OrderShippedResponse
+        // Try to ship
+        var shipped = ShippingService.TryShip(evt.OrderId);
+        if (!shipped)
         {
-            OrderId = message.OrderId,
-            ParentMessageId = message.MessageId
-        });
-        await Context.MarkAsComplete<ShipOrderCommand>();
+            // Broadcast failure so *interested* parties can react
+            await Context.Publish(new OrderShippingFailedEvent
+            {
+                OrderId = evt.OrderId,
+                ParentMessageId = evt.MessageId
+            }, cancellationToken);
+            await Context.MarkAsFailed<PaymentSucceededEvent>(cancellationToken);
+            return;
+        }
+
+        await Context.Publish(new OrderShippedEvent
+        {
+            OrderId = evt.OrderId,
+            ParentMessageId = evt.MessageId
+        }, cancellationToken);
+        await Context.MarkAsComplete<PaymentSucceededEvent>(cancellationToken);
     }
 
-    public override Task CompensateAsync(ShipOrderCommand message)
+    public Task CompensateAsync(OrderShippingFailedEvent failed, CancellationToken cancellationToken = default)
     {
-        Context.Data.ShippingCompensated = true; // Sample flag to indicate compensation
+        // Undo or no-op (often nothing to undo if shipping didn’t happen)
         return Task.CompletedTask;
     }
 }

@@ -52,7 +52,7 @@ public class SagaDispatcher(
 
         if (IsSuccessResponse(messageType))
         {
-            Console.WriteLine($"[Dispatch] Dispatching {messageType.Name} to {handlerType.Name}");
+            Console.WriteLine($"[Dispatch] Dispatching {messageType.Name} to {handlerType!.Name}");
             await InvokeHandlerAsync(serviceProvider.GetServices(handlerType), message,
                 cancellationToken: cancellationToken);
         }
@@ -64,8 +64,8 @@ public class SagaDispatcher(
                 ExceptionType = message.GetType().Name,
                 OccurredAt = DateTime.UtcNow
             };
-            Console.WriteLine($"[Dispatch] Dispatching {messageType.Name} to {handlerType.Name}");
-            await InvokeHandlerAsync(serviceProvider.GetServices(handlerType), message, sagaId, fail,
+            Console.WriteLine($"[Dispatch] Dispatching {messageType.Name} to {handlerType?.Name}");
+            await InvokeHandlerAsync(serviceProvider.GetServices(handlerType!), message, sagaId, fail,
                 cancellationToken);
         }
         else
@@ -74,7 +74,7 @@ public class SagaDispatcher(
         }
     }
 
-    protected virtual async Task InvokeHandlerAsync(
+    private async Task InvokeHandlerAsync(
         object? handler,
         IMessage message,
         Guid? sagaId = null,
@@ -123,13 +123,12 @@ public class SagaDispatcher(
             eventBus,
             sagaStore,
             sagaIdGenerator,
-            compensationCoordinator
-        );
+            compensationCoordinator, cancellationToken);
         
-        await HandleSagaAsync(message, handler, handlerType);
+        await HandleSagaAsync(message, handler, handlerType, cancellationToken);
     }
 
-    private async Task HandleSagaAsync(IMessage message, object? handler, Type handlerType)
+    private async Task HandleSagaAsync(IMessage message, object? handler, Type handlerType, CancellationToken cancellationToken)
     {
         if (handler == null) return;
 
@@ -142,11 +141,11 @@ public class SagaDispatcher(
                 ? "HandleSuccessResponseAsync"
                 : "HandleAsyncInternal";
 
-            var delegateMethod =
+            var delegateMethod = 
                 HandlerDelegateHelper.GetHandlerDelegate(handlerType, methodName, message.GetType());
-            await delegateMethod(handler, message);
+            await delegateMethod(handler, message, cancellationToken);
 
-            await ValidateSagaStepCompletionAsync(message, handlerType, sagaId);
+            await ValidateSagaStepCompletionAsync(message, handlerType, sagaId, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -171,11 +170,11 @@ public class SagaDispatcher(
         return sagaId;
     }
 
-    private async Task ValidateSagaStepCompletionAsync(IMessage message, Type handlerType, Guid sagaId)
+    private async Task ValidateSagaStepCompletionAsync(IMessage message, Type handlerType, Guid sagaId, CancellationToken cancellationToken = default)
     {
         var stepTypeToCheck = message.GetType();
         var alreadyMarked =
-            await sagaStore.IsStepCompletedAsync(sagaId, message.MessageId, stepTypeToCheck, handlerType);
+            await sagaStore.IsStepCompletedAsync(sagaId, message.MessageId, stepTypeToCheck, handlerType, cancellationToken);
         if (!alreadyMarked)
         {
             Console.WriteLine($"Step for {stepTypeToCheck.Name} was not marked as completed, failed, or compensated.");
