@@ -1,35 +1,34 @@
 using Lycia.Saga.Handlers;
-using Sample.Shared.Messages.Commands;
-using Sample.Shared.Messages.Responses;
-using Sample.Shared.SagaStates;
+using Sample.Shared.Messages.Events;
 using Sample.Shared.Services;
 
 namespace Sample.Order.Choreography.Consumer.Sagas;
 
-public class PaymentSagaHandler :
-    CoordinatedResponsiveSagaHandler<ProcessPaymentCommand, PaymentSucceededResponse, CreateOrderSagaData>
+public class PaymentSagaHandler : ReactiveSagaHandler<InventoryReservedEvent>
 {
-    public override async Task HandleAsync(ProcessPaymentCommand message)
+    public override async Task HandleAsync(InventoryReservedEvent evt, CancellationToken cancellationToken = default)
     {
-        // Simulate payment process
-        var paymentSucceeded = PaymentService.SimulatePayment();
-
-        if (!paymentSucceeded)
+        if (await Context.IsAlreadyCompleted<InventoryReservedEvent>(cancellationToken)) return;
+        
+        var ok = PaymentService.SimulatePayment();
+        if (!ok)
         {
-            // Payment failed, compensation chain is initiated
-            await Context.MarkAsFailed<ProcessPaymentCommand>();
+            await Context.Publish(new PaymentFailedEvent
+            {
+                OrderId = evt.OrderId,
+                ParentMessageId = evt.MessageId
+            }, cancellationToken);
+
+            // Mark only this step as failed (step logging/metrics)
+            await Context.MarkAsFailed<InventoryReservedEvent>(cancellationToken);
             return;
         }
 
-        // Pivot step: no compensation after this point, only retry
-        Context.Data.PaymentIrreversible = true;
-
-        // Continue
-        await Context.Publish(new PaymentSucceededResponse
+        await Context.Publish(new PaymentSucceededEvent
         {
-            OrderId = message.OrderId,
-            ParentMessageId = message.MessageId
-        });
-        await Context.MarkAsComplete<ProcessPaymentCommand>();
+            OrderId = evt.OrderId,
+            ParentMessageId = evt.MessageId
+        }, cancellationToken);
+        await Context.MarkAsComplete<InventoryReservedEvent>(cancellationToken);
     }
 }

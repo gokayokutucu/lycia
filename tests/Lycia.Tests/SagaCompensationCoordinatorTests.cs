@@ -30,7 +30,7 @@ public class SagaCompensationCoordinatorTests
         };
 
         var handlerMock = new Mock<ISagaCompensationHandler<DummyEvent>>();
-        handlerMock.Setup(h => h.CompensateAsync(It.IsAny<DummyEvent>()))
+        handlerMock.Setup(h => h.CompensateAsync(It.IsAny<DummyEvent>(), CancellationToken.None))
             .Returns(() =>
             {
                 invocationCount++;
@@ -174,7 +174,7 @@ public class SagaCompensationCoordinatorTests
     {
         public static readonly List<string> Invocations = [];
 
-        public Task CompensateAsync(DummyEvent message)
+        public Task CompensateAsync(DummyEvent message, CancellationToken cancellationToken = default)
         {
             Invocations.Add(nameof(CircularHandler));
             return Task.CompletedTask;
@@ -272,7 +272,7 @@ public class SagaCompensationCoordinatorTests
         var messageId = Guid.NewGuid();
 
         var handlerMock = new Mock<ISagaCompensationHandler<DummyEvent>>();
-        handlerMock.Setup(h => h.CompensateAsync(It.IsAny<DummyEvent>()))
+        handlerMock.Setup(h => h.CompensateAsync(It.IsAny<DummyEvent>(), CancellationToken.None))
             .Returns(Task.CompletedTask)
             .Verifiable();
 
@@ -306,7 +306,7 @@ public class SagaCompensationCoordinatorTests
         await coordinator.CompensateAsync(sagaId, stepType, handlerMock.Object.GetType(), payload,null);
 
         // Assert
-        handlerMock.Verify(h => h.CompensateAsync(It.IsAny<DummyEvent>()), Times.Once);
+        handlerMock.Verify(h => h.CompensateAsync(It.IsAny<DummyEvent>(), CancellationToken.None), Times.Once);
     }
 
     [Fact]
@@ -471,7 +471,7 @@ public class SagaCompensationCoordinatorTests
     {
         public static readonly List<string> Invocations = [];
 
-        public Task CompensateAsync(DummyEvent message)
+        public Task CompensateAsync(DummyEvent message, CancellationToken cancellationToken = default)
         {
             Invocations.Add(nameof(NoOpHandler));
             return Task.CompletedTask;

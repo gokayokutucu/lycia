@@ -1,10 +1,7 @@
-using Lycia.Messaging;
 using Lycia.Saga.Handlers;
 using Lycia.Saga.Handlers.Abstractions;
 using Sample.Shared.Messages.Commands;
 using Sample.Shared.Messages.Events;
-using Sample.Shared.Messages.Responses;
-using Sample.Shared.SagaStates;
 
 namespace Sample.Order.Choreography.Consumer.Sagas;
 
@@ -13,25 +10,30 @@ public class CreateOrderSagaHandler :
     ISagaCompensationHandler<PaymentFailedEvent>,
     ISagaCompensationHandler<OrderShippingFailedEvent>
 {
-    public override async Task HandleStartAsync(CreateOrderCommand message)
+    public override async Task HandleStartAsync(CreateOrderCommand cmd, CancellationToken cancellationToken = default)
     {
-        // Persist order in the database, perform initial business logic
-        await Context.Publish(new OrderCreatedResponse
+        // Check if already completed to avoid duplicate processing for idempotency
+        // This is important in a reactive saga where the same command might be retried
+        if (await Context.IsAlreadyCompleted<CreateOrderCommand>(cancellationToken)) return;
+        
+        await Context.Publish(new OrderCreatedEvent
         {
-            OrderId = message.OrderId,
-            ParentMessageId = message.MessageId
-        });
-        await Context.MarkAsComplete<CreateOrderCommand>();
+            OrderId = cmd.OrderId,
+            ParentMessageId = cmd.MessageId
+        }, cancellationToken);
+        await Context.MarkAsComplete<CreateOrderCommand>(cancellationToken);
     }
 
-
-    public Task CompensateAsync(PaymentFailedEvent message)
+    // Optional – compensate on payment failure (reactive, not orchestration)
+    public async Task CompensateAsync(PaymentFailedEvent failed, CancellationToken cancellationToken = default)
     {
-        throw new NotImplementedException();
+        if (await Context.IsAlreadyCompleted<CreateOrderCommand>(cancellationToken)) return;
+        // e.g., notify user / mark order canceled / audit
     }
 
-    public Task CompensateAsync(OrderShippingFailedEvent message)
+    public Task CompensateAsync(OrderShippingFailedEvent failed, CancellationToken cancellationToken = default)
     {
-        throw new NotImplementedException();
+        // e.g., refund or notify depending on your business
+        return Task.CompletedTask;
     }
 }

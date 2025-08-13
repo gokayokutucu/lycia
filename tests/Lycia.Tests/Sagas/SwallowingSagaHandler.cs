@@ -6,7 +6,7 @@ namespace Lycia.Tests.Sagas;
 
 public class SwallowingSagaHandler : CoordinatedSagaHandler<OrderCreatedEvent, SampleSagaData>
 {
-    public override Task HandleAsync(OrderCreatedEvent message)
+    public override Task HandleAsync(OrderCreatedEvent message, CancellationToken cancellationToken = default)
     {
         try
         {

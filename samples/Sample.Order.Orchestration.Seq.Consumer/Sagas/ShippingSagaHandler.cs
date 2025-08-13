@@ -8,7 +8,7 @@ namespace Sample.Order.Orchestration.Seq.Consumer.Sagas;
 public class ShippingSagaHandler : 
     CoordinatedSagaHandler<PaymentProcessedEvent, CreateOrderSagaData>
 {
-    public override async Task HandleAsync(PaymentProcessedEvent message)
+    public override async Task HandleAsync(PaymentProcessedEvent message, CancellationToken cancellationToken = default)
     {
         // Simulate shipping step
         var shipped = true; // Simulate logic
@@ -16,18 +16,18 @@ public class ShippingSagaHandler :
         if (!shipped)
         {
             // Shipping failed
-            await Context.MarkAsFailed<PaymentProcessedEvent>();
+            await Context.MarkAsFailed<PaymentProcessedEvent>(cancellationToken);
             return;
         }
 
         // Shipping succeeded, complete the saga or trigger next step if needed
-        await Context.MarkAsComplete<PaymentProcessedEvent>();
+        await Context.MarkAsComplete<PaymentProcessedEvent>(cancellationToken);
     }
 
-    public override async Task CompensateAsync(PaymentProcessedEvent message)
+    public override async Task CompensateAsync(PaymentProcessedEvent message, CancellationToken cancellationToken = default)
     {
         // Compensation logic: recall shipment, notify customer, etc.
         Context.Data.ShippingReversed = true;
-        await Context.CompensateAndBubbleUp<PaymentProcessedEvent>();
+        await Context.CompensateAndBubbleUp<PaymentProcessedEvent>(cancellationToken);
     }
 }

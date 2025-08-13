@@ -21,7 +21,8 @@ public static class SagaContextFactory
         IEventBus eventBus,
         ISagaStore sagaStore,
         ISagaIdGenerator sagaIdGenerator,
-        ISagaCompensationCoordinator compensationCoordinator)
+        ISagaCompensationCoordinator compensationCoordinator,
+        CancellationToken cancellationToken = default)
     {
         if (handler is null) throw new ArgumentNullException(nameof(handler));
 
@@ -44,7 +45,7 @@ public static class SagaContextFactory
             var initDataArg = args[1];
 
             var loadedSagaData =
-                await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", initDataArg, sagaId);
+                await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", initDataArg, sagaId, cancellationToken);
 
             var contextType = typeof(SagaContext<,>).MakeGenericType(initMsgArg, initDataArg);
             contextInstance = Activator.CreateInstance(
