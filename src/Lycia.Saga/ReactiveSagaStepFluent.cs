@@ -3,18 +3,15 @@ using Lycia.Saga.Abstractions;
 
 namespace Lycia.Saga;
 
-// TInitialMessage is the type of message that the ISagaContext is primarily associated with.
-
-public class CoordinatedSagaStepFluent<TInitialMessage, TSagaData>(
-    ISagaContext<TInitialMessage, TSagaData> context,
+public class ReactiveSagaStepFluent<TInitialMessage>(
+    ISagaContext<TInitialMessage> context,
     Func<Task> operation) : ISagaStepFluent
     where TInitialMessage : IMessage
-    where TSagaData : SagaData
 {
-    public static object Create(Type stepType, Type sagaDataType, object context, Func<Task> operation)
+    public static object Create(Type stepType, object context, Func<Task> operation)
     {
-        var open = typeof(CoordinatedSagaStepFluent<,>);
-        var closed = open.MakeGenericType(stepType, sagaDataType);
+        var open = typeof(ReactiveSagaStepFluent<>);
+        var closed = open.MakeGenericType(stepType);
         return Activator.CreateInstance(closed, context, operation)!;
     }
     
@@ -33,7 +30,7 @@ public class CoordinatedSagaStepFluent<TInitialMessage, TSagaData>(
     public async Task ThenMarkAsCompensated()
     {
         await operation();
-        await context.CompensateAndBubbleUp<TInitialMessage>();
+        await context.MarkAsCompensated<TInitialMessage>();
     }
 
     public async Task ThenMarkAsCompensationFailed()
