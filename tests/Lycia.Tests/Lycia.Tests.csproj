@@ -9,6 +9,7 @@
 
     <ItemGroup>
         <PackageReference Include="coverlet.collector" Version="6.0.2"/>
+        <PackageReference Include="Microsoft.Extensions.Configuration" Version="9.0.0" />
         <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.5" />
         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1"/>
         <PackageReference Include="Moq" Version="4.20.72" />
@@ -23,7 +24,6 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\..\samples\Sample.Order.Choreography.Consumer\Sample.Order.Choreography.Consumer.csproj" />
       <ProjectReference Include="..\..\samples\Sample.Shared\Sample.Shared.csproj" />
       <ProjectReference Include="..\..\src\Lycia.Extensions\Lycia.Extensions.csproj" />
       <ProjectReference Include="..\..\src\Lycia.Infrastructure\Lycia.Infrastructure.csproj" />

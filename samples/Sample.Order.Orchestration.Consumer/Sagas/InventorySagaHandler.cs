@@ -6,21 +6,21 @@ using Sample.Shared.SagaStates;
 namespace Sample.Order.Orchestration.Consumer.Sagas;
 
 public class InventorySagaHandler : 
-    CoordinatedSagaHandler<ReserveInventoryCommand, InventoryReservedResponse, CreateOrderSagaData>
+    CoordinatedSagaHandler<ReserveInventoryCommand, CreateOrderSagaData>
 {
-    protected override async Task HandleAsync(ReserveInventoryCommand message)
+    public override async Task HandleAsync(ReserveInventoryCommand message, CancellationToken cancellationToken = default)
     {
         await Context.Publish(new InventoryReservedResponse
         {
             OrderId = message.OrderId,
             ParentMessageId = message.MessageId
-        });
-        await Context.MarkAsComplete<ReserveInventoryCommand>();
+        }, cancellationToken);
+        await Context.MarkAsComplete<ReserveInventoryCommand>(cancellationToken);
     }
 
-    public override Task CompensateAsync(ReserveInventoryCommand message)
+    public override Task CompensateAsync(ReserveInventoryCommand message, CancellationToken cancellationToken = default)
     {
         Context.Data.InventoryCompensated = true;
-        return Task.CompletedTask;
+        return Context.CompensateAndBubbleUp<ReserveInventoryCommand>(cancellationToken);
     }
 }

@@ -8,6 +8,7 @@ using Lycia.Saga.Enums;
 using Lycia.Saga.Exceptions;
 using Lycia.Saga.Extensions;
 using Lycia.Saga.Helpers;
+using Newtonsoft.Json;
 
 namespace Lycia.Infrastructure.Stores;
 
@@ -23,11 +24,18 @@ public class InMemorySagaStore(
     // Stores saga data per sagaId
     private readonly ConcurrentDictionary<Guid, object> _sagaData = new();
 
-    // Stores step logs per sagaId with composite key "stepTypeName_handlerTypeFullName"
+    // Stores step logs per sagaId with a composite key "stepTypeName_handlerTypeFullName"
     private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<string, SagaStepMetadata>> _stepLogs = new();
 
     public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
-        Type handlerType, object? payload)
+        Type handlerType, object? payload, Exception? exception, CancellationToken cancellationToken = default)
+    {
+        return LogStepAsync(sagaId, messageId, parentMessageId, stepType, status, handlerType, payload, 
+            new SagaStepFailureInfo("Exception occurred", exception?.GetType().Name, exception?.ToString()  ), cancellationToken);
+    }
+    
+    public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
+        Type handlerType, object? payload, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default)
     {
         var stepDict = _stepLogs.GetOrAdd(sagaId, _ => new ConcurrentDictionary<string, SagaStepMetadata>());
         var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
@@ -42,7 +50,8 @@ public class InMemorySagaStore(
             parentMessageId: parentMessageId,
             messageTypeName: messageTypeName,
             applicationId: "InMemory",
-            payload: payload);
+            payload: payload,
+            failureInfo: failureInfo);
 
         // State transition validation
         var result = SagaStepHelper.ValidateSagaStepTransition(messageId, parentMessageId, status, stepDict.Values,
@@ -74,24 +83,23 @@ public class InMemorySagaStore(
     /// Checks if the step with specified stepType and handlerType is completed.
     /// Uses the composite key for lookup.
     /// </summary>
-    public Task<bool> IsStepCompletedAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType)
+    public Task<bool> IsStepCompletedAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType, CancellationToken cancellationToken = default)
     {
-        if (_stepLogs.TryGetValue(sagaId, out var steps))
-        {
-            var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
-            return Task.FromResult(
-                steps.TryGetValue(stepKey, out var metadata) && metadata.Status == StepStatus.Completed
-            );
-        }
+        if (!_stepLogs.TryGetValue(sagaId, out var steps)) 
+            return Task.FromResult(false);
+        
+        var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
+        return Task.FromResult(
+            steps.TryGetValue(stepKey, out var metadata) && metadata.Status == StepStatus.Completed
+        );
 
-        return Task.FromResult(false);
     }
 
     /// <summary>
     /// Gets the status of the step with specified stepType and handlerType.
     /// Uses the composite key for lookup.
     /// </summary>
-    public Task<StepStatus> GetStepStatusAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType)
+    public Task<StepStatus> GetStepStatusAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType, CancellationToken cancellationToken = default)
     {
         if (_stepLogs.TryGetValue(sagaId, out var steps))
         {
@@ -106,26 +114,25 @@ public class InMemorySagaStore(
     }
 
     public Task<KeyValuePair<(string stepType, string handlerType, string messageId), SagaStepMetadata>?>
-        GetSagaHandlerStepAsync(Guid sagaId, Guid messageId)
+        GetSagaHandlerStepAsync(Guid sagaId, Guid messageId, CancellationToken cancellationToken = default)
     {
-        if (_stepLogs.TryGetValue(sagaId, out var steps))
+        if (!_stepLogs.TryGetValue(sagaId, out var steps))
+            return Task.FromResult<KeyValuePair<(string, string, string), SagaStepMetadata>?>(null);
+        foreach (var kvp in steps)
         {
-            foreach (var kvp in steps)
+            try
             {
-                try
+                var (stepTypeName, handlerTypeName, msgId) = SagaStoreLogicHelper.ParseStepKey(kvp.Key);
+                if (msgId == messageId.ToString())
                 {
-                    var (stepTypeName, handlerTypeName, msgId) = SagaStoreLogicHelper.ParseStepKey(kvp.Key);
-                    if (msgId == messageId.ToString())
-                    {
-                        return Task.FromResult<KeyValuePair<(string, string, string), SagaStepMetadata>?>(
-                            new KeyValuePair<(string, string, string), SagaStepMetadata>(
-                                (stepTypeName, handlerTypeName, msgId), kvp.Value));
-                    }
+                    return Task.FromResult<KeyValuePair<(string, string, string), SagaStepMetadata>?>(
+                        new KeyValuePair<(string, string, string), SagaStepMetadata>(
+                            (stepTypeName, handlerTypeName, msgId), kvp.Value));
                 }
-                catch
-                {
-                    // Ignore malformed keys
-                }
+            }
+            catch
+            {
+                // Ignore malformed keys
             }
         }
 
@@ -137,71 +144,132 @@ public class InMemorySagaStore(
     /// Returns a dictionary keyed by (stepType, handlerType) tuple.
     /// </summary>
     public Task<IReadOnlyDictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>>
-        GetSagaHandlerStepsAsync(Guid sagaId)
+        GetSagaHandlerStepsAsync(Guid sagaId, CancellationToken cancellationToken = default)
     {
-        if (_stepLogs.TryGetValue(sagaId, out var steps))
-        {
-            // Parse keys of the form "step:{stepType}:handler:{handlerType}:message:{messageId}"
-            var result = new Dictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>();
-            foreach (var kvp in steps)
-            {
-                var key = kvp.Key;
-                var metadata = kvp.Value;
-
-                try
-                {
-                    var (stepTypeName, handlerTypeName, messageId) = SagaStoreLogicHelper.ParseStepKey(key);
-                    result[(stepTypeName, handlerTypeName, messageId)] = metadata;
-                }
-                catch
-                {
-                    // ignore malformed keys
-                }
-            }
-
+        if (!_stepLogs.TryGetValue(sagaId, out var steps))
             return Task
                 .FromResult<IReadOnlyDictionary<(string stepType, string handlerType, string messageId),
-                    SagaStepMetadata>>(result);
+                    SagaStepMetadata>>(
+                    new Dictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>());
+        // Parse keys of the form "step:{stepType}:handler:{handlerType}:message:{messageId}"
+        var result = new Dictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>();
+        foreach (var kvp in steps)
+        {
+            var key = kvp.Key;
+            var metadata = kvp.Value;
+
+            try
+            {
+                var (stepTypeName, handlerTypeName, messageId) = SagaStoreLogicHelper.ParseStepKey(key);
+                result[(stepTypeName, handlerTypeName, messageId)] = metadata;
+            }
+            catch
+            {
+                // ignore malformed keys
+            }
         }
 
         return Task
-            .FromResult<IReadOnlyDictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>>(
-                new Dictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>());
-    }
+            .FromResult<IReadOnlyDictionary<(string stepType, string handlerType, string messageId),
+                SagaStepMetadata>>(result);
 
-    public Task<TSagaData?> LoadSagaDataAsync<TSagaData>(Guid sagaId)
-        where TSagaData : class
+    }
+    
+    public Task<IMessage?> LoadSagaStepMessageAsync(Guid sagaId, Type stepType, CancellationToken cancellationToken = default)
     {
-        _sagaData.TryGetValue(sagaId, out var data);
-        return Task.FromResult(data as TSagaData);
+        if (!_stepLogs.TryGetValue(sagaId, out var steps)) return Task.FromResult<IMessage?>(null);
+
+        foreach (var kvp in steps)
+        {
+            try
+            {
+                var (stepTypeName, _, _) = SagaStoreLogicHelper.ParseStepKey(kvp.Key);
+                if (stepTypeName != stepType.GetSimplifiedQualifiedName()) continue;
+
+                var meta = kvp.Value;
+                var payloadType = Type.GetType(meta.MessageTypeName);
+                if (payloadType == null) continue;
+
+                if (JsonConvert.DeserializeObject(meta.MessagePayload, payloadType) is IMessage messageObject)
+                    return Task.FromResult<IMessage?>(messageObject);
+            }
+            catch
+            {
+                // Ignore malformed keys
+            }
+        }
+
+        return Task.FromResult<IMessage?>(null);
     }
 
-    public Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data)
+    public Task<IMessage?> LoadSagaStepMessageAsync(Guid sagaId, Guid messageId, CancellationToken cancellationToken = default)
+    {
+        if (!_stepLogs.TryGetValue(sagaId, out var steps)) return Task.FromResult<IMessage?>(null);
+
+        foreach (var kvp in steps)
+        {
+            try
+            {
+                var (_, _, msgId) = SagaStoreLogicHelper.ParseStepKey(kvp.Key);
+                if (msgId != messageId.ToString()) continue;
+
+                var meta = kvp.Value;
+                var payloadType = Type.GetType(meta.MessageTypeName);
+                if (payloadType == null) continue;
+
+                return Task.FromResult(JsonConvert.DeserializeObject(meta.MessagePayload, payloadType) as IMessage);
+            }
+            catch
+            {
+                // Ignore malformed keys
+            }
+        }
+
+        return Task.FromResult<IMessage?>(null);
+    }
+
+    public Task<TSagaData> LoadSagaDataAsync<TSagaData>(Guid sagaId, CancellationToken cancellationToken = default)
+        where TSagaData : SagaData, new()
+    {
+        if (_sagaData.TryGetValue(sagaId, out var data))
+        {
+            return Task.FromResult((TSagaData)data);
+        }
+        var defaultData = new TSagaData();
+        _sagaData[sagaId] = defaultData;
+        return Task.FromResult(defaultData);
+    }
+
+    public Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data, CancellationToken cancellationToken = default)
+        where TSagaData : SagaData
     {
         if (data is null) return Task.CompletedTask;
+        data.SagaId = sagaId;
+        
         _sagaData[sagaId] = data;
         return Task.CompletedTask;
     }
 
     public Task<ISagaContext<TMessage, TSagaData>> LoadContextAsync<TMessage, TSagaData>(Guid sagaId, TMessage message,
-        Type handlerType)
+        Type handlerType, CancellationToken cancellationToken = default)
         where TMessage : IMessage
-        where TSagaData : new()
+        where TSagaData : SagaData
     {
         if (!_sagaData.TryGetValue(sagaId, out var data))
         {
-            data = new TSagaData();
-            _sagaData[sagaId] = data;
+            _sagaData[sagaId] = data ?? throw new InvalidOperationException(
+                $"SagaData instance could not be loaded or created. " +
+                $"Please ensure a non-null state is available for saga: {sagaId}");
         }
-
+        
         ISagaContext<TMessage, TSagaData> context = new SagaContext<TMessage, TSagaData>(
             sagaId: sagaId,
             currentStep: message,
             handlerTypeOfCurrentStep: handlerType,
             data: (TSagaData)data,
-            eventBus: eventBus, // Use injected field
+            eventBus: eventBus, // Use the injected field
             sagaStore: this,
-            sagaIdGenerator: sagaIdGenerator, // Use injected field
+            sagaIdGenerator: sagaIdGenerator, // Use the injected field
             compensationCoordinator: compensationCoordinator
         );
 

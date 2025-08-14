@@ -6,15 +6,15 @@ public class GrandparentCompensationSagaHandler : StartReactiveSagaHandler<Dummy
 {
     public static readonly List<string> Invocations = [];
 
-    public override Task HandleStartAsync(DummyGrandparentEvent message)
+    public override Task HandleStartAsync(DummyGrandparentEvent message, CancellationToken cancellationToken = default)
     {
         return Task.CompletedTask;
     }
 
-    public override Task CompensateStartAsync(DummyGrandparentEvent message)
+    public override Task CompensateStartAsync(DummyGrandparentEvent message, CancellationToken cancellationToken = default)
     {
         Invocations.Add(nameof(GrandparentCompensationSagaHandler));
-        Context.MarkAsCompensated<DummyGrandparentEvent>();
+        Context.CompensateAndBubbleUp<DummyGrandparentEvent>(cancellationToken);
         return Task.CompletedTask;
     }
 }
@@ -23,15 +23,15 @@ public class ParentCompensationSagaHandler : ReactiveSagaHandler<DummyParentEven
 {
     public static readonly List<string> Invocations = [];
 
-    public override Task HandleAsync(DummyParentEvent message)
+    public override Task HandleAsync(DummyParentEvent message, CancellationToken cancellationToken = default)
     {
         return Task.CompletedTask;
     }
 
-    public override Task CompensateAsync(DummyParentEvent message)
+    public override Task CompensateAsync(DummyParentEvent message, CancellationToken cancellationToken = default)
     {
         Invocations.Add(nameof(ParentCompensationSagaHandler));
-        Context.MarkAsCompensated<DummyParentEvent>();
+        Context.CompensateAndBubbleUp<DummyParentEvent>(cancellationToken);
         return Task.CompletedTask;
     }
 }
@@ -40,22 +40,22 @@ public class ChildCompensationSagaHandler : ReactiveSagaHandler<DummyChildEvent>
 {
     public static readonly List<string> Invocations = [];
 
-    public override Task HandleAsync(DummyChildEvent message)
+    public override Task HandleAsync(DummyChildEvent message, CancellationToken cancellationToken = default)
     {
         if (message.IsFailed)
         {
-            Context.MarkAsFailed<DummyChildEvent>();
+            Context.MarkAsFailed<DummyChildEvent>(cancellationToken);
         }
         return Task.CompletedTask;
     }
 
-    public override Task CompensateAsync(DummyChildEvent message)
+    public override Task CompensateAsync(DummyChildEvent message, CancellationToken cancellationToken = default)
     {
         Invocations.Add(nameof(ChildCompensationSagaHandler));
         if (message.IsCompensationFailed)
-            Context.MarkAsCompensationFailed<DummyChildEvent>();
+            Context.MarkAsCompensationFailed<DummyChildEvent>(cancellationToken);
         else
-            Context.MarkAsCompensated<DummyChildEvent>();
+            Context.CompensateAndBubbleUp<DummyChildEvent>(cancellationToken);
         return Task.CompletedTask;
     }
 }

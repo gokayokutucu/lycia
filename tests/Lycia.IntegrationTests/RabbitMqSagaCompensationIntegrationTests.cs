@@ -10,6 +10,7 @@ using Lycia.Extensions.Stores;
 using Lycia.Infrastructure.Compensating;
 using Lycia.Infrastructure.Dispatching;
 using Lycia.Messaging.Enums;
+using Lycia.Saga;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Handlers;
 using Lycia.Saga.Handlers.Abstractions;
@@ -129,11 +130,11 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
 
         // Pre-populate saga steps: grandparent and parent as Completed, child as Compensated
         await sagaStore.LogStepAsync(sagaId, grandparentId, null, typeof(DummyGrandparentEvent), StepStatus.Completed,
-            handlerTypeGrandparent, grandparentMsg);
+            handlerTypeGrandparent, grandparentMsg, (SagaStepFailureInfo?)null);
         await sagaStore.LogStepAsync(sagaId, parentId, grandparentId, typeof(DummyParentEvent), StepStatus.Completed,
-            handlerTypeParent, parentMsg);
+            handlerTypeParent, parentMsg, (SagaStepFailureInfo?)null);
         await sagaStore.LogStepAsync(sagaId, childId, parentId, typeof(DummyChildEvent), StepStatus.Failed,
-            handlerTypeChild, childMsg);
+            handlerTypeChild, childMsg, (SagaStepFailureInfo?)null);
 
         // Act 1: Compensate child, parent and grandparent (normal compensation flow)
         await coordinator.CompensateParentAsync(sagaId, typeof(DummyChildEvent), typeof(ChildCompensationSagaHandler), childMsg); 
@@ -257,9 +258,9 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
 
         // Pre-populate saga steps: grandparent and parent as Completed, child as CompensationFailed
         await sagaStore.LogStepAsync(sagaId, grandparentId, null, typeof(DummyGrandparentEvent), StepStatus.Completed,
-            handlerTypeGrandparent, grandparentMsg);
+            handlerTypeGrandparent, grandparentMsg, (SagaStepFailureInfo?)null);
         await sagaStore.LogStepAsync(sagaId, parentId, grandparentId, typeof(DummyParentEvent), StepStatus.Completed,
-            handlerTypeParent, parentMsg);
+            handlerTypeParent, parentMsg, (SagaStepFailureInfo?)null);
 
         // Act 1: Call the protected DispatchCompensationHandlersAsync method using reflection (simulate compensation chain)
         await sagaDispatcher.DispatchAsync(childMsg, typeof(ChildCompensationSagaHandler), sagaId: sagaId, CancellationToken.None);
@@ -366,9 +367,9 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
 
         // Pre-populate saga steps: grandparent and parent as Completed, child as CompensationFailed
         await sagaStore.LogStepAsync(sagaId, grandparentId, null, typeof(DummyGrandparentEvent), StepStatus.Completed,
-            handlerTypeGrandparent, grandparentMsg);
+            handlerTypeGrandparent, grandparentMsg, (SagaStepFailureInfo?)null);
         await sagaStore.LogStepAsync(sagaId, parentId, grandparentId, typeof(DummyParentEvent), StepStatus.Completed,
-            handlerTypeParent, parentMsg);
+            handlerTypeParent, parentMsg, (SagaStepFailureInfo?)null);
 
         // Act 1: Call the protected DispatchCompensationHandlersAsync method using reflection (simulate compensation chain)
         await sagaDispatcher.DispatchAsync(childMsg, typeof(ChildCompensationSagaHandler), sagaId: sagaId, CancellationToken.None);
@@ -467,13 +468,13 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
 
         // Pre-populate the saga steps as "Completed".
         await sagaStore.LogStepAsync(sagaId, grandparentId, null, typeof(DummyEvent), StepStatus.Completed,
-            handlerTypeGrandparent, grandparentMsg);
+            handlerTypeGrandparent, grandparentMsg, (SagaStepFailureInfo?)null);
         await sagaStore.LogStepAsync(sagaId, parentId, grandparentId, typeof(DummyEvent), StepStatus.Completed,
-            handlerTypeParent, parentMsg);
+            handlerTypeParent, parentMsg, (SagaStepFailureInfo?)null);
 
         // Mark child as Compensated (simulate successful compensation at leaf)
         await sagaStore.LogStepAsync(sagaId, childId, parentId, typeof(DummyEvent), StepStatus.Failed,
-            handlerTypeChild, childMsg);
+            handlerTypeChild, childMsg, (SagaStepFailureInfo?)null);
 
         // First compensation attempt should compensate parent only
         await coordinator.CompensateParentAsync(sagaId, typeof(DummyEvent), typeof(ChildCompensationHandler), childMsg);
@@ -541,7 +542,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         var starterMessageId = Guid.NewGuid();
         // Simulate log "Started"
         await sagaStore.LogStepAsync(testCommand.SagaId.Value, starterMessageId, null, typeof(TestSagaCommand),
-            StepStatus.Started, handlerType, testCommand);
+            StepStatus.Started, handlerType, testCommand, (SagaStepFailureInfo?)null);
 
         var finished = new TaskCompletionSource<bool>();
 
@@ -558,7 +559,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
                     if (msg.Message == "trigger-failure")
                     {
                         await sagaStore.LogStepAsync(msg.SagaId.Value, starterMessageId, null, typeof(TestSagaCommand),
-                            StepStatus.Failed, handlerType, msg);
+                            StepStatus.Failed, handlerType, msg, (SagaStepFailureInfo?)null);
                         finished.TrySetResult(true);
                         throw new InvalidOperationException("Intentional failure for compensation.");
                     }
@@ -604,7 +605,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
     // Dummy handler that always throws (simulates saga failure and compensation path)
     private class FailingSagaHandler : ReactiveSagaHandler<TestSagaCommand>
     {
-        public override Task HandleAsync(TestSagaCommand message)
+        public override Task HandleAsync(TestSagaCommand message, CancellationToken cancellationToken = default)
         {
             throw new InvalidOperationException("Intentional failure for test.");
         }
@@ -614,12 +615,13 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
 // Minimal dummy ISagaCompensationCoordinator implementation for testing.
 internal class DummySagaCompensationCoordinator : ISagaCompensationCoordinator
 {
-    public Task CompensateAsync(Guid sagaId, Type failedStepType, Type? handlerType, IMessage message)
+    public Task CompensateAsync(Guid sagaId, Type failedStepType, Type? handlerType, IMessage message,
+        SagaStepFailureInfo? failInfo, CancellationToken cancellationToken = default)
     {
         throw new NotImplementedException();
     }
 
-    public Task CompensateParentAsync(Guid sagaId, Type stepType, Type handlerType, IMessage message)
+    public Task CompensateParentAsync(Guid sagaId, Type stepType, Type handlerType, IMessage message, CancellationToken cancellationToken = default)
     {
         throw new NotImplementedException();
     }
