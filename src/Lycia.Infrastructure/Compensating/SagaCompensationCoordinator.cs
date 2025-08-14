@@ -149,7 +149,9 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
                 eventBus,
                 sagaStore,
                 sagaIdGenerator,
-                this, cancellationToken);
+                this, 
+                serviceProvider,
+                cancellationToken);
 
             await delegateMethod(handler, messageObject, cancellationToken);
         }
@@ -171,7 +173,9 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
                     eventBus,
                     sagaStore,
                     sagaIdGenerator,
-                    this, cancellationToken);
+                    this, 
+                    serviceProvider,
+                    cancellationToken);
 
                 await delegateMethod(handler, messageObject, cancellationToken);
             }
