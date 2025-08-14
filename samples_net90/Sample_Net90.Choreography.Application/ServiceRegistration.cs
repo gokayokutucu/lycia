@@ -1,6 +1,9 @@
 ﻿using FluentValidation;
+using Lycia.Extensions;
+using Lycia.Saga.Extensions;
 using Mapster;
 using MediatR;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Sample_Net90.Choreography.Application.Behaviors;
 using Sample_Net90.Choreography.Application.Order.Commands.Create;
@@ -10,8 +13,11 @@ namespace Sample_Net90.Choreography.Application;
 
 public static class ServiceRegistration
 {
-    public static IServiceCollection AddApplicationServices(this IServiceCollection services)
+    public static IServiceCollection AddApplicationServices(this IServiceCollection services, IConfiguration? configuration)
     {
+        services.AddLycia(configuration)
+            .AddSagasFromCurrentAssembly();
+
         services.AddMediatR(cfg => cfg.RegisterServicesFromAssemblyContaining<CreateOrderCommandHandler>());
 
         services.AddValidatorsFromAssemblyContaining<CreateOrderCommandValidator>();

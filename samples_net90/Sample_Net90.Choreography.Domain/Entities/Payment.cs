@@ -2,11 +2,16 @@
 
 namespace Sample_Net90.Choreography.Domain.Entities;
 
-public sealed record Payment(Guid Id, Guid By, DateTime At, CRUD Action, bool IsDeleted,
-    Guid OrderId,
-    Guid CardId,
-    decimal Amount,
-    Currency Currency,
-    TransactionStatus Status
-) : BaseEntity(Id, By, At, Action, IsDeleted);
+public sealed class Payment : BaseEntity
+{
+    public Guid PaymentId { get; init; }
+    public Order Order { get; init; } = null!;
+    public Guid OrderId { get; init; }
+    public Card Card { get; init; } = null!;
+    public Guid CardId { get; init; }
+    public decimal Amount { get; init; }
+    public Currency Currency { get; init; }
+    public TransactionStatus Status { get; init; }
+
+}
 

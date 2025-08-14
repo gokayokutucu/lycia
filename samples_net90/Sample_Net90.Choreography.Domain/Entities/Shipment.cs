@@ -2,9 +2,14 @@
 
 namespace Sample_Net90.Choreography.Domain.Entities;
 
-public sealed record Shipment(Guid Id, Guid By, DateTime At, CRUD Action, bool IsDeleted,
-    Guid OrderId,
-    Guid DeliveryAddressId,
-    Guid BillingAddressId,
-    ShipmentStatus Status
-) : BaseEntity(Id, By, At, Action, IsDeleted);
+public sealed class Shipment : BaseEntity
+{
+    public Guid ShipmentId { get; init; }
+    public Order Order { get; init; } = null!;
+    public Guid OrderId { get; init; }
+    public Address DeliveryAddress { get; init; } = null!;
+    public Guid DeliveryAddressId { get; init; }
+    public Address BillingAddress { get; init; } = null!;
+    public Guid BillingAddressId { get; init; }
+    public ShipmentStatus Status { get; init; }
+}

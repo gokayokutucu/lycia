@@ -17,17 +17,16 @@ public sealed class ReserveStockSagaHandler(ILogger<ReserveStockSagaHandler> log
 
             foreach (var item in message.Cart)
             {
-                var isAvailable = await stockRepository.IsStockAvailableAsync(item.ProductId, item.Quantity);//lock transaction
+                var isAvailable = await stockRepository.IsStockAvailableAsync(item.ProductId, item.Quantity);
                 if (!isAvailable)
                 {
                     logger.LogWarning("ReserveStockSagaHandler => HandleAsync => Insufficient stock for ProductId: {ProductId}, Quantity: {Quantity}", item.ProductId, item.Quantity);
                     throw new InvalidOperationException($"Insufficient stock for ProductId: {item.ProductId}, Quantity: {item.Quantity}");
                 }
                 var stock = mapper.Map<Domain.Entities.Stock>(item);
-                stock = stock with { Id = Guid.CreateVersion7() };
 
-                await stockRepository.ReserveStockAsync(stock, DateTime.UtcNow.AddMinutes(15));
-                logger.LogInformation("ReserveStockSagaHandler => HandleAsync => Stock reserved successfully for OrderId: {OrderId}, ProductId: {ProductId}, Quantity: {Quantity}", item.OrderId, item.ProductId, item.Quantity);
+                await stockRepository.ReserveStockAsync(stock, message.OrderId, DateTime.UtcNow.AddMinutes(15));//lock transaction
+                logger.LogInformation("ReserveStockSagaHandler => HandleAsync => Stock reserved successfully for OrderId: {OrderId}, ProductId: {ProductId}, Quantity: {Quantity}", message.OrderId, item.ProductId, item.Quantity);
             }
 
             await Context.MarkAsComplete<OrderCreatedSagaEvent>();

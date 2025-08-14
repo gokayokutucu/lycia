@@ -9,23 +9,27 @@ using Sample_Net90.Choreography.Domain.Sagas.Stock.ReserveStock.Events;
 
 namespace Sample_Net90.Choreography.Application.Payment.Commands.Process.Handlers;
 
-public sealed class ProcessPaymentSagaCommandHandler(ILogger<ProcessPaymentSagaCommandHandler> logger, IMapper mapper, IPaymentService paymentService, IOrderRepository orderRepository)
+public sealed class ProcessPaymentSagaCommandHandler(ILogger<ProcessPaymentSagaCommandHandler> logger, IMapper mapper, IPaymentService paymentService, IOrderRepository orderRepository, ICustomerRepository customerRepository)
     : StartReactiveSagaHandler<ProcessPaymentSagaCommand>
 {
     public override async Task HandleStartAsync(ProcessPaymentSagaCommand message)
     {
         try
         {
-            if(!await orderRepository.OrderExistsAsync(message.OrderId))
+            logger.LogInformation("ProcessPaymentSagaCommandHandler => HandleStartAsync => Start processing ProcessPaymentSagaCommand for OrderId: {OrderId}", message.OrderId);
+
+            if (!await customerRepository.CardExistsAsync(message.CardId))
+            {
+                logger.LogWarning("ProcessPaymentSagaCommandHandler => HandleStartAsync => Card with ID: {CartId} does not exist. Cannot process payment.", message.CardId);
+                throw new InvalidOperationException($"Card with ID: {message.CardId} does not exist.");
+            }
+            if (!await orderRepository.OrderExistsAsync(message.OrderId))
             {
                 logger.LogWarning("ProcessPaymentSagaCommandHandler => HandleStartAsync => Order with ID: {OrderId} does not exist. Cannot process payment.", message.OrderId);
                 throw new InvalidOperationException($"Order with ID: {message.OrderId} does not exist.");
             }
 
-            logger.LogInformation("ProcessPaymentSagaCommandHandler => HandleStartAsync => Start processing ProcessPaymentSagaCommand for OrderId: {OrderId}", message.OrderId);
-
             var payment = mapper.Map<Domain.Entities.Payment>(message);
-            payment = payment with { Id = Guid.CreateVersion7() };
             var id = await paymentService.ProcessPaymentAsync(payment);
             logger.LogInformation("ProcessPaymentSagaCommandHandler => HandleStartAsync => Payment processed with ID: {PaymentId} for OrderId: {OrderId}", id, message.OrderId);
 
@@ -49,7 +53,7 @@ public sealed class ProcessPaymentSagaCommandHandler(ILogger<ProcessPaymentSagaC
 
             var payment = mapper.Map<Domain.Entities.Payment>(message);
             await paymentService.RefundPaymentAsync(payment);
-            logger.LogInformation("ProcessPaymentSagaCommandHandler => CompensateStartAsync => Payment with ID: {PaymentId} refunded successfully for OrderId: {OrderId}", payment.Id, message.OrderId);
+            logger.LogInformation("ProcessPaymentSagaCommandHandler => CompensateStartAsync => Payment with ID: {PaymentId} refunded successfully for OrderId: {OrderId}", payment.PaymentId, message.OrderId);
 
             await Context.MarkAsCompensated<StockReservedSagaEvent>();
             logger.LogInformation("ProcessPaymentSagaCommandHandler => CompensateStartAsync => Compensation completed successfully for OrderId: {OrderId}", message.OrderId);

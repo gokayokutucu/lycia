@@ -18,10 +18,9 @@ public sealed class ScheduleShipmentSagaEventHandler (ILogger<ScheduleShipmentSa
 
             //get addresses from db
             var shipment = mapper.Map<Domain.Entities.Shipment>(message);
-            shipment = shipment with { Id = Guid.CreateVersion7() };
             
             await deliveryService.ScheduleShipmentAsync(shipment);
-            logger.LogInformation("ScheduleShipmentSagaEventHandler => HandleAsync => Shipment scheduled with ID: {ShipmentId} for PaymentId: {PaymentId}", shipment.Id, message.PaymentId);
+            logger.LogInformation("ScheduleShipmentSagaEventHandler => HandleAsync => Shipment scheduled with ID: {ShipmentId} for PaymentId: {PaymentId}", shipment.ShipmentId, message.PaymentId);
 
             var shipmentScheduledEvent = mapper.Map<ShipmentScheduledSagaEvent>(shipment);
             await Context.PublishWithTracking(shipmentScheduledEvent).ThenMarkAsComplete();
@@ -43,7 +42,7 @@ public sealed class ScheduleShipmentSagaEventHandler (ILogger<ScheduleShipmentSa
             
             var shipment = mapper.Map<Domain.Entities.Shipment>(message);
             await deliveryService.CancelShipmentAsync(shipment);
-            logger.LogInformation("ScheduleShipmentSagaEventHandler => CompensateAsync => Shipment with ID: {ShipmentId} cancelled successfully for PaymentId: {PaymentId}", shipment.Id, message.PaymentId);
+            logger.LogInformation("ScheduleShipmentSagaEventHandler => CompensateAsync => Shipment with ID: {ShipmentId} cancelled successfully for PaymentId: {PaymentId}", shipment.ShipmentId, message.PaymentId);
             
             await Context.MarkAsCompensated<PaymentProcessedSagaEvent>();
             logger.LogInformation("ScheduleShipmentSagaEventHandler => CompensateAsync => Compensation completed successfully for PaymentId: {PaymentId}", message.PaymentId);

@@ -5,5 +5,5 @@ namespace Sample_Net90.Choreography.Domain.Sagas.Payment.ProcessPayment.Commands
 public sealed class ProcessPaymentSagaCommand : CommandBase
 {
     public Guid OrderId { get; init; }
-    public Guid CartId { get; set; }
+    public Guid CardId { get; set; }
 }
