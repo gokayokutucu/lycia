@@ -7,7 +7,7 @@ public class GrandparentCompensationHandler : ISagaCompensationHandler<DummyEven
 {
     public static readonly List<string> Invocations = [];
 
-    public Task CompensateAsync(DummyEvent message)
+    public Task CompensateAsync(DummyEvent message, CancellationToken cancellationToken = default)
     {
         Invocations.Add(nameof(GrandparentCompensationHandler));
         return Task.CompletedTask;
@@ -18,7 +18,7 @@ public class ParentCompensationHandler : ISagaCompensationHandler<DummyEvent>
 {
     public static readonly List<string> Invocations = [];
 
-    public Task CompensateAsync(DummyEvent message)
+    public Task CompensateAsync(DummyEvent message, CancellationToken cancellationToken = default)
     {
         Invocations.Add(nameof(ParentCompensationHandler));
         return Task.CompletedTask;
@@ -29,7 +29,7 @@ public class ChildCompensationHandler : ISagaCompensationHandler<DummyEvent>
 {
     public static readonly List<string> Invocations = [];
 
-    public Task CompensateAsync(DummyEvent message)
+    public Task CompensateAsync(DummyEvent message, CancellationToken cancellationToken = default)
     {
         Invocations.Add(nameof(ChildCompensationHandler));
         return Task.CompletedTask;

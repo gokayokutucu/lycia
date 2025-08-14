@@ -9,6 +9,7 @@ using System.Text;
 using Lycia.Saga.Helpers;
 using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Helpers;
+using Lycia.Saga.Extensions;
 using Constants = Lycia.Extensions.Configurations.Constants;
 
 
@@ -604,7 +605,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         await EnsureChannelAsync(cancellationToken)
             .ConfigureAwait(false);
         // routingKey equivalent to the exchange name in RabbitMQ terminology
-        var exchangeName = MessagingNamingHelper.GetExchangeName(typeof(TEvent)); // event.OrderCreatedEvent
+        var exchangeName = MessagingNamingHelper.GetExchangeName(typeof(TEvent)); // event.OrderCreatedEvent or response.OrderCreatedResponse
 
         if (_channel == null)
         {
@@ -619,12 +620,8 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             , arguments: null
             , cancellationToken: cancellationToken);
 
-        sagaId ??= @event.SagaId; // Ensure sagaId is not null, use a new Guid if not provided
-
-        var headers = RabbitMqEventBusHelper.BuildMessageHeaders(@event
-            , sagaId
-            , typeof(TEvent)
-            , Constants.EventTypeHeader);
+        //sagaId ??= @event.SagaId; //GOP: silinmis
+        var headers = RabbitMqEventBusHelper.BuildMessageHeaders(@event, sagaId, typeof(TEvent), Constants.EventTypeHeader);
         var properties = new BasicProperties
         {
             Persistent = true,
@@ -675,7 +672,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             Persistent = true,
             Headers = headers
         };
-
+        
         var json = JsonHelper.SerializeSafe(command);
         var body = Encoding.UTF8.GetBytes(json);
 
@@ -702,7 +699,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             var dlqArgs = new Dictionary<string, object?>();
             if (_options.MessageTTL is { TotalMilliseconds: > 0 } ttl)
             {
-                dlqArgs[XMesssageTtl] = (int)ttl.TotalMilliseconds;
+                dlqArgs[XMessageTtl] = (int)ttl.TotalMilliseconds;
             }
             await _channel.QueueDeclareAsync(
                 queue: dlqName,
@@ -770,10 +767,10 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
 
             // Ensure queue and exchange exist and are bound before subscribing the consumer.
             // These operations are idempotent.
-            var exchangeName = MessagingNamingHelper.GetExchangeName(messageType); // e.g., "event.OrderCreatedEvent"
-            var routingKey = MessagingNamingHelper.GetTopicRoutingKey(messageType); // e.g., "event.OrderCreatedEvent.#"
+            var exchangeName = MessagingNamingHelper.GetExchangeName(messageType); // e.g., "event.OrderCreatedEvent" or "command.CreateOrderCommand" or "response.OrderCreatedResponse"
+            var routingKey = MessagingNamingHelper.GetTopicRoutingKey(messageType); // e.g., "event.OrderCreatedEvent.#" or "command.CreateOrderCommand.#" or "response.OrderCreatedResponse.#"
 
-            var exchangeType = messageType.IsSubclassOf(typeof(EventBase))
+            var exchangeType = messageType.IsSubclassOf(typeof(EventBase)) || messageType.IsSubclassOfResponseBase()
                 ? ExchangeType.Topic
                 : ExchangeType.Direct;
 
@@ -789,7 +786,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             var queueArgs = await DeclareDeadLetter(queueName, cancellationToken);
             if (_options?.MessageTTL is { TotalMilliseconds: > 0 } ttl)
             {
-                queueArgs[XMesssageTtl] = (int)ttl.TotalMilliseconds;
+                queueArgs[XMessageTtl] = (int)ttl.TotalMilliseconds;
             }
             await _channel.QueueDeclareAsync(
                 queue: queueName,

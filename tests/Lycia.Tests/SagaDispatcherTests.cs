@@ -12,13 +12,11 @@ using Lycia.Saga.Extensions;
 using Lycia.Saga.Handlers;
 using Lycia.Saga.Handlers.Abstractions;
 using Lycia.Tests.Helpers;
+using Lycia.Tests.Messages;
 using Lycia.Tests.Sagas;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
-using Moq.Protected;
-using Sample.Shared.Messages.Commands;
-using Sample.Shared.Messages.Events;
 
 namespace Lycia.Tests;
 
@@ -87,13 +85,13 @@ public class SagaDispatcherTests
 
         // Log both steps to simulate the circular chain
         await store.LogStepAsync(fixedSagaId, parentEventId, failingEventId, typeof(ParentEvent), StepStatus.Completed,
-            typeof(ParentCompensationSagaHandler), parentEvent);
+            typeof(ParentCompensationSagaHandler), parentEvent, (SagaStepFailureInfo?)null);
 
 
         // Act & Assert: Expect an InvalidOperationException due to the circular parent chain
         await Assert.ThrowsAsync<SagaStepCircularChainException>(() =>
             store.LogStepAsync(fixedSagaId, failingEventId, parentEventId, typeof(FailingEvent), StepStatus.Failed,
-                typeof(FailingCompensationSagaHandler), failingEvent)
+                typeof(FailingCompensationSagaHandler), failingEvent, (SagaStepFailureInfo?)null)
         );
     }
 
@@ -213,7 +211,7 @@ public class SagaDispatcherTests
         };
         
         await store.LogStepAsync(fixedSagaId, startMessageId, Guid.Empty, typeof(CreateOrderCommand), StepStatus.Completed,
-            typeof(CreateOrderSagaHandler), command);
+            typeof(CreateOrderSagaHandler), command, (SagaStepFailureInfo?)null);
 
         // Act
         await dispatcher.DispatchAsync(command, handlerType: typeof(ShipOrderForCompensationSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
@@ -602,13 +600,13 @@ public class SagaDispatcherTests
     {
         public static bool CompensateCalled = false;
 
-        public override async Task HandleStartAsync(InitialCommand message)
+        public override async Task HandleStartAsync(InitialCommand message, CancellationToken cancellationToken = default)
         {
             var next = new ParentEvent { ParentMessageId = message.MessageId };
-            await Context.PublishWithTracking(next).ThenMarkAsComplete();
+            await Context.PublishWithTracking(next).ThenMarkAsComplete(cancellationToken);
         }
 
-        public override Task CompensateStartAsync(InitialCommand message)
+        public override Task CompensateStartAsync(InitialCommand message, CancellationToken cancellationToken = default)
         {
             CompensateCalled = true;
             return Task.CompletedTask;
@@ -619,13 +617,13 @@ public class SagaDispatcherTests
     {
         public static bool CompensateCalled = false;
 
-        public override Task HandleAsync(ParentEvent message)
+        public override Task HandleAsync(ParentEvent message, CancellationToken cancellationToken = default)
         {
             var fail = new FailingEvent { ParentMessageId = message.MessageId };
-            return Context.PublishWithTracking(fail).ThenMarkAsComplete();
+            return Context.PublishWithTracking(fail).ThenMarkAsComplete(cancellationToken);
         }
 
-        public override Task CompensateAsync(ParentEvent message)
+        public override Task CompensateAsync(ParentEvent message, CancellationToken cancellationToken = default)
         {
             CompensateCalled = true;
             return Task.CompletedTask;
@@ -636,18 +634,18 @@ public class SagaDispatcherTests
     {
         public static bool CompensateCalled = false;
 
-        public override Task HandleAsync(FailingEvent message)
+        public override Task HandleAsync(FailingEvent message, CancellationToken cancellationToken = default)
         {
             CompensateCalled = true;
             // Simulate a failure in the handler
             // Uncomment the next line to simulate a failure and trigger compensation
             // throw new Exception("Simulated failure in FailingCompensationSagaHandler");
-            Context.MarkAsComplete<FailingEvent>();
+            Context.MarkAsComplete<FailingEvent>(cancellationToken);
             return Task.CompletedTask;
         }
             //=> throw new InvalidOperationException("Fail!");
 
-        public override Task CompensateAsync(FailingEvent message)
+        public override Task CompensateAsync(FailingEvent message, CancellationToken cancellationToken = default)
         {
             CompensateCalled = true;
             throw new Exception("Compensation failed");

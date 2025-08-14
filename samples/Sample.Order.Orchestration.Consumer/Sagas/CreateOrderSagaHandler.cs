@@ -8,68 +8,68 @@ using Sample.Shared.SagaStates;
 namespace Sample.Order.Orchestration.Consumer.Sagas;
 
 public class CreateOrderSagaHandler :
-    StartCoordinatedSagaHandler<CreateOrderCommand, OrderCreatedResponse, CreateOrderSagaData>,
+    StartCoordinatedResponsiveSagaHandler<CreateOrderCommand, OrderCreatedResponse, CreateOrderSagaData>,
     IResponseSagaHandler<InventoryReservedResponse>,
     IResponseSagaHandler<PaymentSucceededResponse>,
     IResponseSagaHandler<OrderShippedResponse>
 {
-    public override async Task HandleStartAsync(CreateOrderCommand message)
+    public override async Task HandleStartAsync(CreateOrderCommand message, CancellationToken cancellationToken = default)
     {
         // Persist order in the database, perform initial business logic
         await Context.Publish(new OrderCreatedResponse
         {
             OrderId = message.OrderId,
             ParentMessageId = message.MessageId
-        });
-        await Context.MarkAsComplete<CreateOrderCommand>();
+        }, cancellationToken);
+        await Context.MarkAsComplete<CreateOrderCommand>(cancellationToken);
     }
 
-    public override async Task HandleSuccessResponseAsync(OrderCreatedResponse response)
+    public override async Task HandleSuccessResponseAsync(OrderCreatedResponse response, CancellationToken cancellationToken = default)
     {
         // Order created, reserve inventory
         await Context.Send(new ReserveInventoryCommand
         {
             OrderId = response.OrderId,
             ParentMessageId = response.MessageId
-        });
-        await Context.MarkAsComplete<OrderCreatedResponse>();
-    }
-    
-    public override Task HandleFailResponseAsync(OrderCreatedResponse response, FailResponse fail)
-    {
-        // Order could not be created, mark the saga as failed, log, or start compensation
-        return Context.MarkAsFailed<CreateOrderCommand>();
+        }, cancellationToken);
+        await Context.MarkAsComplete<OrderCreatedResponse>(cancellationToken);
     }
 
-    public async Task HandleSuccessResponseAsync(InventoryReservedResponse response)
+    public override Task HandleFailResponseAsync(OrderCreatedResponse response, FailResponse fail, CancellationToken cancellationToken = default)
+    {
+        // Order could not be created, mark the saga as failed, log, or start compensation
+        return Task.CompletedTask;
+    }
+
+    public async Task HandleSuccessResponseAsync(InventoryReservedResponse response, CancellationToken cancellationToken = default)
     {
         // Inventory reserved, start payment process
         await Context.Send(new ProcessPaymentCommand
         {
             OrderId = response.OrderId,
             ParentMessageId = response.MessageId
-        });
-        await Context.MarkAsComplete<InventoryReservedResponse>();
-    }
-    
-    public Task HandleFailResponseAsync(InventoryReservedResponse response, FailResponse fail)
-    {
-        // Inventory reservation failed, cancel the order or log
-        return Context.MarkAsFailed<ReserveInventoryCommand>();
+        }, cancellationToken);
+        await Context.MarkAsComplete<InventoryReservedResponse>(cancellationToken);
     }
 
-    public async Task HandleSuccessResponseAsync(PaymentSucceededResponse response)
+    public Task HandleFailResponseAsync(InventoryReservedResponse response, FailResponse fail, CancellationToken cancellationToken = default)
+    {
+        // Inventory reservation failed, cancel the order or log
+        return Task.CompletedTask;
+    }
+
+    public async Task HandleSuccessResponseAsync(PaymentSucceededResponse response, CancellationToken cancellationToken = default)
     {
         // Payment complete, start shipping process
         await Context.Send(new ShipOrderCommand
         {
             OrderId = response.OrderId,
             ParentMessageId = response.MessageId
-        });
-        await Context.MarkAsComplete<PaymentSucceededResponse>();
+        }, cancellationToken);
+        await Context.MarkAsComplete<PaymentSucceededResponse>(cancellationToken);
     }
-    
-    public Task HandleFailResponseAsync(PaymentSucceededResponse response, FailResponse fail)
+
+    public Task HandleFailResponseAsync(PaymentSucceededResponse response, FailResponse fail, CancellationToken cancellationToken = default)
     {
         /* Payment failed, revert reservation, or cancel the order */
         // If payment is irreversible, we cannot compensate:
@@ -79,25 +79,23 @@ public class CreateOrderSagaHandler :
             Console.WriteLine("Payment irreversible! Compensation skipped.");
             return Task.CompletedTask;
         }
-        else
-        {
-            // Trigger compensation chains for payment(Call the InventorySagaHandler CompensateAsync method)
-            return Context.MarkAsFailed<ReserveInventoryCommand>();
-        }
+
+        // Trigger compensation chains for payment(Call the InventorySagaHandler CompensateAsync method)
+        return Task.CompletedTask;
     }
 
-    public async Task HandleSuccessResponseAsync(OrderShippedResponse response)
+    public async Task HandleSuccessResponseAsync(OrderShippedResponse response, CancellationToken cancellationToken = default)
     {
         // All steps completed
         // Here you can mark the saga as completed (DB update, event publish, etc.)
         // Example:
         Context.Data.IsCompleted = true;
-        await Context.MarkAsComplete<OrderShippedResponse>();
+        await Context.MarkAsComplete<OrderShippedResponse>(cancellationToken);
     }
 
-    public Task HandleFailResponseAsync(OrderShippedResponse response, FailResponse fail)
+    public Task HandleFailResponseAsync(OrderShippedResponse response, FailResponse fail, CancellationToken cancellationToken = default)
     {
         // Shipping failed, notify the customer or start compensation
-        return Context.MarkAsFailed<ShipOrderCommand>();
+        return Task.CompletedTask;
     }
 }
