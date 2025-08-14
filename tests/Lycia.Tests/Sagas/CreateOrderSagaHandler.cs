@@ -15,7 +15,7 @@ public class CreateOrderSagaHandler :
     /// </summary>
     public bool CompensateCalled { get; private set; }
 
-    public override async Task HandleStartAsync(CreateOrderCommand command)
+    public override async Task HandleStartAsync(CreateOrderCommand command, CancellationToken cancellationToken = default)
     {
         // Publish the success response event
         await Context
@@ -24,7 +24,7 @@ public class CreateOrderSagaHandler :
                 OrderId = command.OrderId,
                 UserId = command.UserId,
                 TotalPrice = command.TotalPrice
-            }).ThenMarkAsComplete();
+            }, cancellationToken).ThenMarkAsComplete(cancellationToken);
 
         #region Other way to publish an event
 
@@ -40,20 +40,20 @@ public class CreateOrderSagaHandler :
         #endregion
     }
 
-    public override async Task CompensateStartAsync(CreateOrderCommand message)
+    public override async Task CompensateStartAsync(CreateOrderCommand message, CancellationToken cancellationToken = default)
     {
         try
         {
             CompensateCalled = true;
             // Compensation logic
-            await Context.CompensateAndBubbleUp<CreateOrderCommand>();
+            await Context.CompensateAndBubbleUp<CreateOrderCommand>(cancellationToken);
         }
         catch (Exception ex)
         {
             // Log, notify, halt chain, etc.
             Console.WriteLine($"❌ Compensation failed: {ex.Message}");
 
-            await Context.MarkAsCompensationFailed<CreateOrderCommand>();
+            await Context.MarkAsCompensationFailed<CreateOrderCommand>(ex, cancellationToken);
             // Optionally: rethrow or store for manual retry
             throw; // Or suppress and log for retry system
         }

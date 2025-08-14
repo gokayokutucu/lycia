@@ -7,6 +7,7 @@ using Lycia.Messaging;
 using Lycia.Messaging.Enums;
 using Lycia.Saga;
 using Lycia.Saga.Exceptions;
+using Lycia.Tests.Helpers;
 
 namespace Lycia.IntegrationTests;
 
@@ -160,18 +161,5 @@ public class RedisSagaStoreIntegrationTests : IAsyncLifetime
 
         loaded.Should().NotBeNull();
         loaded.Should().BeEquivalentTo(data);
-    }
-
-    private class DummySagaData : SagaData
-    {
-        public string SomeField { get; set; } = "test";
-    }
-    
-    private class DummyStep : EventBase
-    {
-    }
-
-    private class DummyHandler
-    {
     }
 }
