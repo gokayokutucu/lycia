@@ -1,8 +1,13 @@
+using Autofac.Core;
 using Lycia.Extensions;
 using Lycia.Saga.Extensions;
+using Microsoft.EntityFrameworkCore;
 using Sample_Net90.Choreography.Api.EndPoints;
 using Sample_Net90.Choreography.Api.Middlewares;
 using Sample_Net90.Choreography.Application;
+using Sample_Net90.Choreography.Infrastructure;
+using Sample_Net90.Choreography.Infrastructure.Persistence;
+using System.Configuration;
 
 namespace Sample_Net90.Choreography.Api;
 
@@ -17,13 +22,22 @@ public class Program
         builder.Services.AddEndpointsApiExplorer();
         builder.Services.AddSwaggerGen();
 
-        builder.Services
-            .AddLycia(builder.Configuration)
-            .AddSagasFromCurrentAssembly();
-
-        builder.Services.AddApplicationServices();
+        builder.Services.AddInfrastructureServices(builder.Configuration);
+        builder.Services.AddApplicationServices(builder.Configuration);
+        //builder.Services
+        //    .AddLycia(builder.Configuration)
+        //    .AddSagasFromCurrentAssembly()
+        //    ;
 
         var app = builder.Build();
+
+        using (var scope = app.Services.CreateScope()) // <- after app is built
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            dbContext.Database.Migrate();
+            dbContext.CreateAuditInfrastructure();
+        }
+
 
         if (app.Environment.IsDevelopment())
         {

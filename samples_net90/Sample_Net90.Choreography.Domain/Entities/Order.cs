@@ -1,8 +1,13 @@
-﻿using Sample_Net90.Choreography.Domain.Enums;
+﻿namespace Sample_Net90.Choreography.Domain.Entities;
 
-namespace Sample_Net90.Choreography.Domain.Entities;
-
-public sealed record Order(Guid Id, Guid By, DateTime At, CRUD Action, bool IsDeleted,
-    Guid CustomerId,
-    IEnumerable<CartItem> Products
-) : BaseEntity(Id, By, At, Action, IsDeleted);
+public sealed class Order : BaseEntity
+{
+    public Guid OrderId { get; init; }
+    public Customer Customer { get; init; } = null!;
+    public Guid CustomerId { get; init; }
+    public IEnumerable<CartItem> Products { get; init; }
+    public Address DeliveryAddress { get; init; } = null!;
+    public Guid DeliveryAddressId { get; init; }
+    public Address BillingAddress { get; init; } = null!;
+    public Guid BillingAddressId { get; init; }
+}

@@ -17,17 +17,16 @@ public sealed class ProcessPaymentSagaEventHandler(ILogger<ProcessPaymentSagaEve
         {
             logger.LogInformation("ProcessPaymentSagaEventHandler => HandleAsync => Start processing StockReservedSagaEvent for ReservationId: {ReservationId}", message.ReservationId);
 
-            if (!await stockRepository.IsReserved(message.ReservationId))
+            if (!await stockRepository.IsReservedAsync(message.ReservationId))
             {
                 logger.LogWarning("ProcessPaymentSagaEventHandler => HandleAsync => Reservation with ID: {ReservationId} does not exist. Cannot process payment.", message.ReservationId);
                 throw new InvalidOperationException($"Reservation with ID: {message.ReservationId} does not exist.");
             }
 
             var payment = mapper.Map<Domain.Entities.Payment>(message);
-            payment = payment with { Id = Guid.CreateVersion7() };
 
             await paymentService.ProcessPaymentAsync(payment);
-            logger.LogInformation("ProcessPaymentSagaEventHandler => HandleAsync => Payment processed with ID: {PaymentId} for ReservationId: {ReservationId}", payment.Id, message.ReservationId);
+            logger.LogInformation("ProcessPaymentSagaEventHandler => HandleAsync => Payment processed with ID: {PaymentId} for ReservationId: {ReservationId}", payment.PaymentId, message.ReservationId);
 
             var paymentProcessedEvent = mapper.Map<PaymentProcessedSagaEvent>(payment);
             await Context.PublishWithTracking(paymentProcessedEvent).ThenMarkAsComplete();
@@ -49,7 +48,7 @@ public sealed class ProcessPaymentSagaEventHandler(ILogger<ProcessPaymentSagaEve
 
             var payment = mapper.Map<Domain.Entities.Payment>(message);
             await paymentService.RefundPaymentAsync(payment);
-            logger.LogInformation("ProcessPaymentSagaEventHandler => CompensateAsync => Payment with ID: {PaymentId} refunded successfully for ReservationId: {ReservationId}", payment.Id, message.ReservationId);
+            logger.LogInformation("ProcessPaymentSagaEventHandler => CompensateAsync => Payment with ID: {PaymentId} refunded successfully for ReservationId: {ReservationId}", payment.PaymentId, message.ReservationId);
 
             await Context.MarkAsCompensated<StockReservedSagaEvent>();
             logger.LogInformation("ProcessPaymentSagaEventHandler => CompensateAsync => Compensation completed successfully for ReservationId: {ReservationId}", message.ReservationId);

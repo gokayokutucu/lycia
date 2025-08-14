@@ -15,6 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Lycia.Extensions\Lycia.Extensions.csproj" />
     <ProjectReference Include="..\..\src\Lycia.Saga\Lycia.Saga.csproj" />
     <ProjectReference Include="..\Sample_Net90.Choreography.Domain\Sample_Net90.Choreography.Domain.csproj" />
   </ItemGroup>
@@ -25,8 +26,6 @@
     <Folder Include="Shipment\Commands\Schedule\Mapping\" />
     <Folder Include="Shipment\Commands\Schedule\Validation\" />
     <Folder Include="Stock\Commands\Reserve\Dto\" />
-    <Folder Include="Stock\Commands\Reserve\Mapping\" />
-    <Folder Include="Stock\Commands\Reserve\Validation\" />
   </ItemGroup>
 
 </Project>

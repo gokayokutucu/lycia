@@ -2,8 +2,8 @@
 
 public static class ValidationErrors
 {
-    public const string InvalidAddress = "Invalid address.";
-    public const string InvalidCard = "Invalid card details.";
-    public const string InsufficientStock = "Insufficient stock available.";
-    public const string InvalidLocation = "Invalid stock location.";
+    public const string IsRequired = "{PropertyName} is required.";
+    public const string MustBeCorrectFormat = "{PropertyName} must be in a correct format.";
+    public const string MustNotBeEmpty = "{PropertyName} must have at least one item.";
+    public const string MustBeGreaterThan = "{PropertyName} must be greater than {ComparisonValue}.";
 }

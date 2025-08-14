@@ -11,14 +11,19 @@ public static class OrdersEndpoints
     {
         app.MapPost("/orders", async (IMediator mediator, [FromBody] CreateOrderCommand command) =>
         {
-            var id = await mediator.Send(command);
-            return Results.Ok;
-        });
+            var orderId = await mediator.Send(command);
+            return Results.Ok(orderId);
+        })
+        .WithName("CreateOrder")
+        .WithOpenApi();
 
-        app.MapPost("/orders/{id:guid}/payment", async (IMediator mediator, ProcessPaymentCommand command) =>
+        app.MapPost("/orders/{orderId:Guid}/payment", async (IMediator mediator, [FromRoute] Guid orderId, [FromBody] ProcessPaymentCommand command) =>
         {
-            var id = await mediator.Send(command);
-            return Results.Ok;
-        });
+            command.OrderId = orderId;
+            var paymentId = await mediator.Send(command);
+            return Results.Ok(paymentId);
+        })
+        .WithName("Payment")
+        .WithOpenApi();
     }
 }
