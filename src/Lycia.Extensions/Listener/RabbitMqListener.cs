@@ -71,7 +71,7 @@ public class RabbitMqListener(
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error while processing message of type {MessageType}", messageType?.Name);
+                logger.LogError(ex, "Error while processing message of type {MessageType}", messageType.Name);
                 // Optional: DLQ/retry/metrics logic.
             }
         }
