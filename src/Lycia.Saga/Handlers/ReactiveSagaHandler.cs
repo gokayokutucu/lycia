@@ -1,6 +1,8 @@
 using Lycia.Messaging;
 using Lycia.Saga.Abstractions;
+using Lycia.Saga.Configurations;
 using Lycia.Saga.Handlers.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace Lycia.Saga.Handlers;
 
@@ -14,10 +16,14 @@ public abstract class ReactiveSagaHandler<TMessage> :
     where TMessage : IMessage
 {
     protected ISagaContext<IMessage> Context { get; private set; } = null!;
+    protected virtual bool EnforceIdempotency => 
+        _sagaOptions?.DefaultIdempotency ?? true;
 
-    public void Initialize(ISagaContext<IMessage> context)
+    private SagaOptions? _sagaOptions;
+    public void Initialize(ISagaContext<IMessage> context, IOptions<SagaOptions> sagaOptions)
     {
         Context = context;
+        _sagaOptions = sagaOptions.Value;
     }
     
     protected async Task HandleAsyncInternal(TMessage message, CancellationToken cancellationToken = default)
@@ -25,11 +31,21 @@ public abstract class ReactiveSagaHandler<TMessage> :
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
+            if (EnforceIdempotency &&
+                await Context.IsAlreadyCompleted<TMessage>(cancellationToken))
+                return;
+            
             await HandleAsync(message, cancellationToken);  // Actual business logic
         }
-        catch (Exception)
+        catch (OperationCanceledException)
         {
-            await Context.MarkAsFailed<TMessage>(cancellationToken);
+            // Cancellation is not a failure; let it bubble (or just return if that's your policy)
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Preserve failure details in your store/logs
+            await Context.MarkAsFailed<TMessage>(ex, cancellationToken);
         }
     }
 
@@ -40,9 +56,14 @@ public abstract class ReactiveSagaHandler<TMessage> :
         {
             await CompensateAsync(message, cancellationToken);  // Actual business logic
         }
-        catch (Exception)
+        catch (OperationCanceledException)
         {
-            await Context.MarkAsCompensationFailed<TMessage>(cancellationToken);
+            // Cancellation is not a failure; let it bubble (or just return if that's your policy)
+            throw;
+        }
+        catch (Exception ex)
+        {
+            await Context.MarkAsCompensationFailed<TMessage>(ex, cancellationToken);
         }
     }
 

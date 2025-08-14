@@ -1,6 +1,7 @@
 using Lycia.Saga.Handlers;
 using Lycia.Saga.Handlers.Abstractions;
 using Sample.Shared.Messages.Events;
+using Sample.Shared.Services;
 
 namespace Sample.Order.Choreography.Consumer.Sagas;
 
@@ -19,10 +20,26 @@ public class InventorySagaHandler :
         await Context.MarkAsComplete<OrderCreatedEvent>(cancellationToken);
     }
 
+    public override async Task CompensateAsync(OrderCreatedEvent message, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            // Fix count of reserved stock
+            InventoryService.ReleaseStock(message.OrderId);
+            await Context.MarkAsCompensated<OrderCreatedEvent>(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await Context.MarkAsCompensationFailed<OrderCreatedEvent>(cancellationToken);
+
+            throw; 
+        }
+    }
+
     public Task CompensateAsync(PaymentFailedEvent failed, CancellationToken cancellationToken = default)
     {
         // Release reserved stock
-        // Optionally publish InventoryReleasedEvent
+        InventoryService.ReleaseStock(failed.OrderId);
         return Task.CompletedTask;
     }
 }

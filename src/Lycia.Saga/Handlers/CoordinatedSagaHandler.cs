@@ -1,6 +1,8 @@
 using Lycia.Messaging;
 using Lycia.Saga.Abstractions;
+using Lycia.Saga.Configurations;
 using Lycia.Saga.Handlers.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace Lycia.Saga.Handlers;
 
@@ -16,7 +18,7 @@ public abstract class CoordinatedSagaHandler<TMessage, TSagaData> :
 {
     protected ISagaContext<IMessage, TSagaData> Context { get; private set; } = null!;
 
-    public void Initialize(ISagaContext<IMessage, TSagaData> context)
+    public void Initialize(ISagaContext<IMessage, TSagaData> context, IOptions<SagaOptions> sagaOptions)
     {
         Context = context;
     }
