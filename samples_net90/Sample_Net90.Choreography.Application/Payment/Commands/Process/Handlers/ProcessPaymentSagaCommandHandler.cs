@@ -12,10 +12,12 @@ namespace Sample_Net90.Choreography.Application.Payment.Commands.Process.Handler
 public sealed class ProcessPaymentSagaCommandHandler(ILogger<ProcessPaymentSagaCommandHandler> logger, IMapper mapper, IPaymentService paymentService, IOrderRepository orderRepository, ICustomerRepository customerRepository)
     : StartReactiveSagaHandler<ProcessPaymentSagaCommand>
 {
-    public override async Task HandleStartAsync(ProcessPaymentSagaCommand message)
+    public override async Task HandleStartAsync(ProcessPaymentSagaCommand message, CancellationToken cancellationToken = default)
     {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             logger.LogInformation("ProcessPaymentSagaCommandHandler => HandleStartAsync => Start processing ProcessPaymentSagaCommand for OrderId: {OrderId}", message.OrderId);
 
             if (!await customerRepository.CardExistsAsync(message.CardId))
@@ -45,10 +47,12 @@ public sealed class ProcessPaymentSagaCommandHandler(ILogger<ProcessPaymentSagaC
             throw new Exception($"ProcessPaymentSagaCommandHandler => HandleStartAsync => Error : {ex.InnerException?.Message ?? ex.Message}", ex);
         }
     }
-    public override async Task CompensateStartAsync(ProcessPaymentSagaCommand message)
+    public override async Task CompensateStartAsync(ProcessPaymentSagaCommand message, CancellationToken cancellationToken = default)
     {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             logger.LogInformation("ProcessPaymentSagaCommandHandler => CompensateStartAsync => Start compensating ProcessPaymentSagaCommand for OrderId: {OrderId}", message.OrderId);
 
             var payment = mapper.Map<Domain.Entities.Payment>(message);

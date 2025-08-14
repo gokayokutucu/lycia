@@ -9,10 +9,12 @@ namespace Sample_Net90.Choreography.Application.Stock.Commands.Reserve.Handlers;
 public sealed class ReserveStockSagaHandler(ILogger<ReserveStockSagaHandler> logger, IMapper mapper, IStockRepository stockRepository)
     : ReactiveSagaHandler<OrderCreatedSagaEvent>
 {
-    public override async Task HandleAsync(OrderCreatedSagaEvent message)
+    public override async Task HandleAsync(OrderCreatedSagaEvent message, CancellationToken cancellationToken = default)
     {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             logger.LogInformation("ReserveStockSagaHandler => HandleAsync => Start processing OrderCreatedSagaEvent for OrderId: {OrderId}", message.OrderId);
 
             foreach (var item in message.Cart)
@@ -45,10 +47,12 @@ public sealed class ReserveStockSagaHandler(ILogger<ReserveStockSagaHandler> log
         }
     }
 
-    public override async Task CompensateAsync(OrderCreatedSagaEvent message)
+    public override async Task CompensateAsync(OrderCreatedSagaEvent message, CancellationToken cancellationToken = default)
     {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             logger.LogInformation("ReserveStockSagaHandler => CompensateAsync => Start compensating for OrderCreatedSagaEvent with OrderId: {OrderId}", message.OrderId);
 
             var stock = mapper.Map<Domain.Entities.Stock>(message);

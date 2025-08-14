@@ -127,8 +127,6 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             , arguments: null);
 
 
-        sagaId ??= @event.SagaId; // Ensure sagaId is not null, use a new Guid if not provided
-
         var headers = RabbitMqEventBusHelper.BuildMessageHeaders(@event
             , sagaId
             , typeof(TEvent)
@@ -513,7 +511,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
 #else
 public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
 {
-    private const string XMesssageTtl = "x-message-ttl";
+    private const string XMessageTtl = "x-message-ttl";
     private readonly ConnectionFactory _factory;
     private readonly ILogger<RabbitMqEventBus> _logger;
     private IConnection? _connection;
@@ -620,7 +618,6 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             , arguments: null
             , cancellationToken: cancellationToken);
 
-        //sagaId ??= @event.SagaId; //GOP: silinmis
         var headers = RabbitMqEventBusHelper.BuildMessageHeaders(@event, sagaId, typeof(TEvent), Constants.EventTypeHeader);
         var properties = new BasicProperties
         {

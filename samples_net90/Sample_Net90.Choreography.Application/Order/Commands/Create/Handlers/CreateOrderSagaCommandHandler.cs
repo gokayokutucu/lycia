@@ -14,10 +14,12 @@ public sealed class CreateOrderSagaCommandHandler(
     ICustomerRepository customerRepository)
     : StartReactiveSagaHandler<CreateOrderSagaCommand>
 {
-    public override async Task HandleStartAsync(CreateOrderSagaCommand message)
+    public override async Task HandleStartAsync(CreateOrderSagaCommand message, CancellationToken cancellationToken = default)
     {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             logger.LogInformation("Start processing CreateOrderSagaCommand.");
 
             if (!await customerRepository.CustomerExistsAsync(message.CustomerId))
@@ -58,10 +60,12 @@ public sealed class CreateOrderSagaCommandHandler(
         }
     }
 
-    public override async Task CompensateStartAsync(CreateOrderSagaCommand message)
+    public override async Task CompensateStartAsync(CreateOrderSagaCommand message, CancellationToken cancellationToken = default)
     {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             logger.LogInformation("Start compensating CreateOrderSagaCommand.");
 
             var order = mapper.Map<Domain.Entities.Order>(message);
