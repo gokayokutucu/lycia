@@ -123,7 +123,9 @@ public class SagaDispatcher(
             eventBus,
             sagaStore,
             sagaIdGenerator,
-            compensationCoordinator, cancellationToken);
+            compensationCoordinator, 
+            serviceProvider, 
+            cancellationToken);
         
         await HandleSagaAsync(message, handler, handlerType, cancellationToken);
     }

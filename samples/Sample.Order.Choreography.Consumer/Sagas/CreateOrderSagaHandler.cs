@@ -10,18 +10,36 @@ public class CreateOrderSagaHandler :
     ISagaCompensationHandler<PaymentFailedEvent>,
     ISagaCompensationHandler<OrderShippingFailedEvent>
 {
+    // Use this to enforce idempotency if needed
+    // Uncomment if you want to enforce idempotency for this saga
+    //protected override bool EnforceIdempotency => true;
+
     public override async Task HandleStartAsync(CreateOrderCommand cmd, CancellationToken cancellationToken = default)
     {
-        // Check if already completed to avoid duplicate processing for idempotency
-        // This is important in a reactive saga where the same command might be retried
-        if (await Context.IsAlreadyCompleted<CreateOrderCommand>(cancellationToken)) return;
-        
         await Context.Publish(new OrderCreatedEvent
         {
             OrderId = cmd.OrderId,
             ParentMessageId = cmd.MessageId
         }, cancellationToken);
         await Context.MarkAsComplete<CreateOrderCommand>(cancellationToken);
+    }
+
+    public override async Task CompensateStartAsync(CreateOrderCommand message, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            // Compensation logic
+            await Context.MarkAsCompensated<CreateOrderCommand>(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            // Log, notify, halt chain, etc.
+            Console.WriteLine($"❌ Compensation failed: {ex.Message}");
+            
+            await Context.MarkAsCompensationFailed<CreateOrderCommand>(cancellationToken);
+            // Optionally: rethrow or store for manual retry
+            throw; // Or suppress and log for retry system
+        }
     }
 
     // Optional – compensate on payment failure (reactive, not orchestration)
