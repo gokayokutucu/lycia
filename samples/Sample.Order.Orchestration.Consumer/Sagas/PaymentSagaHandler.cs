@@ -2,20 +2,34 @@ using Lycia.Saga.Handlers;
 using Sample.Shared.Messages.Commands;
 using Sample.Shared.Messages.Responses;
 using Sample.Shared.SagaStates;
+using Sample.Shared.Services;
 
 namespace Sample.Order.Orchestration.Consumer.Sagas;
 
 public class PaymentSagaHandler :
-    CoordinatedSagaHandler<ProcessPaymentCommand, PaymentSucceededResponse, CreateOrderSagaData>
+    CoordinatedSagaHandler<ProcessPaymentCommand, CreateOrderSagaData>
 {
-    protected override async Task HandleAsync(ProcessPaymentCommand message)
+    public override async Task HandleAsync(ProcessPaymentCommand message, CancellationToken cancellationToken = default)
     {
+        // Simulate payment process
+        var paymentSucceeded = PaymentService.SimulatePayment(false);
+
+        if (!paymentSucceeded)
+        {
+            // Payment failed, compensation chain is initiated
+            await Context.MarkAsFailed<ProcessPaymentCommand>(cancellationToken);
+            return;
+        }
+
+        // Pivot step: no compensation after this point, only retry
+        Context.Data.PaymentIrreversible = true;
+
+        // Continue
         await Context.Publish(new PaymentSucceededResponse
         {
             OrderId = message.OrderId,
             ParentMessageId = message.MessageId
-        });
-        //Pivot point
-        await Context.MarkAsComplete<ProcessPaymentCommand>();
+        }, cancellationToken);
+        await Context.MarkAsComplete<ProcessPaymentCommand>(cancellationToken);
     }
 }

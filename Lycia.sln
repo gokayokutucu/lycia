@@ -25,8 +25,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.IntegrationTests", "t
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Tests", "tests\Lycia.Tests\Lycia.Tests.csproj", "{B2AE5013-780F-4387-970E-F7BAD9D26332}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Order.Choreography.Consumer", "samples\Sample.Order.Choreography.Consumer\Sample.Order.Choreography.Consumer.csproj", "{454B7D73-55D4-4AD2-B8BD-25B0D4A0AD94}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Tests.Helpers", "tests\Lycia.Tests.Helpers\Lycia.Tests.Helpers.csproj", "{60897FE6-CD56-4352-B3A8-DE9A38AA551D}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "samples_net48", "samples_net48", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
@@ -50,6 +48,10 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample_Net90.Choreography.Domain", "samples_net90\Sample_Net90.Choreography.Domain\Sample_Net90.Choreography.Domain.csproj", "{0EF775A2-7EEB-298C-58EC-3D5D52B8A8EE}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample_Net90.Choreography.Infrastructure", "samples_net90\Sample_Net90.Choreography.Infrastructure\Sample_Net90.Choreography.Infrastructure.csproj", "{498E4347-241B-41AC-B2B4-4CE47D3A2362}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Order.Choreography.Consumer", "samples\Sample.Order.Choreography.Consumer\Sample.Order.Choreography.Consumer.csproj", "{3CEE35A8-FE87-46F7-9B38-5A6C28CE176A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Order.Orchestration.Seq.Consumer", "samples\Sample.Order.Orchestration.Seq.Consumer\Sample.Order.Orchestration.Seq.Consumer.csproj", "{162A2960-9663-4650-91B9-69C2CE0283E7}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -89,10 +91,6 @@ Global
 		{B2AE5013-780F-4387-970E-F7BAD9D26332}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B2AE5013-780F-4387-970E-F7BAD9D26332}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B2AE5013-780F-4387-970E-F7BAD9D26332}.Release|Any CPU.Build.0 = Release|Any CPU
-		{454B7D73-55D4-4AD2-B8BD-25B0D4A0AD94}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{454B7D73-55D4-4AD2-B8BD-25B0D4A0AD94}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{454B7D73-55D4-4AD2-B8BD-25B0D4A0AD94}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{454B7D73-55D4-4AD2-B8BD-25B0D4A0AD94}.Release|Any CPU.Build.0 = Release|Any CPU
 		{60897FE6-CD56-4352-B3A8-DE9A38AA551D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{60897FE6-CD56-4352-B3A8-DE9A38AA551D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{60897FE6-CD56-4352-B3A8-DE9A38AA551D}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -132,6 +130,18 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+		{9194D736-D70F-4C02-A38B-F7C0DB38788B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9194D736-D70F-4C02-A38B-F7C0DB38788B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9194D736-D70F-4C02-A38B-F7C0DB38788B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9194D736-D70F-4C02-A38B-F7C0DB38788B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3CEE35A8-FE87-46F7-9B38-5A6C28CE176A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3CEE35A8-FE87-46F7-9B38-5A6C28CE176A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3CEE35A8-FE87-46F7-9B38-5A6C28CE176A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3CEE35A8-FE87-46F7-9B38-5A6C28CE176A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{162A2960-9663-4650-91B9-69C2CE0283E7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{162A2960-9663-4650-91B9-69C2CE0283E7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{162A2960-9663-4650-91B9-69C2CE0283E7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{162A2960-9663-4650-91B9-69C2CE0283E7}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{EED82447-E52F-4A54-A6CF-45EC98C1C37B} = {59E39671-6EFC-4EE2-B70F-DF6955451C7C}
@@ -154,5 +164,8 @@ Global
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {5CD8A085-2012-4CA9-864D-8C9A851CDF68}
+		{9194D736-D70F-4C02-A38B-F7C0DB38788B} = {BC1E10B1-10E1-456F-9496-6DA354303160}
+		{3CEE35A8-FE87-46F7-9B38-5A6C28CE176A} = {BC1E10B1-10E1-456F-9496-6DA354303160}
+		{162A2960-9663-4650-91B9-69C2CE0283E7} = {BC1E10B1-10E1-456F-9496-6DA354303160}
 	EndGlobalSection
 EndGlobal
