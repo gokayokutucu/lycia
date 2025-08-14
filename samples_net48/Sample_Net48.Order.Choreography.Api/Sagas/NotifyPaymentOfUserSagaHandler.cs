@@ -2,6 +2,7 @@ using Lycia.Saga.Handlers;
 using Microsoft.Extensions.Logging;
 using Sample_Net48.Shared.Messages.Events;
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Sample_Net48.Order.Choreography.Api.Sagas
@@ -14,8 +15,10 @@ namespace Sample_Net48.Order.Choreography.Api.Sagas
             logger = _logger;
         }
 
-        public override async Task HandleAsync(PaymentProcessedEvent paymentProcessedEvent)
+        public override async Task HandleAsync(PaymentProcessedEvent paymentProcessedEvent, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             if (paymentProcessedEvent == null)
             {
                 logger.LogError("PaymentProcessedEvent is null.");
@@ -28,10 +31,12 @@ namespace Sample_Net48.Order.Choreography.Api.Sagas
             await Context.MarkAsComplete<PaymentProcessedEvent>();
         }
 
-        public override async Task CompensateAsync(PaymentProcessedEvent message)
+        public override async Task CompensateAsync(PaymentProcessedEvent message, CancellationToken cancellationToken = default)
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 logger.LogInformation("Compensating for failed payment notification. OrderId: {OrderId}", message.OrderId);
                 await Context.MarkAsCompensated<PaymentProcessedEvent>();
             }

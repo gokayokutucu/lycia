@@ -2,6 +2,7 @@ using Lycia.Saga.Handlers;
 using Microsoft.Extensions.Logging;
 using Sample_Net21.Shared.Messages.Events;
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Sample_Core31.Order.Choreography.Api.Sagas
@@ -14,8 +15,9 @@ namespace Sample_Core31.Order.Choreography.Api.Sagas
             logger = _logger;
         }
 
-        public override async Task HandleAsync(PaymentProcessedEvent paymentProcessedEvent)
+        public override async Task HandleAsync(PaymentProcessedEvent paymentProcessedEvent, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             //throw new NotImplementedException("This handler is not implemented yet. Please implement the logic to notify the user of payment processing.");
             if (paymentProcessedEvent == null)
             {
@@ -29,11 +31,13 @@ namespace Sample_Core31.Order.Choreography.Api.Sagas
             await Context.MarkAsComplete<PaymentProcessedEvent>();
         }
 
-        public override async Task CompensateAsync(PaymentProcessedEvent message)
+        public override async Task CompensateAsync(PaymentProcessedEvent message, CancellationToken cancellationToken = default)
         {
             //NOTIFY
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 logger.LogInformation("SendNotification Compensated for OrderId: {OrderId}", message.OrderId);
                 await Context.MarkAsCompensated<PaymentProcessedEvent>();
             }

@@ -169,7 +169,7 @@ public static class SagaHandlerRegistrationExtensions
     /// This is useful for registering all handlers in the current project or module without specifying marker types explicitly.
     /// </summary>
     /// <param name="serviceCollection">The DI service collection wrapper.</param>
-    /// <returns>The updated service collection.</returns>//GOP
+    /// <returns>The updated service collection.</returns>
     public static ILyciaServiceCollection AddSagasFromCurrentAssembly(this ILyciaServiceCollection serviceCollection)
     {
         var callingAssembly = Assembly.GetCallingAssembly();
@@ -214,7 +214,7 @@ public static class SagaHandlerRegistrationExtensions
     }
 #endif
     public static Dictionary<string, (Type MessageType, Type HandlerType)> DiscoverQueueTypeMap(string? applicationId,
-        params Assembly[] assemblies)//GOP
+        params Assembly[] assemblies)
     {
         var handlerTypes = assemblies
             .SelectMany(a => a.GetTypes())

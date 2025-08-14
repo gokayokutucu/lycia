@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 using Sample_Net48.Shared.Messages.Events;
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Sample_Net48.Order.Choreography.Api.Sagas
@@ -14,8 +15,10 @@ namespace Sample_Net48.Order.Choreography.Api.Sagas
             logger = _logger;
         }
 
-        public override async Task HandleAsync(OrderCreatedEvent orderCreatedEvent)
+        public override async Task HandleAsync(OrderCreatedEvent orderCreatedEvent, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             if (orderCreatedEvent == null)
             {
                 logger.LogError("OrderCreatedEvent is null");
@@ -33,10 +36,12 @@ namespace Sample_Net48.Order.Choreography.Api.Sagas
             await Context.PublishWithTracking(reserveStockEvent).ThenMarkAsComplete();
         }
 
-        public override async Task CompensateAsync(OrderCreatedEvent message)
+        public override async Task CompensateAsync(OrderCreatedEvent message, CancellationToken cancellationToken = default)
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 if (message.OrderId == Guid.Empty)
                 {
                     throw new InvalidOperationException("Total price must be greater than zero for compensation.");

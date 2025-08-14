@@ -11,10 +11,12 @@ namespace Sample_Net90.Choreography.Application.Payment.Commands.Process.Handler
 public sealed class ProcessPaymentSagaEventHandler(ILogger<ProcessPaymentSagaEventHandler> logger, IMapper mapper, IPaymentService paymentService, IStockRepository stockRepository)
     : ReactiveSagaHandler<StockReservedSagaEvent>
 {
-    public override async Task HandleAsync(StockReservedSagaEvent message)
+    public override async Task HandleAsync(StockReservedSagaEvent message, CancellationToken cancellationToken = default)
     {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             logger.LogInformation("ProcessPaymentSagaEventHandler => HandleAsync => Start processing StockReservedSagaEvent for ReservationId: {ReservationId}", message.ReservationId);
 
             if (!await stockRepository.IsReservedAsync(message.ReservationId))
@@ -40,10 +42,12 @@ public sealed class ProcessPaymentSagaEventHandler(ILogger<ProcessPaymentSagaEve
             throw new Exception($"ProcessPaymentSagaEventHandler => HandleAsync => Error : {ex.InnerException?.Message ?? ex.Message}", ex);
         }
     }
-    public override async Task CompensateAsync(StockReservedSagaEvent message)
+    public override async Task CompensateAsync(StockReservedSagaEvent message, CancellationToken cancellationToken = default)
     {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             logger.LogInformation("ProcessPaymentSagaEventHandler => CompensateAsync => Start compensating StockReservedSagaEvent for ReservationId: {ReservationId}", message.ReservationId);
 
             var payment = mapper.Map<Domain.Entities.Payment>(message);

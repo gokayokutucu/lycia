@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 using Sample_Net21.Shared.Messages.Events;
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Sample_Core31.Order.Choreography.Api.Sagas
@@ -14,8 +15,10 @@ namespace Sample_Core31.Order.Choreography.Api.Sagas
             logger = _logger;
         }
 
-        public override async Task HandleAsync(OrderCreatedEvent orderCreatedEvent)
+        public override async Task HandleAsync(OrderCreatedEvent orderCreatedEvent, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             if (orderCreatedEvent == null)
             {
                 logger.LogError("OrderCreatedEvent is null");
@@ -34,8 +37,10 @@ namespace Sample_Core31.Order.Choreography.Api.Sagas
             await Context.PublishWithTracking(reserveStockEvent).ThenMarkAsComplete();
         }
 
-        public override async Task CompensateAsync(OrderCreatedEvent message)
+        public override async Task CompensateAsync(OrderCreatedEvent message, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             //STOCK
             try
             {
