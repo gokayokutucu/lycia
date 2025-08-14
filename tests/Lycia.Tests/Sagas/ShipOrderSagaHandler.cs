@@ -1,11 +1,12 @@
 using Lycia.Saga.Handlers;
-using Sample.Shared.Messages.Events;
+using Lycia.Tests.Messages;
+using Lycia.Tests.SagaStates;
 
 namespace Lycia.Tests.Sagas;
 
-public class ShipOrderSagaHandler : ReactiveSagaHandler<OrderCreatedEvent>
+public class ShipOrderSagaHandler : CoordinatedSagaHandler<OrderCreatedEvent, CreateOrderSagaData>
 {
-    public override async Task HandleAsync(OrderCreatedEvent command)
+    public override async Task HandleAsync(OrderCreatedEvent command, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -14,7 +15,7 @@ public class ShipOrderSagaHandler : ReactiveSagaHandler<OrderCreatedEvent>
             
             if (!stockAvailable)
             {
-                await Context.MarkAsFailed<OrderCreatedEvent>();
+                await Context.MarkAsFailed<OrderCreatedEvent>(cancellationToken);
                 return;
             }
 
@@ -24,12 +25,12 @@ public class ShipOrderSagaHandler : ReactiveSagaHandler<OrderCreatedEvent>
                 ShipmentTrackId = Guid.NewGuid(),
                 ShippedAt = DateTime.UtcNow
             })
-                .ThenMarkAsComplete();
+                .ThenMarkAsComplete(cancellationToken);
         }
         catch (Exception ex)
         {
             Console.WriteLine($"🚨 Shipping failed: {ex.Message}");
-            await Context.MarkAsFailed<OrderCreatedEvent>();
+            await Context.MarkAsFailed<OrderCreatedEvent>(cancellationToken);
         }
     }
 }

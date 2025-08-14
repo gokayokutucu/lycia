@@ -9,16 +9,14 @@ namespace Lycia.Saga.Handlers;
 /// Handles the initial message in a coordinated saga and initializes saga state.
 /// Use this as a base for coordinated saga starters.
 /// </summary>
-public abstract class StartCoordinatedSagaHandler<TMessage, TResponse, TSagaData> :
-    ISagaStartHandler<TMessage, TSagaData>,
-    IResponseSagaHandler<TResponse>
+public abstract class StartCoordinatedSagaHandler<TMessage, TSagaData> :
+    ISagaStartHandler<TMessage, TSagaData>
     where TMessage : IMessage
-    where TResponse : IResponse<TMessage>
-    where TSagaData : new()
+    where TSagaData : SagaData
 {
-    protected ISagaContext<TMessage, TSagaData> Context { get; private set; } = null!;
+    protected ISagaContext<IMessage, TSagaData> Context { get; private set; } = null!;
 
-    public void Initialize(ISagaContext<TMessage, TSagaData> context)
+    public void Initialize(ISagaContext<IMessage, TSagaData> context)
     {
         Context = context;
     }
@@ -55,14 +53,9 @@ public abstract class StartCoordinatedSagaHandler<TMessage, TResponse, TSagaData
     {
         return Task.CompletedTask;
     }
-
-    public virtual Task HandleSuccessResponseAsync(TResponse response)
-    {
-        return Task.CompletedTask;
-    }
-
-    public virtual Task HandleFailResponseAsync(TResponse response, FailResponse fail)
-    {
-        return Task.CompletedTask;
-    }
+    
+    protected Task MarkAsComplete(CancellationToken cancellationToken = default) => Context.MarkAsComplete<TMessage>(cancellationToken);
+    protected Task MarkAsFailed(CancellationToken cancellationToken = default) => Context.MarkAsFailed<TMessage>(cancellationToken);
+    protected Task MarkAsCompensationFailed(CancellationToken cancellationToken = default) => Context.MarkAsCompensationFailed<TMessage>(cancellationToken);
+    protected Task<bool> IsAlreadyCompleted(CancellationToken cancellationToken = default) => Context.IsAlreadyCompleted<TMessage>(cancellationToken);
 }

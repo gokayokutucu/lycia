@@ -11,7 +11,7 @@ public interface IFailResponse<TPrevious> : IResponse<TPrevious> where TPrevious
 /// </summary>
 public interface ISuccessResponseHandler<in TResponse>
 {
-    Task HandleSuccessResponseAsync(TResponse response);
+    Task HandleSuccessResponseAsync(TResponse response, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -19,5 +19,5 @@ public interface ISuccessResponseHandler<in TResponse>
 /// </summary>
 public interface IFailResponseHandler<in TResponse>
 {
-    Task HandleFailResponseAsync(TResponse response, FailResponse fail);
+    Task HandleFailResponseAsync(TResponse response, FailResponse fail, CancellationToken cancellationToken = default);
 }

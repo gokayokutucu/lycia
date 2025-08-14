@@ -6,53 +6,85 @@ namespace Lycia.Saga.Helpers;
 
 public static class HandlerDelegateHelper
 {
-    private static readonly ConcurrentDictionary<(Type HandlerType, string MethodName), Func<object, object, Task>> DelegateCache = new();
+    private static readonly ConcurrentDictionary<(Type HandlerType, string MethodName, Type MessageType), Func<object, object, CancellationToken, Task>> DelegateCache = new();
 
-    // Handles both real handlers and proxy/mock types (e.g., Moq) by searching for the method in both the class and its interfaces.
-    // This is needed because proxies may implement the method only via interface, not directly on the proxy class.
-    public static Func<object, object, Task> GetHandlerDelegate(Type handlerType, string methodName, Type messageType)
+    public static Func<object, object, CancellationToken, Task> GetHandlerDelegate(Type handlerType, string methodName, Type messageType)
     {
-        var key = (handlerType, methodName);
+        var key = (handlerType, methodName, messageType);
         if (DelegateCache.TryGetValue(key, out var dlg))
             return dlg;
 
-        // Try to get the method directly from the type (including non-public for concrete handler types)
-        var method = handlerType.GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null,
-            [messageType], null);
-
-        // If not found, look in all implemented interfaces (useful for Moq/proxy types)
-        if (method == null)
-        {
-            foreach (var iface in handlerType.GetInterfaces())
-            {
-                method = iface.GetMethod(methodName, [messageType]);
-                if (method != null)
-                    break;
-            }
-        }
+        // Try to find the method directly on the concrete type (public or non-public)
+        var method = FindMethod(handlerType, methodName, messageType, withCancellationToken: true)
+                     ?? FindMethod(handlerType, methodName, messageType, withCancellationToken: false)
+                     ?? FindOnInterfaces(handlerType, methodName, messageType, withCancellationToken: true)
+                     ?? FindOnInterfaces(handlerType, methodName, messageType, withCancellationToken: false);
 
         if (method == null)
-            throw new InvalidOperationException($"Method '{methodName}' not found on {handlerType.FullName}");
+            throw new InvalidOperationException($"Method '{methodName}({messageType.FullName})' not found on {handlerType.FullName}.");
 
         var handlerParam = Expression.Parameter(typeof(object), "handler");
         var messageParam = Expression.Parameter(typeof(object), "message");
+        var ctParam = Expression.Parameter(typeof(CancellationToken), "cancellationToken");
 
-        // Add type checks to ensure the parameters are of the correct types
+        // Build a defensive type check with a helpful error message
+        var expectedTypeConst = Expression.Constant(messageType, typeof(Type));
+        var actualTypeExpr = Expression.Call(messageParam, typeof(object).GetMethod(nameof(object.GetType))!);
+        var invalidCastCtor = typeof(InvalidCastException).GetConstructor(new[] { typeof(string) })!;
+        var errorMsg = Expression.Call(
+            typeof(string).GetMethod(nameof(string.Format), [typeof(string), typeof(object), typeof(object)])!,
+            Expression.Constant("HandlerDelegateHelper: cannot cast message. Expected={0}, Actual={1}"),
+            expectedTypeConst,
+            Expression.Convert(actualTypeExpr, typeof(object))
+        );
+
+        var callArgs = method.GetParameters().Length == 2
+            ? new Expression[] { Expression.Convert(messageParam, messageType), ctParam }
+            : new Expression[] { Expression.Convert(messageParam, messageType) };
+
         var body = Expression.Block(
             Expression.IfThen(
                 Expression.Not(Expression.TypeIs(messageParam, messageType)),
-                Expression.Throw(Expression.New(typeof(InvalidCastException)))
+                Expression.Throw(Expression.New(invalidCastCtor, errorMsg))
             ),
             Expression.Call(
                 Expression.Convert(handlerParam, method.DeclaringType!),
                 method,
-                Expression.Convert(messageParam, messageType)
+                callArgs
             )
         );
 
-        var lambda = Expression.Lambda<Func<object, object, Task>>(body, handlerParam, messageParam);
+        var lambda = Expression.Lambda<Func<object, object, CancellationToken, Task>>(body, handlerParam, messageParam, ctParam);
         var compiled = lambda.Compile();
         DelegateCache[key] = compiled;
         return compiled;
+    }
+
+    private static MethodInfo? FindMethod(Type handlerType, string methodName, Type messageType, bool withCancellationToken)
+    {
+        var paramTypes = withCancellationToken
+            ? new[] { messageType, typeof(CancellationToken) }
+            : new[] { messageType };
+
+        return handlerType.GetMethod(
+            methodName,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            binder: null,
+            types: paramTypes,
+            modifiers: null);
+    }
+
+    private static MethodInfo? FindOnInterfaces(Type handlerType, string methodName, Type messageType, bool withCancellationToken)
+    {
+        foreach (var iface in handlerType.GetInterfaces())
+        {
+            var paramTypes = withCancellationToken
+                ? new[] { messageType, typeof(CancellationToken) }
+                : new[] { messageType };
+            var m = iface.GetMethod(methodName, paramTypes);
+            if (m != null)
+                return m;
+        }
+        return null;
     }
 }

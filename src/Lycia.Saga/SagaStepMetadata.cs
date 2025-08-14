@@ -11,6 +11,9 @@ public class SagaStepMetadata
     public string MessageTypeName { get; set; } = null!;
     public string? ApplicationId { get; set; } = null!; // Optional but useful
     public string MessagePayload { get; set; } = null!;
+
+    public SagaStepFailureInfo? FailureInfo { get; set; }
+    
     public DateTime RecordedAt { get; private set; } = DateTime.UtcNow;
     
     /// <summary>
@@ -22,7 +25,8 @@ public class SagaStepMetadata
         Guid? parentMessageId,
         string messageTypeName,
         string? applicationId,
-        object? payload)
+        object? payload,
+        SagaStepFailureInfo? failureInfo)
     {
         return new SagaStepMetadata
         {
@@ -31,13 +35,15 @@ public class SagaStepMetadata
             ParentMessageId = parentMessageId,
             MessageTypeName = messageTypeName,
             ApplicationId = applicationId,
-            MessagePayload = JsonHelper.SerializeSafe(payload)
+            MessagePayload = JsonHelper.SerializeSafe(payload),
+            FailureInfo = failureInfo
         };
     }
     
     /// <summary>
     /// Determines whether this step is idempotent with another step.
     /// All relevant metadata fields must be exactly equal.
+    /// Do not override the equality operator, as this is used for idempotency checks. And we don't involve the RecordedAt timestamp in idempotency checks.
     /// </summary>
     public bool IsIdempotentWith(SagaStepMetadata other)
     {
@@ -46,6 +52,7 @@ public class SagaStepMetadata
                && Status == other.Status
                && MessageTypeName == other.MessageTypeName
                && ApplicationId == other.ApplicationId
-               && MessagePayload == other.MessagePayload;
+               && MessagePayload == other.MessagePayload
+               && (FailureInfo?.Equals(other.FailureInfo) ?? other.FailureInfo == null);
     }
 }

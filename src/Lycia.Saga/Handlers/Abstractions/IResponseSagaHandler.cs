@@ -7,6 +7,5 @@ public interface IResponseSagaHandler<in TResponse> :
     IFailResponseHandler<TResponse>
     where TResponse : IMessage
 {
-    Task HandleSuccessResponseAsync(TResponse response);
-    Task HandleFailResponseAsync(TResponse response, FailResponse fail);
+
 }

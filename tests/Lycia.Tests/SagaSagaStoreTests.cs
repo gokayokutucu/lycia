@@ -2,6 +2,7 @@ using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Stores;
 using Lycia.Infrastructure.Stores;
 using Lycia.Messaging.Enums;
+using Lycia.Saga;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Exceptions;
 using Lycia.Tests.Messages;
@@ -57,9 +58,9 @@ public class SagaSagaStoreTests : IAsyncLifetime
         var stepType = typeof(DummyEvent);
         var handlerType = typeof(DummySagaHandler);
 
-        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Started, handlerType, null);
-        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Failed, handlerType, null);
-        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Compensated, handlerType, null);
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Started, handlerType, null, (SagaStepFailureInfo?)null);
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Failed, handlerType, null, (SagaStepFailureInfo?)null);
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Compensated, handlerType, null, (SagaStepFailureInfo?)null);
     }
 
     [Theory]
@@ -90,11 +91,11 @@ public class SagaSagaStoreTests : IAsyncLifetime
         var handlerType = typeof(DummySagaHandler);
 
         await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.CompensationFailed,
-            handlerType, null);
+            handlerType, null, (SagaStepFailureInfo?)null);
 
         // Act & Assert
         await Assert.ThrowsAsync<SagaStepTransitionException>(() =>
-            store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Compensated, handlerType, null));
+            store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Compensated, handlerType, null, (SagaStepFailureInfo?)null));
     }
 
     [Theory]
@@ -123,11 +124,11 @@ public class SagaSagaStoreTests : IAsyncLifetime
         var stepType = typeof(DummyEvent);
         var handlerType = typeof(DummySagaHandler);
 
-        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Failed, handlerType, null);
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Failed, handlerType, null, (SagaStepFailureInfo?)null);
 
         // Act & Assert
         await Assert.ThrowsAsync<SagaStepTransitionException>(() =>
-            store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType, null));
+            store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType, null, (SagaStepFailureInfo?)null));
     }
 
     [Theory]
@@ -155,12 +156,12 @@ public class SagaSagaStoreTests : IAsyncLifetime
         var stepType = typeof(DummyEvent);
         var handlerType = typeof(DummySagaHandler);
 
-        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Started, handlerType, null);
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Started, handlerType, null, (SagaStepFailureInfo?)null);
 
         // Act & Assert
         await Assert.ThrowsAsync<SagaStepTransitionException>(() =>
             store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.CompensationFailed,
-                handlerType, null));
+                handlerType, null, (SagaStepFailureInfo?)null));
     }
 
     [Theory]
@@ -188,11 +189,11 @@ public class SagaSagaStoreTests : IAsyncLifetime
         var stepType = typeof(DummyEvent);
         var handlerType = typeof(DummySagaHandler);
 
-        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Compensated, handlerType, null);
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Compensated, handlerType, null, (SagaStepFailureInfo?)null);
 
         // Act & Assert
         await Assert.ThrowsAsync<SagaStepTransitionException>(() =>
-            store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType, null));
+            store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType, null, (SagaStepFailureInfo?)null));
     }
 
     [Theory]
@@ -220,10 +221,10 @@ public class SagaSagaStoreTests : IAsyncLifetime
         var stepType = typeof(DummyEvent);
         var handlerType = typeof(DummySagaHandler);
 
-        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType, null);
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType, null, (SagaStepFailureInfo?)null);
 
         // Act & Assert
-        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType, null);
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType, null, (SagaStepFailureInfo?)null);
     }
 
     [Theory]
@@ -252,11 +253,11 @@ public class SagaSagaStoreTests : IAsyncLifetime
         var handlerType = typeof(DummySagaHandler);
 
         // Act
-        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Started, handlerType, null);
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Started, handlerType, null, (SagaStepFailureInfo?)null);
 
-        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType, null);
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType, null, (SagaStepFailureInfo?)null);
         
-        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType, null);
+        await store.LogStepAsync(sagaId, messageId, parentMessageId, stepType, StepStatus.Completed, handlerType, null, (SagaStepFailureInfo?)null);
 
 
         var steps = await store.GetSagaHandlerStepsAsync(sagaId);

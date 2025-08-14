@@ -1,4 +1,5 @@
 using Lycia.Messaging;
+using Lycia.Saga.Extensions;
 
 namespace Lycia.Saga.Helpers;
 
@@ -43,7 +44,7 @@ public static class MessagingNamingHelper
     {
         if (string.IsNullOrWhiteSpace(applicationId))
             throw new ArgumentException("ApplicationId cannot be null or empty", nameof(applicationId));
-        
+
         if (handlerType is null)
             throw new ArgumentNullException(nameof(handlerType));
 
@@ -56,6 +57,10 @@ public static class MessagingNamingHelper
         {
             prefix = "command";
         }
+        else if (messageType.IsSubclassOfResponseBase())
+        {
+            prefix = "response";
+        }
         else
         {
             prefix = "message";
@@ -64,7 +69,7 @@ public static class MessagingNamingHelper
         // Full format: event.OrderCreatedEvent.CreateOrderSagaHandler.OrderService
         return $"{prefix}.{messageType.Name}.{handlerType.Name}.{applicationId}";
     }
-    
+
     /// <summary>
     /// Returns a topic routing key pattern for publishing messages.
     /// Format: "{event|command|message}.{MessageType}.#"
@@ -89,6 +94,10 @@ public static class MessagingNamingHelper
         {
             prefix = "command";
         }
+        else if (messageType.IsSubclassOfResponseBase())
+        {
+            prefix = "response";
+        }
         else
         {
             prefix = "message";
@@ -97,7 +106,7 @@ public static class MessagingNamingHelper
         // Full format: event.OrderCreatedEvent.#
         return $"{prefix}.{messageType.Name}.#";
     }
-    
+
     /// <summary>
     /// Returns the exchange name for the given message type.
     /// Format: "{event|command|message}.{MessageType}"
@@ -110,11 +119,22 @@ public static class MessagingNamingHelper
     {
         string prefix;
         if (messageType.IsSubclassOf(typeof(EventBase)))
+        {
             prefix = "event";
+        }
         else if (messageType.IsSubclassOf(typeof(CommandBase)))
+        {
             prefix = "command";
+        }
+        else if (messageType.IsSubclassOfResponseBase())
+        {
+            prefix = "response";
+        }
         else
+        {
             prefix = "message";
+        }
+
         return $"{prefix}.{messageType.Name}";
     }
 }

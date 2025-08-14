@@ -6,12 +6,12 @@ namespace Lycia.Saga.Handlers.Abstractions;
 public interface ISagaStartHandler<TMessage>
     where TMessage : IMessage
 {
-    void Initialize(ISagaContext<TMessage> context);
+    void Initialize(ISagaContext<IMessage> context);
 }
 
 public interface ISagaStartHandler<TMessage, TSagaData>
     where TMessage: IMessage
-    where TSagaData : new()
+    where TSagaData : SagaData
 {
-    void Initialize(ISagaContext<TMessage, TSagaData> context);
+    void Initialize(ISagaContext<IMessage, TSagaData> context);
 }

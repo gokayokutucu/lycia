@@ -1,45 +1,39 @@
 using Lycia.Saga.Handlers;
+using Lycia.Saga.Handlers.Abstractions;
 using Sample.Shared.Messages.Commands;
 using Sample.Shared.Messages.Events;
 
 namespace Sample.Order.Choreography.Consumer.Sagas;
 
-/// <summary>
-/// Handles the start of the order process in a reactive saga flow and emits an OrderCreatedEvent.
-/// </summary>
 public class CreateOrderSagaHandler :
-    StartReactiveSagaHandler<CreateOrderCommand>
+    StartReactiveSagaHandler<CreateOrderCommand>,
+    ISagaCompensationHandler<PaymentFailedEvent>,
+    ISagaCompensationHandler<OrderShippingFailedEvent>
 {
-    /// <summary>
-    /// For test purposes, we can check if the compensation was called.
-    /// </summary>
-    public bool CompensateCalled { get; private set; }
-    
-    public override async Task HandleStartAsync(CreateOrderCommand command)
+    public override async Task HandleStartAsync(CreateOrderCommand cmd, CancellationToken cancellationToken = default)
     {
+        // Check if already completed to avoid duplicate processing for idempotency
+        // This is important in a reactive saga where the same command might be retried
+        if (await Context.IsAlreadyCompleted<CreateOrderCommand>(cancellationToken)) return;
+        
         await Context.Publish(new OrderCreatedEvent
         {
-            OrderId = command.OrderId,
-        });
-        await Context.MarkAsComplete<CreateOrderCommand>();
+            OrderId = cmd.OrderId,
+            ParentMessageId = cmd.MessageId
+        }, cancellationToken);
+        await Context.MarkAsComplete<CreateOrderCommand>(cancellationToken);
     }
 
-    public override async Task CompensateStartAsync(CreateOrderCommand message)
+    // Optional – compensate on payment failure (reactive, not orchestration)
+    public async Task CompensateAsync(PaymentFailedEvent failed, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            CompensateCalled = true;
-            // Compensation logic
-            await Context.MarkAsCompensated<CreateOrderCommand>();
-        }
-        catch (Exception ex)
-        {
-            // Log, notify, halt chain, etc.
-            Console.WriteLine($"❌ Compensation failed: {ex.Message}");
-            
-            await Context.MarkAsCompensationFailed<CreateOrderCommand>();
-            // Optionally: rethrow or store for manual retry
-            throw; // Or suppress and log for retry system
-        }
+        if (await Context.IsAlreadyCompleted<CreateOrderCommand>(cancellationToken)) return;
+        // e.g., notify user / mark order canceled / audit
+    }
+
+    public Task CompensateAsync(OrderShippingFailedEvent failed, CancellationToken cancellationToken = default)
+    {
+        // e.g., refund or notify depending on your business
+        return Task.CompletedTask;
     }
 }

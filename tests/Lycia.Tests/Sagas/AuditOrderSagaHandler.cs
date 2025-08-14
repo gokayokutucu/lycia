@@ -1,20 +1,21 @@
 using Lycia.Saga.Handlers;
-using Sample.Shared.Messages.Events;
+using Lycia.Tests.Messages;
+using Lycia.Tests.SagaStates;
 
 namespace Lycia.Tests.Sagas;
 
-public class AuditOrderSagaHandler : ReactiveSagaHandler<OrderCreatedEvent>
+public class AuditOrderSagaHandler : CoordinatedSagaHandler<OrderCreatedEvent, CreateOrderSagaData>
 {
-    public override Task HandleAsync(OrderCreatedEvent message)
+    public override Task HandleAsync(OrderCreatedEvent message, CancellationToken cancellationToken = default)
     {
         try
         {
-            return Context.MarkAsComplete<OrderCreatedEvent>();
+            return Context.MarkAsComplete<OrderCreatedEvent>(cancellationToken);
         }
         catch (Exception e)
         {
             Console.WriteLine($"🚨 Audit failed: {e.Message}");
-            return Context.MarkAsFailed<OrderCreatedEvent>();
+            return Context.MarkAsFailed<OrderCreatedEvent>(cancellationToken);
         }
     }
 }

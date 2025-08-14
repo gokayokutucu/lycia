@@ -141,18 +141,8 @@ public static class SagaHandlerRegistrationExtensions
     {
         var handlerTypes = assemblies
             .SelectMany(a => a.GetTypes())
-            .Where(t => !t.IsAbstract && !t.IsInterface && t.GetInterfaces().Any(i =>
-                i.IsGenericType &&
-                (
-                    i.GetGenericTypeDefinition() == typeof(ISagaHandler<>) ||
-                    i.GetGenericTypeDefinition() == typeof(ISagaStartHandler<>) ||
-                    i.GetGenericTypeDefinition() == typeof(ISagaHandler<,>) ||
-                    i.GetGenericTypeDefinition() == typeof(ISagaStartHandler<,>) ||
-                    i.GetGenericTypeDefinition() == typeof(ISagaCompensationHandler<>) ||
-                    i.GetGenericTypeDefinition() == typeof(IResponseSagaHandler<>) ||                    
-                    i.GetGenericTypeDefinition() == typeof(ISuccessResponseHandler<>) ||
-                    i.GetGenericTypeDefinition() == typeof(IFailResponseHandler<>)
-                )))
+            .Where(t => t is { IsAbstract: false, IsInterface: false } &&
+                        ImplementsAnySagaInterface(t))
             .ToList();
 
         var queueTypeMap = new Dictionary<string, (Type MessageType, Type HandlerType)>();
@@ -177,8 +167,10 @@ public static class SagaHandlerRegistrationExtensions
     {
         return GetGenericBaseType(type, typeof(StartReactiveSagaHandler<>)) != null
                || GetGenericBaseType(type, typeof(ReactiveSagaHandler<>)) != null
-               || GetGenericBaseType(type, typeof(StartCoordinatedSagaHandler<,,>)) != null
-               || GetGenericBaseType(type, typeof(CoordinatedSagaHandler<,,>)) != null;
+               || GetGenericBaseType(type, typeof(StartCoordinatedSagaHandler<,>)) != null
+               || GetGenericBaseType(type, typeof(StartCoordinatedResponsiveSagaHandler<,,>)) != null
+               || GetGenericBaseType(type, typeof(CoordinatedResponsiveSagaHandler<,,>)) != null
+               || GetGenericBaseType(type, typeof(CoordinatedSagaHandler<,>)) != null;
     }
 
     /// <summary>
@@ -217,13 +209,14 @@ public static class SagaHandlerRegistrationExtensions
     }
 
     /// <summary>
-    /// Extracts all message types from a handler type based on its implemented Saga interfaces.
+    /// Extracts all message types from a handler type based on its implemented Saga interfaces and known base classes.
     /// </summary>
     private static IEnumerable<Type> GetMessageTypesFromHandler(Type handlerType)
     {
         var messageTypes = new HashSet<Type>();
 
-        var interfaces = handlerType.GetInterfaces()
+        // 1) From interfaces
+        var interfaceArgs = handlerType.GetInterfaces()
             .Where(i => i.IsGenericType &&
                         (i.GetGenericTypeDefinition() == typeof(ISagaHandler<>)
                          || i.GetGenericTypeDefinition() == typeof(ISagaStartHandler<>)
@@ -232,17 +225,53 @@ public static class SagaHandlerRegistrationExtensions
                          || i.GetGenericTypeDefinition() == typeof(ISagaCompensationHandler<>)
                          || i.GetGenericTypeDefinition() == typeof(IResponseSagaHandler<>)
                          || i.GetGenericTypeDefinition() == typeof(ISuccessResponseHandler<>)
-                         || i.GetGenericTypeDefinition() == typeof(IFailResponseHandler<>)));
+                         || i.GetGenericTypeDefinition() == typeof(IFailResponseHandler<>)))
+            .SelectMany(i => i.GetGenericArguments());
 
-        foreach (var iFace in interfaces)
+        foreach (var arg in interfaceArgs)
         {
-            var genericArgs = iFace.GetGenericArguments();
-            foreach (var arg in genericArgs)
-            {
+            if (typeof(IMessage).IsAssignableFrom(arg) && !typeof(SagaData).IsAssignableFrom(arg))
                 messageTypes.Add(arg);
+        }
+
+        // 2) From known generic base classes (walk up the inheritance chain)
+        Type? current = handlerType;
+        while (current != null && current != typeof(object))
+        {
+            if (current.IsGenericType)
+            {
+                var def = current.GetGenericTypeDefinition();
+                var args = current.GetGenericArguments();
+
+                if (def == typeof(StartReactiveSagaHandler<>) || def == typeof(ReactiveSagaHandler<>))
+                {
+                    // [TMessage]
+                    TryAddMessage(args[0], messageTypes);
+                }
+                else if (def == typeof(StartCoordinatedSagaHandler<,>) || def == typeof(CoordinatedSagaHandler<,>))
+                {
+                    // [TMessage, TSagaData]
+                    TryAddMessage(args[0], messageTypes);
+                }
+                else if (def == typeof(StartCoordinatedResponsiveSagaHandler<,,>) || def == typeof(CoordinatedResponsiveSagaHandler<,,>))
+                {
+                    // [TMessage, TResponse, TSagaData] => include both message and response
+                    TryAddMessage(args[0], messageTypes);
+                    TryAddMessage(args[1], messageTypes);
+                }
             }
+
+            current = current.BaseType;
         }
 
         return messageTypes;
+
+        static void TryAddMessage(Type candidate, HashSet<Type> set)
+        {
+            if (typeof(IMessage).IsAssignableFrom(candidate) && !typeof(SagaData).IsAssignableFrom(candidate))
+            {
+                set.Add(candidate);
+            }
+        }
     }
 }

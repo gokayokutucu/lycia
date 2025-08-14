@@ -313,7 +313,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
 // Dummy command handler for test
     private class TestCommandHandlerA : StartReactiveSagaHandler<TestCommand>
     {
-        public override Task HandleStartAsync(TestCommand message) => Task.CompletedTask;
+        public override Task HandleStartAsync(TestCommand message, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
 // Test command for Send
@@ -324,12 +324,12 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
 
     private class TestEventHandlerA : StartReactiveSagaHandler<TestEvent>
     {
-        public override Task HandleStartAsync(TestEvent message) => Task.CompletedTask;
+        public override Task HandleStartAsync(TestEvent message, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private class TestEventHandlerB : StartReactiveSagaHandler<TestEvent>
     {
-        public override Task HandleStartAsync(TestEvent message) => Task.CompletedTask;
+        public override Task HandleStartAsync(TestEvent message, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
 
