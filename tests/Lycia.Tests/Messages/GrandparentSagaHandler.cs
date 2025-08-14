@@ -1,8 +1,9 @@
 using Lycia.Saga.Handlers;
+using Lycia.Tests.Helpers;
 
 namespace Lycia.Tests.Messages;
 
-public class GrandparentCompensationSagaHandler : StartReactiveSagaHandler<DummyGrandparentEvent>
+public class GrandparentCompensationSagaHandler : StartCoordinatedSagaHandler<DummyGrandparentEvent, DummySagaData>
 {
     public static readonly List<string> Invocations = [];
 
@@ -19,7 +20,7 @@ public class GrandparentCompensationSagaHandler : StartReactiveSagaHandler<Dummy
     }
 }
 
-public class ParentCompensationSagaHandler : ReactiveSagaHandler<DummyParentEvent>
+public class ParentCompensationSagaHandler : CoordinatedSagaHandler<DummyParentEvent, DummySagaData>
 {
     public static readonly List<string> Invocations = [];
 
@@ -36,7 +37,7 @@ public class ParentCompensationSagaHandler : ReactiveSagaHandler<DummyParentEven
     }
 }
 
-public class ChildCompensationSagaHandler : ReactiveSagaHandler<DummyChildEvent>
+public class ChildCompensationSagaHandler : CoordinatedSagaHandler<DummyChildEvent, DummySagaData>
 {
     public static readonly List<string> Invocations = [];
 

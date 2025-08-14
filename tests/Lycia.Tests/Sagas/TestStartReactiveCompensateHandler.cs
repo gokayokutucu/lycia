@@ -7,12 +7,12 @@ namespace Lycia.Tests.Sagas;
 public class TestStartReactiveCompensateHandler : StartCoordinatedSagaHandler<CreateOrderCommand, SampleSagaData>
 {
     public static bool CompensateCalled = false;
-    public override Task HandleStartAsync(CreateOrderCommand message)
+    public override Task HandleStartAsync(CreateOrderCommand message, CancellationToken cancellationToken = default)
     {
         // Mark step as failed so that compensation triggers
-        return Context.MarkAsFailed<CreateOrderCommand>();
+        return Context.MarkAsFailed<CreateOrderCommand>(cancellationToken);
     }
-    public override Task CompensateStartAsync(CreateOrderCommand message)
+    public override Task CompensateStartAsync(CreateOrderCommand message, CancellationToken cancellationToken = default)
     {
         CompensateCalled = true;
         return Task.CompletedTask;

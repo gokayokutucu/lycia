@@ -23,35 +23,35 @@ public abstract class StartCoordinatedSagaHandler<TMessage, TSagaData> :
         Context = context;
     }
 
-    public abstract Task HandleStartAsync(TMessage message);
+    public abstract Task HandleStartAsync(TMessage message, CancellationToken cancellationToken = default);
 
-    protected async Task HandleAsyncInternal(TMessage message)
+    protected async Task HandleAsyncInternal(TMessage message, CancellationToken cancellationToken = default)
     {
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
-            await HandleStartAsync(message); // Actual business logic
+            await HandleStartAsync(message, cancellationToken); // Actual business logic
         }
         catch (Exception)
         {
-            await Context.MarkAsFailed<TMessage>();
+            await Context.MarkAsFailed<TMessage>(cancellationToken);
         }
     }
 
-    protected async Task CompensateAsyncInternal(TMessage message)
+    protected async Task CompensateAsyncInternal(TMessage message, CancellationToken cancellationToken = default)
     {
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
-            await CompensateStartAsync(message); // Actual business logic
+            await CompensateStartAsync(message, cancellationToken); // Actual business logic
         }
         catch (Exception)
         {
-            await Context.MarkAsCompensationFailed<TMessage>();
+            await Context.MarkAsCompensationFailed<TMessage>(cancellationToken);
         }
     }
 
-    public virtual Task CompensateStartAsync(TMessage message)
+    public virtual Task CompensateStartAsync(TMessage message, CancellationToken cancellationToken = default)
     {
         return Task.CompletedTask;
     }
