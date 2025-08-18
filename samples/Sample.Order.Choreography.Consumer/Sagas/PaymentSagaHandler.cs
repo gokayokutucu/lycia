@@ -27,6 +27,6 @@ public class PaymentSagaHandler : ReactiveSagaHandler<InventoryReservedEvent>
             OrderId = evt.OrderId,
             ParentMessageId = evt.MessageId
         }, cancellationToken);
-        await Context.MarkAsComplete<InventoryReservedEvent>(cancellationToken);
+        await Context.MarkAsComplete<InventoryReservedEvent>();
     }
 }
