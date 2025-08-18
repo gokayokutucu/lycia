@@ -29,18 +29,18 @@ namespace Lycia.Saga.Extensions;
 public static class SagaHandlerRegistrationExtensions
 {
 #if NETSTANDARD2_0
-    public static ContainerBuilder AddSaga(this ContainerBuilder builder, IConfiguration configuration, Type handlerType, IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap)
+    public static ILyciaContainerBuilder AddSaga(this ILyciaContainerBuilder builder, Type handlerType)
     {
-        var appId = configuration["ApplicationId"] ?? throw new InvalidOperationException("ApplicationId is not configured.");
+        var appId = builder.Configuration?.AppSettings.Settings["ApplicationId"]?.Value ?? throw new InvalidOperationException("ApplicationId is not configured.");
         if (handlerType is null) throw new ArgumentNullException(nameof(handlerType), "Handler type cannot be null.");
 
-        builder.RegisterType(handlerType).InstancePerLifetimeScope();
+        builder.Builder.RegisterType(handlerType).InstancePerLifetimeScope();
 
         var messageTypes = GetMessageTypesFromHandler(handlerType);
         foreach (var messageType in messageTypes)
         {
             var routingKey = MessagingNamingHelper.GetRoutingKey(messageType, handlerType, appId);
-            queueTypeMap[routingKey] = (messageType, handlerType);
+            builder.QueueTypeMap[routingKey] = (messageType, handlerType);
         }
         return builder;
     }
@@ -51,20 +51,20 @@ public static class SagaHandlerRegistrationExtensions
     /// <param name="serviceCollection">The DI service collection.</param>
     /// <param name="handlerTypes">Array of handler class types.</param>
     /// <returns>The updated service collection.</returns>
-    public static ContainerBuilder AddSagas(this ContainerBuilder builder, IConfiguration configuration, IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap, params Type?[] handlerTypes)
+    public static ILyciaContainerBuilder AddSagas(this ILyciaContainerBuilder builder, params Type?[] handlerTypes)
     {
-        var appId = configuration["ApplicationId"] ?? throw new InvalidOperationException("ApplicationId is not configured.");
+        var appId = builder.Configuration?.AppSettings.Settings["ApplicationId"]?.Value ?? throw new InvalidOperationException("ApplicationId is not configured.");
         foreach (var handlerType in handlerTypes)
         {
             if (handlerType is null) continue;
 
-            builder.RegisterType(handlerType).InstancePerLifetimeScope();
+            builder.Builder.RegisterType(handlerType).InstancePerLifetimeScope();
 
             var messageTypes = GetMessageTypesFromHandler(handlerType);
             foreach (var messageType in messageTypes)
             {
                 var routingKey = MessagingNamingHelper.GetRoutingKey(messageType, handlerType, appId);
-                queueTypeMap[routingKey] = (messageType, handlerType);
+                builder.QueueTypeMap[routingKey] = (messageType, handlerType);
             }
         }
         return builder;
@@ -76,21 +76,21 @@ public static class SagaHandlerRegistrationExtensions
     /// </summary>
     /// <param name="serviceCollection">The DI service collection wrapper.</param>
     /// <returns>The updated service collection.</returns>
-    public static ContainerBuilder AddSagasFromCurrentAssembly(this ContainerBuilder builder, IConfiguration configuration, IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap)
+    public static ILyciaContainerBuilder AddSagasFromCurrentAssembly(this ILyciaContainerBuilder builder)
     {
         var callingAssembly = Assembly.GetCallingAssembly();
-        return builder.AddSagasFromAssemblies(configuration, queueTypeMap, callingAssembly);
+        return builder.AddSagasFromAssemblies(callingAssembly);
     }
 
-    public static ContainerBuilder AddSagasFromAssembliesOf(this ContainerBuilder builder, IConfiguration configuration, IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap, params Type[] markerTypes)
+    public static ILyciaContainerBuilder AddSagasFromAssembliesOf(this ILyciaContainerBuilder builder, params Type[] markerTypes)
     {
         var assemblies = markerTypes.Select(t => t.Assembly).Distinct().ToArray();
-        return builder.AddSagasFromAssemblies(configuration, queueTypeMap, assemblies);
+        return builder.AddSagasFromAssemblies(assemblies);
     }
 
-    public static ContainerBuilder AddSagasFromAssemblies(this ContainerBuilder builder, IConfiguration configuration, IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap, params Assembly[] assemblies)
+    public static ILyciaContainerBuilder AddSagasFromAssemblies(this ILyciaContainerBuilder builder, params Assembly[] assemblies)
     {
-        var appId = configuration["ApplicationId"] ?? throw new InvalidOperationException("ApplicationId is not configured.");
+        var appId = builder.Configuration?.AppSettings.Settings["ApplicationId"]?.Value ?? throw new InvalidOperationException("ApplicationId is not configured.");
 
         foreach (var assembly in assemblies)
         {
@@ -102,13 +102,13 @@ public static class SagaHandlerRegistrationExtensions
             {
                 if (handlerType == null) continue;
 
-                builder.RegisterType(handlerType).InstancePerLifetimeScope();
+                builder.Builder.RegisterType(handlerType).InstancePerLifetimeScope();
 
                 var messageTypes = GetMessageTypesFromHandler(handlerType);
                 foreach (var messageType in messageTypes)
                 {
                     var routingKey = MessagingNamingHelper.GetRoutingKey(messageType, handlerType, appId);
-                    queueTypeMap[routingKey] = (messageType, handlerType);
+                    builder.QueueTypeMap[routingKey] = (messageType, handlerType);
                 }
             }
         }

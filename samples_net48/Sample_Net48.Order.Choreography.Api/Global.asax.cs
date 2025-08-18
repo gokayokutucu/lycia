@@ -34,8 +34,8 @@ namespace Sample_Net48.Order.Choreography.Api
 
             var config = System.Web.Configuration.WebConfigurationManager.OpenWebConfiguration("~");
 
-            builder.AddLycia(config);
-            builder.AddSagasFromCurrentAssembly();
+            builder.AddLycia(config)
+                .AddSagasFromCurrentAssembly();
 
             var container = builder.Build();
 
