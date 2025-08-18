@@ -33,5 +33,10 @@ public enum StepStatus
     /// <summary>
     /// The step was failed in compensation.
     /// </summary>
-    CompensationFailed
+    CompensationFailed,
+
+    /// <summary>
+    /// The step was cancelled and will not proceed further.
+    /// </summary>
+    Cancelled
 }

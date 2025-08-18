@@ -28,11 +28,16 @@ public abstract class StartCoordinatedResponsiveSagaHandler<TMessage, TResponse,
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             await HandleStartAsync(message, cancellationToken); // Actual business logic
         }
-        catch (Exception)
+        catch (OperationCanceledException ex)
         {
-            await Context.MarkAsFailed<TMessage>(cancellationToken);
+            await Context.MarkAsCancelled<TMessage>(ex, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await Context.MarkAsFailed<TMessage>(ex, cancellationToken);
         }
     }
 
@@ -41,14 +46,19 @@ public abstract class StartCoordinatedResponsiveSagaHandler<TMessage, TResponse,
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             await CompensateStartAsync(message, cancellationToken); // Actual business logic
 
             // After custom compensation logic, invoke the fail handler for the failed step if needed
             await InvokeFailedStepHandlerAsync(this, Context.Data, Context.SagaStore, cancellationToken);
         }
-        catch (Exception)
+        catch (OperationCanceledException ex)
         {
-            await Context.MarkAsCompensationFailed<TMessage>(cancellationToken);
+            await Context.MarkAsCancelled<TMessage>(ex, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await Context.MarkAsCompensationFailed<TMessage>(ex, cancellationToken);
         }
     }
 
@@ -125,8 +135,8 @@ public abstract class StartCoordinatedResponsiveSagaHandler<TMessage, TResponse,
                 continue;
 
             // Try to load the real response from the store; if not present, synthesize one
-            var responseInstance = await sagaStore.LoadSagaStepMessageAsync(sagaData.SagaId, responseType, cancellationToken)
-                                   ?? await CreateSyntheticResponseAsync(sagaStore, sagaData.SagaId, failedStepType, responseType, cancellationToken);
+            var responseInstance = await sagaStore.LoadSagaStepMessageAsync(sagaData.SagaId, responseType)
+                                   ?? await CreateSyntheticResponseAsync(sagaStore, sagaData.SagaId, failedStepType, responseType);
             if (responseInstance is null)
                 continue;
 
@@ -151,10 +161,10 @@ public abstract class StartCoordinatedResponsiveSagaHandler<TMessage, TResponse,
         }
     }
 
-    private static async Task<object?> CreateSyntheticResponseAsync(ISagaStore sagaStore, Guid sagaId, Type failedCommandType, Type responseType, CancellationToken cancellationToken = default)
+    private static async Task<object?> CreateSyntheticResponseAsync(ISagaStore sagaStore, Guid sagaId, Type failedCommandType, Type responseType)
     {
         // If the failed command instance exists, use it to populate a minimal response
-        var failedCommand = await sagaStore.LoadSagaStepMessageAsync(sagaId, failedCommandType, cancellationToken);
+        var failedCommand = await sagaStore.LoadSagaStepMessageAsync(sagaId, failedCommandType);
         var resp = Activator.CreateInstance(responseType);
         if (resp is null)
             return null;

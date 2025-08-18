@@ -31,20 +31,20 @@ public abstract class ReactiveSagaHandler<TMessage> :
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            
             if (EnforceIdempotency &&
                 await Context.IsAlreadyCompleted<TMessage>(cancellationToken))
                 return;
             
             await HandleAsync(message, cancellationToken);  // Actual business logic
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
-            // Cancellation is not a failure; let it bubble (or just return if that's your policy)
-            throw;
+            await Context.MarkAsCancelled<TMessage>(ex, cancellationToken);
         }
         catch (Exception ex)
         {
-            // Preserve failure details in your store/logs
             await Context.MarkAsFailed<TMessage>(ex, cancellationToken);
         }
     }
@@ -54,12 +54,12 @@ public abstract class ReactiveSagaHandler<TMessage> :
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             await CompensateAsync(message, cancellationToken);  // Actual business logic
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
-            // Cancellation is not a failure; let it bubble (or just return if that's your policy)
-            throw;
+            await Context.MarkAsCancelled<TMessage>(ex, cancellationToken);
         }
         catch (Exception ex)
         {

@@ -95,11 +95,12 @@ public static class SagaStepHelper
         => previous switch
         {
             StepStatus.None => true,
-            StepStatus.Started => next is StepStatus.Completed or StepStatus.Failed,
-            StepStatus.Completed => next is StepStatus.Compensated or StepStatus.CompensationFailed,
-            StepStatus.Failed => next is StepStatus.Compensated or StepStatus.CompensationFailed,
-            StepStatus.Compensated => false,
-            StepStatus.CompensationFailed => false,
+            StepStatus.Started => next is StepStatus.Completed or StepStatus.Failed or StepStatus.Cancelled,
+            StepStatus.Completed => next is StepStatus.Compensated or StepStatus.CompensationFailed or StepStatus.Cancelled,
+            StepStatus.Failed => next is StepStatus.Compensated or StepStatus.CompensationFailed or StepStatus.Cancelled,
+            StepStatus.Compensated => next is StepStatus.Cancelled,
+            StepStatus.CompensationFailed => next is StepStatus.Cancelled,
+            StepStatus.Cancelled => false,
             _ => false
         };
 }

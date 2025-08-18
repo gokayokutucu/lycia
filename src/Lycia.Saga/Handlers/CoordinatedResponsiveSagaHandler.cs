@@ -24,11 +24,16 @@ public abstract class CoordinatedResponsiveSagaHandler<TMessage, TResponse, TSag
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             await HandleAsync(message, cancellationToken);  // Actual business logic
         }
-        catch (Exception)
+        catch (OperationCanceledException ex)
         {
-            await Context.MarkAsFailed<TMessage>(cancellationToken);
+            await Context.MarkAsCancelled<TMessage>(ex, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await Context.MarkAsFailed<TMessage>(ex, cancellationToken);
         }
     }
     
@@ -37,11 +42,16 @@ public abstract class CoordinatedResponsiveSagaHandler<TMessage, TResponse, TSag
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             await CompensateAsync(message, cancellationToken);  // Actual business logic
         }
-        catch (Exception)
+        catch (OperationCanceledException ex)
         {
-            await Context.MarkAsCompensationFailed<TMessage>(cancellationToken);
+            await Context.MarkAsCancelled<TMessage>(ex, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await Context.MarkAsCompensationFailed<TMessage>(ex, cancellationToken);
         }
     }
 
