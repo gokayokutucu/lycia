@@ -31,21 +31,21 @@ public class RedisSagaStore(
     private static string StepLogKey(Guid sagaId) => $"saga:steps:{sagaId}";
 
     public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
-        Type handlerType, object? payload, Exception? exception, CancellationToken cancellationToken = default)
+        Type handlerType, object? payload, Exception? exception)
     {
         return LogStepAsync(sagaId, messageId, parentMessageId, stepType, status, handlerType, payload,
-            new SagaStepFailureInfo("Exception occurred", exception?.GetType().Name, exception?.ToString()), cancellationToken);
+            new SagaStepFailureInfo("Exception occurred", exception?.GetType().Name, exception?.ToString()));
     }
 
     public async Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
-        Type handlerType, object? payload, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default)
+        Type handlerType, object? payload, SagaStepFailureInfo? failureInfo)
     {
         var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
         var applicationId = ApplicationId();
         var messageTypeName = SagaStoreLogicHelper.GetMessageTypeName(stepType);
         var redisStepLogKey = StepLogKey(sagaId);
 
-        var existingSteps = await GetSagaHandlerStepsAsync(sagaId, cancellationToken);
+        var existingSteps = await GetSagaHandlerStepsAsync(sagaId);
 
         // Atomic update retry config
         var attempt = 0;
@@ -141,7 +141,7 @@ public class RedisSagaStore(
         await redisDb.KeyExpireAsync(redisStepLogKey, _options.StepLogTtl ?? TimeSpan.FromHours(1));
     }
 
-    public async Task<bool> IsStepCompletedAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType, CancellationToken cancellationToken = default)
+    public async Task<bool> IsStepCompletedAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType)
     {
         var redisStepLogKey = StepLogKey(sagaId);
         var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
@@ -154,7 +154,7 @@ public class RedisSagaStore(
         return metadata?.Status == StepStatus.Completed;
     }
 
-    public async Task<StepStatus> GetStepStatusAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType, CancellationToken cancellationToken = default)
+    public async Task<StepStatus> GetStepStatusAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType)
     {
         var redisStepLogKey = StepLogKey(sagaId);
         var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
@@ -168,7 +168,7 @@ public class RedisSagaStore(
     }
 
     public async Task<KeyValuePair<(string stepType, string handlerType, string messageId), SagaStepMetadata>?>
-        GetSagaHandlerStepAsync(Guid sagaId, Guid messageId, CancellationToken cancellationToken = default)
+        GetSagaHandlerStepAsync(Guid sagaId, Guid messageId)
     {
         var redisStepLogKey = StepLogKey(sagaId);
         var entries = await redisDb.HashGetAllAsync(redisStepLogKey);
@@ -190,7 +190,7 @@ public class RedisSagaStore(
     }
 
     public async Task<IReadOnlyDictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>>
-        GetSagaHandlerStepsAsync(Guid sagaId, CancellationToken cancellationToken = default)
+        GetSagaHandlerStepsAsync(Guid sagaId)
     {
         var redisStepLogKey = StepLogKey(sagaId);
         var entries = await redisDb.HashGetAllAsync(redisStepLogKey);
@@ -208,7 +208,7 @@ public class RedisSagaStore(
         return result;
     }
 
-    public async Task<IMessage?> LoadSagaStepMessageAsync(Guid sagaId, Type stepType, CancellationToken cancellationToken = default)
+    public async Task<IMessage?> LoadSagaStepMessageAsync(Guid sagaId, Type stepType)
     {
         var redisStepLogKey = StepLogKey(sagaId);
         var entries = await redisDb.HashGetAllAsync(redisStepLogKey);
@@ -236,7 +236,7 @@ public class RedisSagaStore(
         return null;
     }
 
-    public async Task<IMessage?> LoadSagaStepMessageAsync(Guid sagaId, Guid messageId, CancellationToken cancellationToken = default)
+    public async Task<IMessage?> LoadSagaStepMessageAsync(Guid sagaId, Guid messageId)
     {
         var redisStepLogKey = StepLogKey(sagaId);
         var entries = await redisDb.HashGetAllAsync(redisStepLogKey);
@@ -264,18 +264,18 @@ public class RedisSagaStore(
         return null;
     }
 
-    public async Task<TSagaData> LoadSagaDataAsync<TSagaData>(Guid sagaId, CancellationToken cancellationToken = default)
+    public async Task<TSagaData> LoadSagaDataAsync<TSagaData>(Guid sagaId)
         where TSagaData : SagaData, new()
     {
         var dataJson = await redisDb.StringGetAsync(SagaDataKey(sagaId));
         if (dataJson.HasValue) return JsonConvert.DeserializeObject<TSagaData>(dataJson!)!;
         // Return a new instance if nothing is found
         var emptyData = new TSagaData();
-        await SaveSagaDataAsync(sagaId, emptyData, cancellationToken);
+        await SaveSagaDataAsync(sagaId, emptyData);
         return emptyData;
     }
 
-    public async Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data, CancellationToken cancellationToken = default)
+    public async Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data)
         where TSagaData : SagaData
     {
         if (data is null) return;
@@ -285,7 +285,7 @@ public class RedisSagaStore(
     }
 
     public async Task<ISagaContext<TMessage, TSagaData>> LoadContextAsync<TMessage, TSagaData>(Guid sagaId,
-        TMessage message, Type handlerType, CancellationToken cancellationToken = default)
+        TMessage message, Type handlerType)
         where TMessage : IMessage
         where TSagaData : SagaData
     {

@@ -30,6 +30,7 @@ public interface ISagaContext<TInitialMessage>
     Task CompensateAndBubbleUp<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage;
     Task MarkAsCompensationFailed<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage;    
     Task MarkAsCompensationFailed<TStep>(Exception? ex, CancellationToken cancellationToken = default) where TStep : IMessage;
+    Task MarkAsCancelled<TStep>(Exception? ex, CancellationToken cancellationToken = default) where TStep : IMessage;
 
     Task<bool> IsAlreadyCompleted<T>(CancellationToken cancellationToken = default) where T : IMessage;
     void RegisterStepMessage<TMessage>(TMessage message) where TMessage : IMessage;

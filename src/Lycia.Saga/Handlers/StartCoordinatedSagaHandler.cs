@@ -30,11 +30,16 @@ public abstract class StartCoordinatedSagaHandler<TMessage, TSagaData> :
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             await HandleStartAsync(message, cancellationToken); // Actual business logic
         }
-        catch (Exception)
+        catch (OperationCanceledException ex)
         {
-            await Context.MarkAsFailed<TMessage>(cancellationToken);
+            await Context.MarkAsCancelled<TMessage>(ex, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await Context.MarkAsFailed<TMessage>(ex, cancellationToken);
         }
     }
 
@@ -43,11 +48,16 @@ public abstract class StartCoordinatedSagaHandler<TMessage, TSagaData> :
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             await CompensateStartAsync(message, cancellationToken); // Actual business logic
         }
-        catch (Exception)
+        catch (OperationCanceledException ex)
         {
-            await Context.MarkAsCompensationFailed<TMessage>(cancellationToken);
+            await Context.MarkAsCancelled<TMessage>(ex, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await Context.MarkAsCompensationFailed<TMessage>(ex, cancellationToken);
         }
     }
 

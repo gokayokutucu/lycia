@@ -1,5 +1,4 @@
 using Lycia.Messaging;
-using Lycia.Saga;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Extensions;
 using Lycia.Saga.Handlers;
@@ -147,7 +146,7 @@ public class SagaDispatcher(
                 HandlerDelegateHelper.GetHandlerDelegate(handlerType, methodName, message.GetType());
             await delegateMethod(handler, message, cancellationToken);
 
-            await ValidateSagaStepCompletionAsync(message, handlerType, sagaId, cancellationToken);
+            await ValidateSagaStepCompletionAsync(message, handlerType, sagaId);
         }
         catch (Exception ex)
         {
@@ -172,11 +171,11 @@ public class SagaDispatcher(
         return sagaId;
     }
 
-    private async Task ValidateSagaStepCompletionAsync(IMessage message, Type handlerType, Guid sagaId, CancellationToken cancellationToken = default)
+    private async Task ValidateSagaStepCompletionAsync(IMessage message, Type handlerType, Guid sagaId)
     {
         var stepTypeToCheck = message.GetType();
         var alreadyMarked =
-            await sagaStore.IsStepCompletedAsync(sagaId, message.MessageId, stepTypeToCheck, handlerType, cancellationToken);
+            await sagaStore.IsStepCompletedAsync(sagaId, message.MessageId, stepTypeToCheck, handlerType);
         if (!alreadyMarked)
         {
             Console.WriteLine($"Step for {stepTypeToCheck.Name} was not marked as completed, failed, or compensated.");

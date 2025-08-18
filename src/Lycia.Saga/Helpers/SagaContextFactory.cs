@@ -59,7 +59,7 @@ public static class SagaContextFactory
             var initDataArg = args[1];
 
             var loadedSagaData =
-                await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", initDataArg, sagaId, cancellationToken);
+                await sagaStore.InvokeGenericTaskResultAsync("LoadSagaDataAsync", initDataArg, sagaId);
 
             var contextType = typeof(SagaContext<,>).MakeGenericType(initMsgArg, initDataArg);
             contextInstance = Activator.CreateInstance(
