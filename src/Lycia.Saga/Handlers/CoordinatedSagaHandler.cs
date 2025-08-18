@@ -28,16 +28,16 @@ public abstract class CoordinatedSagaHandler<TMessage, TSagaData> :
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
-            await HandleAsync(message);  // Actual business logic
+            cancellationToken.ThrowIfCancellationRequested();
+            await HandleAsync(message, cancellationToken);  // Actual business logic
+        }
+        catch (OperationCanceledException ex)
+        {
+            await Context.MarkAsCancelled<TMessage>(ex, cancellationToken);
         }
         catch (Exception ex)
         {
-            await Context.MarkAsFailed<TMessage>(new FailResponse()
-            {
-                Reason = "Saga step failed",
-                ExceptionType = ex.GetType().Name,
-                ExceptionDetail = ex.ToString()
-            }, cancellationToken);
+            await Context.MarkAsFailed<TMessage>(ex, cancellationToken);
         }
     }
     
@@ -46,11 +46,16 @@ public abstract class CoordinatedSagaHandler<TMessage, TSagaData> :
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             await CompensateAsync(message, cancellationToken);  // Actual business logic
         }
-        catch (Exception)
+        catch (OperationCanceledException ex)
         {
-            await Context.MarkAsCompensationFailed<TMessage>(cancellationToken);
+            await Context.MarkAsCancelled<TMessage>(ex, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await Context.MarkAsCompensationFailed<TMessage>(ex, cancellationToken);
         }
     }
 
