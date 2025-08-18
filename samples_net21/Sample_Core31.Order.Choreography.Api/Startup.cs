@@ -44,9 +44,8 @@ namespace Sample_Core31.Order.Choreography.Api
                 EventStoreConnectionString = Configuration["Lycia:EventStore:ConnectionString"],
                 EventBusConnectionString = Configuration["Lycia:EventBus:ConnectionString"]
             };
-            builder.AddLycia(lyciaOptions);
-
-            builder.AddSagasFromCurrentAssembly(lyciaOptions);
+            builder.AddLycia(lyciaOptions)
+                .AddSagasFromCurrentAssembly();
 
             builder.RegisterAssemblyTypes(Assembly.GetExecutingAssembly())
                    .Where(t => t.Name.EndsWith("Controller"))

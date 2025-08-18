@@ -14,8 +14,6 @@ using StackExchange.Redis;
 using Microsoft.Extensions.Logging;
 using Lycia.Saga.Configurations;
 
-
-
 #if NETSTANDARD2_0
 using Autofac;
 #else
@@ -29,9 +27,9 @@ namespace Lycia.Extensions;
 public static class LyciaRegistrationExtension
 {
 #if NETSTANDARD2_0
-    public static void AddLycia(this ContainerBuilder builder, System.Configuration.Configuration? configuration = null, Type? sagaType = null)
+    public static ILyciaContainerBuilder AddLycia(this ContainerBuilder builder, System.Configuration.Configuration? configuration = null, Type? sagaType = null)
     {
-
+        if(configuration is null) return new LyciaContainerBuilder(builder, null);
 
         var eventBusProvider = configuration?.AppSettings.Settings["Lycia:EventBus:Provider"]?.Value ?? "RabbitMQ";
         var eventStoreProvider = configuration?.AppSettings.Settings["Lycia:EventStore:Provider"]?.Value ?? "Redis";
@@ -51,10 +49,6 @@ public static class LyciaRegistrationExtension
         builder.RegisterType<SagaDispatcher>().As<ISagaDispatcher>().InstancePerLifetimeScope();
         builder.RegisterType<SagaCompensationCoordinator>().As<ISagaCompensationCoordinator>().InstancePerLifetimeScope();
 
-
-
-
-
         if (eventStoreProvider == "Redis")
         {
             var conn = configuration?.AppSettings.Settings["Lycia:EventStore:ConnectionString"]?.Value
@@ -63,9 +57,7 @@ public static class LyciaRegistrationExtension
             builder.Register(ctx => ctx.Resolve<IConnectionMultiplexer>().GetDatabase()).As<IDatabase>().InstancePerLifetimeScope();
         }
 
-
         var queueTypeMap = SagaHandlerRegistrationExtensions.DiscoverQueueTypeMap(appId, sagaType?.Assembly ?? Assembly.GetCallingAssembly());
-
 
         if (eventBusProvider == "RabbitMQ")
         {
@@ -88,7 +80,6 @@ public static class LyciaRegistrationExtension
             builder.RegisterType<RabbitMqListenerWorker>().AsSelf().SingleInstance().AutoActivate();
         }
 
-
         if (eventStoreProvider == "Redis")
         {
             builder.Register(ctx =>
@@ -107,8 +98,9 @@ public static class LyciaRegistrationExtension
                 return new RedisSagaStore(redisDb, eventBus, sagaIdGen, sagaCompensationCoordinator, options);
             }).As<ISagaStore>().InstancePerLifetimeScope();
         }
+        return new LyciaContainerBuilder(builder, configuration);
     }
-    public static void AddLycia(this ContainerBuilder builder, LyciaOptions options = null, Type sagaType = null)
+    public static ILyciaContainerBuilder AddLycia(this ContainerBuilder builder, LyciaOptions options = null, Type sagaType = null)
     {
         var eventBusProvider = options?.EventBusProvider ?? "RabbitMQ";
         var eventStoreProvider = options?.EventStoreProvider ?? "Redis";
@@ -166,15 +158,18 @@ public static class LyciaRegistrationExtension
                 return new RedisSagaStore(redisDb, eventBus, sagaIdGen, sagaCompensationCoordinator, options);
             }).As<ISagaStore>().InstancePerLifetimeScope();
         }
+        return new LyciaContainerBuilder(builder, options!);
     }
 
-    public static void AddLyciaInMemory(this ContainerBuilder builder)
+    public static ILyciaContainerBuilder AddLyciaInMemory(this ContainerBuilder builder)
     {
         builder.RegisterType<DefaultSagaIdGenerator>().As<ISagaIdGenerator>().InstancePerLifetimeScope();
         builder.RegisterType<SagaDispatcher>().As<ISagaDispatcher>().InstancePerLifetimeScope();
         builder.RegisterType<SagaCompensationCoordinator>().As<ISagaCompensationCoordinator>().InstancePerLifetimeScope();
         builder.RegisterType<InMemorySagaStore>().As<ISagaStore>().InstancePerLifetimeScope();
         builder.RegisterType<InMemoryEventBus>().As<IEventBus>().InstancePerLifetimeScope();
+
+        return new LyciaContainerBuilder(builder);
     }
 #else
     public static ILyciaServiceCollection AddLycia(this IServiceCollection services, IConfiguration? configuration = null, Type? sagaType = null)
