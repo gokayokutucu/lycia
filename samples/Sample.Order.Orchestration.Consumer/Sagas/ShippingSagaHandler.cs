@@ -16,7 +16,7 @@ public class ShippingSagaHandler :
             OrderId = message.OrderId,
             ParentMessageId = message.MessageId
         }, cancellationToken);
-        await Context.MarkAsComplete<ShipOrderCommand>(cancellationToken);
+        await Context.MarkAsComplete<ShipOrderCommand>();
     }
 
     public override Task CompensateAsync(ShipOrderCommand message, CancellationToken cancellationToken = default)

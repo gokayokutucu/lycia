@@ -29,7 +29,7 @@ public abstract class CoordinatedResponsiveSagaHandler<TMessage, TResponse, TSag
         }
         catch (OperationCanceledException ex)
         {
-            await Context.MarkAsCancelled<TMessage>(ex, cancellationToken);
+            await Context.MarkAsCancelled<TMessage>(ex);
         }
         catch (Exception ex)
         {
@@ -47,11 +47,11 @@ public abstract class CoordinatedResponsiveSagaHandler<TMessage, TResponse, TSag
         }
         catch (OperationCanceledException ex)
         {
-            await Context.MarkAsCancelled<TMessage>(ex, cancellationToken);
+            await Context.MarkAsCancelled<TMessage>(ex);
         }
         catch (Exception ex)
         {
-            await Context.MarkAsCompensationFailed<TMessage>(ex, cancellationToken);
+            await Context.MarkAsCompensationFailed<TMessage>(ex);
         }
     }
 
@@ -60,8 +60,8 @@ public abstract class CoordinatedResponsiveSagaHandler<TMessage, TResponse, TSag
     public virtual Task CompensateAsync(TMessage message, CancellationToken cancellationToken = default) => 
         Context.CompensateAndBubbleUp<TMessage>(cancellationToken);
     
-    protected Task MarkAsComplete(CancellationToken cancellationToken = default) => Context.MarkAsComplete<TMessage>(cancellationToken);
+    protected Task MarkAsComplete(CancellationToken cancellationToken = default) => Context.MarkAsComplete<TMessage>();
     protected Task MarkAsFailed(CancellationToken cancellationToken = default) => Context.MarkAsFailed<TMessage>(cancellationToken);
-    protected Task MarkAsCompensationFailed(CancellationToken cancellationToken = default) => Context.MarkAsCompensationFailed<TMessage>(cancellationToken);
-    protected Task<bool> IsAlreadyCompleted(CancellationToken cancellationToken = default) => Context.IsAlreadyCompleted<TMessage>(cancellationToken);
+    protected Task MarkAsCompensationFailed(CancellationToken cancellationToken = default) => Context.MarkAsCompensationFailed<TMessage>();
+    protected Task<bool> IsAlreadyCompleted(CancellationToken cancellationToken = default) => Context.IsAlreadyCompleted<TMessage>();
 }

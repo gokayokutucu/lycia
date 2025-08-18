@@ -10,7 +10,7 @@ public class AuditOrderSagaHandler : CoordinatedSagaHandler<OrderCreatedEvent, C
     {
         try
         {
-            return Context.MarkAsComplete<OrderCreatedEvent>(cancellationToken);
+            return Context.MarkAsComplete<OrderCreatedEvent>();
         }
         catch (Exception e)
         {

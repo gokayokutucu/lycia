@@ -54,7 +54,7 @@ public class ChildCompensationSagaHandler : CoordinatedSagaHandler<DummyChildEve
     {
         Invocations.Add(nameof(ChildCompensationSagaHandler));
         if (message.IsCompensationFailed)
-            Context.MarkAsCompensationFailed<DummyChildEvent>(cancellationToken);
+            Context.MarkAsCompensationFailed<DummyChildEvent>();
         else
             Context.CompensateAndBubbleUp<DummyChildEvent>(cancellationToken);
         return Task.CompletedTask;

@@ -17,7 +17,7 @@ public class InventorySagaHandler :
             OrderId = evt.OrderId,
             ParentMessageId = evt.MessageId
         }, cancellationToken);
-        await Context.MarkAsComplete<OrderCreatedEvent>(cancellationToken);
+        await Context.MarkAsComplete<OrderCreatedEvent>();
     }
 
     public override async Task CompensateAsync(OrderCreatedEvent message, CancellationToken cancellationToken = default)
@@ -26,11 +26,11 @@ public class InventorySagaHandler :
         {
             // Fix count of reserved stock
             InventoryService.ReleaseStock(message.OrderId);
-            await Context.MarkAsCompensated<OrderCreatedEvent>(cancellationToken);
+            await Context.MarkAsCompensated<OrderCreatedEvent>();
         }
         catch (Exception ex)
         {
-            await Context.MarkAsCompensationFailed<OrderCreatedEvent>(cancellationToken);
+            await Context.MarkAsCompensationFailed<OrderCreatedEvent>();
 
             throw; 
         }

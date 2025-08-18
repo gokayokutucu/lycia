@@ -21,7 +21,7 @@ public class CreateOrderSagaHandler :
             OrderId = cmd.OrderId,
             ParentMessageId = cmd.MessageId
         }, cancellationToken);
-        await Context.MarkAsComplete<CreateOrderCommand>(cancellationToken);
+        await Context.MarkAsComplete<CreateOrderCommand>();
     }
 
     public override async Task CompensateStartAsync(CreateOrderCommand message, CancellationToken cancellationToken = default)
@@ -29,14 +29,14 @@ public class CreateOrderSagaHandler :
         try
         {
             // Compensation logic
-            await Context.MarkAsCompensated<CreateOrderCommand>(cancellationToken);
+            await Context.MarkAsCompensated<CreateOrderCommand>();
         }
         catch (Exception ex)
         {
             // Log, notify, halt chain, etc.
             Console.WriteLine($"❌ Compensation failed: {ex.Message}");
             
-            await Context.MarkAsCompensationFailed<CreateOrderCommand>(cancellationToken);
+            await Context.MarkAsCompensationFailed<CreateOrderCommand>();
             // Optionally: rethrow or store for manual retry
             throw; // Or suppress and log for retry system
         }
@@ -45,7 +45,7 @@ public class CreateOrderSagaHandler :
     // Optional – compensate on payment failure (reactive, not orchestration)
     public async Task CompensateAsync(PaymentFailedEvent failed, CancellationToken cancellationToken = default)
     {
-        if (await Context.IsAlreadyCompleted<CreateOrderCommand>(cancellationToken)) return;
+        if (await Context.IsAlreadyCompleted<CreateOrderCommand>()) return;
         // e.g., notify user / mark order canceled / audit
     }
 
