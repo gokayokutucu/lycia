@@ -21,7 +21,7 @@ public class CreateOrderSagaHandler :
             OrderId = message.OrderId,
             ParentMessageId = message.MessageId
         }, cancellationToken);
-        await Context.MarkAsComplete<CreateOrderCommand>(cancellationToken);
+        await Context.MarkAsComplete<CreateOrderCommand>();
     }
 
     public override async Task HandleSuccessResponseAsync(OrderCreatedResponse response, CancellationToken cancellationToken = default)
@@ -32,7 +32,7 @@ public class CreateOrderSagaHandler :
             OrderId = response.OrderId,
             ParentMessageId = response.MessageId
         }, cancellationToken);
-        await Context.MarkAsComplete<OrderCreatedResponse>(cancellationToken);
+        await Context.MarkAsComplete<OrderCreatedResponse>();
     }
 
     public override Task HandleFailResponseAsync(OrderCreatedResponse response, FailResponse fail, CancellationToken cancellationToken = default)
@@ -49,7 +49,7 @@ public class CreateOrderSagaHandler :
             OrderId = response.OrderId,
             ParentMessageId = response.MessageId
         }, cancellationToken);
-        await Context.MarkAsComplete<InventoryReservedResponse>(cancellationToken);
+        await Context.MarkAsComplete<InventoryReservedResponse>();
     }
 
     public Task HandleFailResponseAsync(InventoryReservedResponse response, FailResponse fail, CancellationToken cancellationToken = default)
@@ -66,7 +66,7 @@ public class CreateOrderSagaHandler :
             OrderId = response.OrderId,
             ParentMessageId = response.MessageId
         }, cancellationToken);
-        await Context.MarkAsComplete<PaymentSucceededResponse>(cancellationToken);
+        await Context.MarkAsComplete<PaymentSucceededResponse>();
     }
 
     public Task HandleFailResponseAsync(PaymentSucceededResponse response, FailResponse fail, CancellationToken cancellationToken = default)
@@ -90,7 +90,7 @@ public class CreateOrderSagaHandler :
         // Here you can mark the saga as completed (DB update, event publish, etc.)
         // Example:
         Context.Data.IsCompleted = true;
-        await Context.MarkAsComplete<OrderShippedResponse>(cancellationToken);
+        await Context.MarkAsComplete<OrderShippedResponse>();
     }
 
     public Task HandleFailResponseAsync(OrderShippedResponse response, FailResponse fail, CancellationToken cancellationToken = default)

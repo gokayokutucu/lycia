@@ -19,6 +19,10 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
             .WithImage("rabbitmq:3.13-management-alpine")
             .WithCleanUp(true)
             .Build();
+    
+    private string RabbitMqConnectionString =>
+        //"amqp://guest:guest@127.0.0.1:5672/"; 
+        _rabbitMqContainer.GetConnectionString();
 
     public async Task InitializeAsync()
         => await _rabbitMqContainer.StartAsync().ConfigureAwait(false);
@@ -29,14 +33,13 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task Publish_Event_Expires_To_DLQ_Succeeds()
     {
-        //string amqpUri = "amqp://guest:guest@localhost:5672";
-        var amqpUri = _rabbitMqContainer.GetConnectionString();
+
         var applicationId = "TestApp";
         var handlerType = typeof(TestEventHandlerA);
         var queueName = MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType, applicationId);
 
         // Clean up before test (best practice for integration tests)
-        var factory = new ConnectionFactory { Uri = new Uri(amqpUri) };
+        var factory = new ConnectionFactory { Uri = new Uri(RabbitMqConnectionString) };
         await using (var conn = await factory.CreateConnectionAsync(CancellationToken.None))
         await using (var channelDelete = await conn.CreateChannelAsync(cancellationToken: CancellationToken.None))
         {
@@ -72,10 +75,10 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         };
 
         await using (var consumerBus = await RabbitMqEventBus.CreateAsync(
-                   amqpUri,
-                   NullLogger<RabbitMqEventBus>.Instance,
-                   queueTypeMap,
-                   eventBusOptions))
+                         RabbitMqConnectionString,
+                         NullLogger<RabbitMqEventBus>.Instance,
+                         queueTypeMap,
+                         eventBusOptions))
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5)); // Extra time for test
 
@@ -83,21 +86,28 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
             {
                 // Trigger consumer (do not process any messages)
                 // Start the consumer just to trigger queue creation, don't wait for any message
-                await using var enumerator = consumerBus.ConsumeAsync(autoAck: false, cancellationToken: cts.Token).GetAsyncEnumerator(cts.Token);
+                await using var enumerator = consumerBus.ConsumeAsync(autoAck: false, cancellationToken: cts.Token)
+                    .GetAsyncEnumerator(cts.Token);
                 // Just trigger queue/DLQ creation (no actual message expected)
                 await enumerator.MoveNextAsync();
             }
-            catch (TaskCanceledException) { /* Ignore cancellation*/  }
-            catch (OperationCanceledException) { /* Ignore cancellation */  }
+            catch (TaskCanceledException)
+            {
+                /* Ignore cancellation*/
+            }
+            catch (OperationCanceledException)
+            {
+                /* Ignore cancellation */
+            }
         }
-        
+
         await Task.Delay(500);
 
-       await using (var publisherBus = await RabbitMqEventBus.CreateAsync(
-                   amqpUri,
-                   NullLogger<RabbitMqEventBus>.Instance,
-                   queueTypeMap,
-                   eventBusOptions))
+        await using (var publisherBus = await RabbitMqEventBus.CreateAsync(
+                         RabbitMqConnectionString,
+                         NullLogger<RabbitMqEventBus>.Instance,
+                         queueTypeMap,
+                         eventBusOptions))
         {
             // Publish event
             var testEvent = new TestEvent
@@ -107,7 +117,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
             };
             await publisherBus.Publish(testEvent);
         }
-       
+
         // Wait for TTL + DLQ transfer
         await Task.Delay(ttl + TimeSpan.FromSeconds(23));
 
@@ -129,14 +139,15 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task PublishThenConsume_Event_Succeeds()
     {
-        //string amqpUri = "amqp://guest:guest@localhost:5672";
-        var amqpUri = _rabbitMqContainer.GetConnectionString();
         var applicationId = "TestApp";
         var handlerType = typeof(TestEventHandlerA);
 
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
-            { MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType, applicationId), (typeof(TestEvent), typeof(TestEventHandlerA) )}
+            {
+                MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType, applicationId),
+                (typeof(TestEvent), typeof(TestEventHandlerA))
+            }
         };
 
         var eventBusOptions = new EventBusOptions
@@ -146,7 +157,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         };
 
         var eventBus = await RabbitMqEventBus.CreateAsync(
-            amqpUri,
+            RabbitMqConnectionString,
             NullLogger<RabbitMqEventBus>.Instance,
             queueTypeMap,
             eventBusOptions);
@@ -187,8 +198,6 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task PublishThenConsume_Event_MultiConsumer_Succeeds()
     {
-        //string amqpUri = "amqp://guest:guest@localhost:5672";
-        var amqpUri = _rabbitMqContainer.GetConnectionString();
         var applicationId = "TestApp";
         var handlerType1 = typeof(TestEventHandlerA);
         var handlerType2 = typeof(TestEventHandlerB);
@@ -196,8 +205,14 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         // Separate queueTypeMap entry for each handler
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
-            { MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType1, applicationId), (typeof(TestEvent), typeof(TestEventHandlerA)) },
-            { MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType2, applicationId), (typeof(TestEvent), typeof(TestEventHandlerB)) }
+            {
+                MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType1, applicationId),
+                (typeof(TestEvent), typeof(TestEventHandlerA))
+            },
+            {
+                MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType2, applicationId),
+                (typeof(TestEvent), typeof(TestEventHandlerB))
+            }
         };
 
         var eventBusOptions = new EventBusOptions
@@ -207,7 +222,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         };
 
         var eventBus = await RabbitMqEventBus.CreateAsync(
-            amqpUri,
+            RabbitMqConnectionString,
             NullLogger<RabbitMqEventBus>.Instance,
             queueTypeMap,
             eventBusOptions);
@@ -251,8 +266,6 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task SendThenConsume_Command_Succeeds()
     {
-        //string amqpUri = "amqp://guest:guest@localhost:5672";
-        var amqpUri = _rabbitMqContainer.GetConnectionString();
         var applicationId = "TestApp";
         var handlerType = typeof(TestCommandHandlerA);
 
@@ -272,7 +285,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         };
 
         var eventBus = await RabbitMqEventBus.CreateAsync(
-            amqpUri,
+            RabbitMqConnectionString,
             NullLogger<RabbitMqEventBus>.Instance,
             queueTypeMap,
             eventBusOptions);
@@ -313,7 +326,8 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
 // Dummy command handler for test
     private class TestCommandHandlerA : StartReactiveSagaHandler<TestCommand>
     {
-        public override Task HandleStartAsync(TestCommand message, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public override Task HandleStartAsync(TestCommand message, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
     }
 
 // Test command for Send
@@ -324,14 +338,15 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
 
     private class TestEventHandlerA : StartReactiveSagaHandler<TestEvent>
     {
-        public override Task HandleStartAsync(TestEvent message, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public override Task HandleStartAsync(TestEvent message, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
     }
 
     private class TestEventHandlerB : StartReactiveSagaHandler<TestEvent>
     {
-        public override Task HandleStartAsync(TestEvent message, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public override Task HandleStartAsync(TestEvent message, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
     }
-
 
     private class TestEvent : EventBase
     {

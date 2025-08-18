@@ -9,6 +9,7 @@ using Lycia.Infrastructure.Eventing;
 using Lycia.Infrastructure.Stores;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Common;
+using Lycia.Saga.Configurations;
 using Lycia.Saga.Extensions;
 using StackExchange.Redis;
 using Microsoft.Extensions.Logging;
@@ -189,7 +190,9 @@ public static class LyciaRegistrationExtension
         var logMaxRetryCount = int.TryParse(configuration["Lycia:EventStore:LogMaxRetryCount"], out var parsedLogRetryMaxCount) && parsedLogRetryMaxCount > 0
             ? parsedLogRetryMaxCount
             : Constants.LogMaxRetryCount;
-
+        
+        services.Configure<SagaOptions>(configuration.GetSection(SagaOptions.Saga));//GOP
+        
         // Production default registration for ISagaIdGenerator
         services.TryAddScoped<ISagaIdGenerator, DefaultSagaIdGenerator>();
         // Production default registration for ISagaDispatcher
@@ -256,11 +259,14 @@ public static class LyciaRegistrationExtension
 
     public static ILyciaServiceCollection AddLyciaInMemory(this IServiceCollection services, IConfiguration? configuration = null)
     {
+        services.TryAddSingleton(new SagaOptions());
+        
         services.TryAddScoped<ISagaIdGenerator, DefaultSagaIdGenerator>();
         services.TryAddScoped<ISagaDispatcher, SagaDispatcher>();
         services.TryAddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.TryAddScoped<ISagaStore, InMemorySagaStore>();
         services.TryAddScoped<IEventBus, InMemoryEventBus>();
+        
         return new LyciaServiceCollection(services, configuration);
     }
 #endif

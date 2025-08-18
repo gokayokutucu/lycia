@@ -40,15 +40,15 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
             sagaStore)
             throw new InvalidOperationException("ISagaStore not resolved.");
 
-        var stepKeyValuePair = await sagaStore.GetSagaHandlerStepAsync(sagaId, message.MessageId, cancellationToken);
+        var stepKeyValuePair = await sagaStore.GetSagaHandlerStepAsync(sagaId, message.MessageId);
         if (IsStepAlreadyInStatus(stepKeyValuePair, StepStatus.Failed, StepStatus.Compensated,
                 StepStatus.CompensationFailed))
             return;
 
         await sagaStore.LogStepAsync(sagaId, message.MessageId, message.ParentMessageId, failedStepType,
-            StepStatus.Failed, handlerType, message, failInfo, cancellationToken);
+            StepStatus.Failed, handlerType, message, failInfo);
 
-        stepKeyValuePair = await sagaStore.GetSagaHandlerStepAsync(sagaId, message.MessageId, cancellationToken);
+        stepKeyValuePair = await sagaStore.GetSagaHandlerStepAsync(sagaId, message.MessageId);
         if (!stepKeyValuePair.HasValue) return;
         var step = stepKeyValuePair.Value;
 
@@ -73,6 +73,7 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
     /// <param name="stepType">The type of the step whose parent is to be compensated.</param>
     /// <param name="handlerType"></param>
     /// <param name="message">The message of the current step</param>
+    /// <param name="cancellationToken">Cancellation token</param>
     public async Task CompensateParentAsync(Guid sagaId, Type stepType, Type handlerType, IMessage message, CancellationToken cancellationToken = default)
     {
         if (serviceProvider.GetService(typeof(IEventBus)) is not IEventBus eventBus)
@@ -82,14 +83,14 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
             sagaStore)
             throw new InvalidOperationException("ISagaStore not resolved.");
 
-        var stepKeyValuePair = await sagaStore.GetSagaHandlerStepAsync(sagaId, message.MessageId, cancellationToken);
+        var stepKeyValuePair = await sagaStore.GetSagaHandlerStepAsync(sagaId, message.MessageId);
         if (IsStepAlreadyInStatus(stepKeyValuePair, StepStatus.Compensated, StepStatus.CompensationFailed))
             return;
         // Log the step as failed before compensating
         await sagaStore.LogStepAsync(sagaId, message.MessageId, message.ParentMessageId, stepType,
-            StepStatus.Compensated, handlerType, message, (Exception?)null, cancellationToken);
+            StepStatus.Compensated, handlerType, message, (Exception?)null);
         
-        var steps = await sagaStore.GetSagaHandlerStepsAsync(sagaId, cancellationToken);
+        var steps = await sagaStore.GetSagaHandlerStepsAsync(sagaId);
         
         if (steps.All(kv => kv.Key.messageId != message.MessageId.ToString()))
             return;
@@ -150,7 +151,9 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
                 eventBus,
                 sagaStore,
                 sagaIdGenerator,
-                this, cancellationToken);
+                this, 
+                serviceProvider,
+                cancellationToken);
 
             await delegateMethod(handler, messageObject, cancellationToken);
         }
@@ -172,7 +175,9 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
                     eventBus,
                     sagaStore,
                     sagaIdGenerator,
-                    this, cancellationToken);
+                    this, 
+                    serviceProvider,
+                    cancellationToken);
 
                 await delegateMethod(handler, messageObject, cancellationToken);
             }

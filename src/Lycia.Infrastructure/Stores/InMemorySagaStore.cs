@@ -28,14 +28,14 @@ public class InMemorySagaStore(
     private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<string, SagaStepMetadata>> _stepLogs = new();
 
     public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
-        Type handlerType, object? payload, Exception? exception, CancellationToken cancellationToken = default)
+        Type handlerType, object? payload, Exception? exception)
     {
         return LogStepAsync(sagaId, messageId, parentMessageId, stepType, status, handlerType, payload, 
-            new SagaStepFailureInfo("Exception occurred", exception?.GetType().Name, exception?.ToString()  ), cancellationToken);
+            new SagaStepFailureInfo("Exception occurred", exception?.GetType().Name, exception?.ToString()  ));
     }
     
     public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
-        Type handlerType, object? payload, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default)
+        Type handlerType, object? payload, SagaStepFailureInfo? failureInfo)
     {
         var stepDict = _stepLogs.GetOrAdd(sagaId, _ => new ConcurrentDictionary<string, SagaStepMetadata>());
         var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
@@ -83,7 +83,7 @@ public class InMemorySagaStore(
     /// Checks if the step with specified stepType and handlerType is completed.
     /// Uses the composite key for lookup.
     /// </summary>
-    public Task<bool> IsStepCompletedAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType, CancellationToken cancellationToken = default)
+    public Task<bool> IsStepCompletedAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType)
     {
         if (!_stepLogs.TryGetValue(sagaId, out var steps)) 
             return Task.FromResult(false);
@@ -99,7 +99,7 @@ public class InMemorySagaStore(
     /// Gets the status of the step with specified stepType and handlerType.
     /// Uses the composite key for lookup.
     /// </summary>
-    public Task<StepStatus> GetStepStatusAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType, CancellationToken cancellationToken = default)
+    public Task<StepStatus> GetStepStatusAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType)
     {
         if (_stepLogs.TryGetValue(sagaId, out var steps))
         {
@@ -114,7 +114,7 @@ public class InMemorySagaStore(
     }
 
     public Task<KeyValuePair<(string stepType, string handlerType, string messageId), SagaStepMetadata>?>
-        GetSagaHandlerStepAsync(Guid sagaId, Guid messageId, CancellationToken cancellationToken = default)
+        GetSagaHandlerStepAsync(Guid sagaId, Guid messageId)
     {
         if (!_stepLogs.TryGetValue(sagaId, out var steps))
             return Task.FromResult<KeyValuePair<(string, string, string), SagaStepMetadata>?>(null);
@@ -144,7 +144,7 @@ public class InMemorySagaStore(
     /// Returns a dictionary keyed by (stepType, handlerType) tuple.
     /// </summary>
     public Task<IReadOnlyDictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>>
-        GetSagaHandlerStepsAsync(Guid sagaId, CancellationToken cancellationToken = default)
+        GetSagaHandlerStepsAsync(Guid sagaId)
     {
         if (!_stepLogs.TryGetValue(sagaId, out var steps))
             return Task
@@ -175,7 +175,7 @@ public class InMemorySagaStore(
 
     }
     
-    public Task<IMessage?> LoadSagaStepMessageAsync(Guid sagaId, Type stepType, CancellationToken cancellationToken = default)
+    public Task<IMessage?> LoadSagaStepMessageAsync(Guid sagaId, Type stepType)
     {
         if (!_stepLogs.TryGetValue(sagaId, out var steps)) return Task.FromResult<IMessage?>(null);
 
@@ -202,7 +202,7 @@ public class InMemorySagaStore(
         return Task.FromResult<IMessage?>(null);
     }
 
-    public Task<IMessage?> LoadSagaStepMessageAsync(Guid sagaId, Guid messageId, CancellationToken cancellationToken = default)
+    public Task<IMessage?> LoadSagaStepMessageAsync(Guid sagaId, Guid messageId)
     {
         if (!_stepLogs.TryGetValue(sagaId, out var steps)) return Task.FromResult<IMessage?>(null);
 
@@ -228,7 +228,7 @@ public class InMemorySagaStore(
         return Task.FromResult<IMessage?>(null);
     }
 
-    public Task<TSagaData> LoadSagaDataAsync<TSagaData>(Guid sagaId, CancellationToken cancellationToken = default)
+    public Task<TSagaData> LoadSagaDataAsync<TSagaData>(Guid sagaId)
         where TSagaData : SagaData, new()
     {
         if (_sagaData.TryGetValue(sagaId, out var data))
@@ -240,7 +240,7 @@ public class InMemorySagaStore(
         return Task.FromResult(defaultData);
     }
 
-    public Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data, CancellationToken cancellationToken = default)
+    public Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data)
         where TSagaData : SagaData
     {
         if (data is null) return Task.CompletedTask;
@@ -251,7 +251,7 @@ public class InMemorySagaStore(
     }
 
     public Task<ISagaContext<TMessage, TSagaData>> LoadContextAsync<TMessage, TSagaData>(Guid sagaId, TMessage message,
-        Type handlerType, CancellationToken cancellationToken = default)
+        Type handlerType)
         where TMessage : IMessage
         where TSagaData : SagaData
     {
