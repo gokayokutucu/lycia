@@ -8,8 +8,6 @@ public class PaymentSagaHandler : ReactiveSagaHandler<InventoryReservedEvent>
 {
     public override async Task HandleAsync(InventoryReservedEvent evt, CancellationToken cancellationToken = default)
     {
-        if (await Context.IsAlreadyCompleted<InventoryReservedEvent>(cancellationToken)) return;
-        
         var ok = PaymentService.SimulatePayment();
         if (!ok)
         {
@@ -29,6 +27,6 @@ public class PaymentSagaHandler : ReactiveSagaHandler<InventoryReservedEvent>
             OrderId = evt.OrderId,
             ParentMessageId = evt.MessageId
         }, cancellationToken);
-        await Context.MarkAsComplete<InventoryReservedEvent>(cancellationToken);
+        await Context.MarkAsComplete<InventoryReservedEvent>();
     }
 }

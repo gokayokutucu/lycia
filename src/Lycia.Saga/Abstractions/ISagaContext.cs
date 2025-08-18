@@ -22,16 +22,17 @@ public interface ISagaContext<TInitialMessage>
 
     Task Compensate<T>(T @event, CancellationToken cancellationToken = default) where T : FailedEventBase;
 
-    Task MarkAsComplete<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage;
+    Task MarkAsComplete<TStep>() where TStep : IMessage;
     Task MarkAsFailed<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage;
     Task MarkAsFailed<TStep>(Exception? ex, CancellationToken cancellationToken = default) where TStep : IMessage;
     Task MarkAsFailed<TStep>(FailResponse fail, CancellationToken cancellationToken = default) where TStep : IMessage;
-    Task MarkAsCompensated<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage;
+    Task MarkAsCompensated<TStep>() where TStep : IMessage;
     Task CompensateAndBubbleUp<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage;
-    Task MarkAsCompensationFailed<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage;    
-    Task MarkAsCompensationFailed<TStep>(Exception? ex, CancellationToken cancellationToken = default) where TStep : IMessage;
+    Task MarkAsCompensationFailed<TStep>() where TStep : IMessage;    
+    Task MarkAsCompensationFailed<TStep>(Exception? ex) where TStep : IMessage;
+    Task MarkAsCancelled<TStep>(Exception? ex) where TStep : IMessage;
 
-    Task<bool> IsAlreadyCompleted<T>(CancellationToken cancellationToken = default) where T : IMessage;
+    Task<bool> IsAlreadyCompleted<T>() where T : IMessage;
     void RegisterStepMessage<TMessage>(TMessage message) where TMessage : IMessage;
 }
 

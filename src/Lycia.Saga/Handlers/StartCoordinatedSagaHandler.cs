@@ -1,6 +1,8 @@
 using Lycia.Messaging;
 using Lycia.Saga.Abstractions;
+using Lycia.Saga.Configurations;
 using Lycia.Saga.Handlers.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace Lycia.Saga.Handlers;
 
@@ -16,46 +18,56 @@ public abstract class StartCoordinatedSagaHandler<TMessage, TSagaData> :
 {
     protected ISagaContext<IMessage, TSagaData> Context { get; private set; } = null!;
 
-    public void Initialize(ISagaContext<IMessage, TSagaData> context)
+    public void Initialize(ISagaContext<IMessage, TSagaData> context, IOptions<SagaOptions> sagaOptions)
     {
         Context = context;
     }
 
-    public abstract Task HandleStartAsync(TMessage message);
+    public abstract Task HandleStartAsync(TMessage message, CancellationToken cancellationToken = default);
 
-    protected async Task HandleAsyncInternal(TMessage message)
+    protected async Task HandleAsyncInternal(TMessage message, CancellationToken cancellationToken = default)
     {
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
-            await HandleStartAsync(message); // Actual business logic
+            cancellationToken.ThrowIfCancellationRequested();
+            await HandleStartAsync(message, cancellationToken); // Actual business logic
         }
-        catch (Exception)
+        catch (OperationCanceledException ex)
         {
-            await Context.MarkAsFailed<TMessage>();
+            await Context.MarkAsCancelled<TMessage>(ex);
+        }
+        catch (Exception ex)
+        {
+            await Context.MarkAsFailed<TMessage>(ex, cancellationToken);
         }
     }
 
-    protected async Task CompensateAsyncInternal(TMessage message)
+    protected async Task CompensateAsyncInternal(TMessage message, CancellationToken cancellationToken = default)
     {
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
-            await CompensateStartAsync(message); // Actual business logic
+            cancellationToken.ThrowIfCancellationRequested();
+            await CompensateStartAsync(message, cancellationToken); // Actual business logic
         }
-        catch (Exception)
+        catch (OperationCanceledException ex)
         {
-            await Context.MarkAsCompensationFailed<TMessage>();
+            await Context.MarkAsCancelled<TMessage>(ex);
+        }
+        catch (Exception ex)
+        {
+            await Context.MarkAsCompensationFailed<TMessage>(ex);
         }
     }
 
-    public virtual Task CompensateStartAsync(TMessage message)
+    public virtual Task CompensateStartAsync(TMessage message, CancellationToken cancellationToken = default)
     {
         return Task.CompletedTask;
     }
     
-    protected Task MarkAsComplete(CancellationToken cancellationToken = default) => Context.MarkAsComplete<TMessage>(cancellationToken);
+    protected Task MarkAsComplete(CancellationToken cancellationToken = default) => Context.MarkAsComplete<TMessage>();
     protected Task MarkAsFailed(CancellationToken cancellationToken = default) => Context.MarkAsFailed<TMessage>(cancellationToken);
-    protected Task MarkAsCompensationFailed(CancellationToken cancellationToken = default) => Context.MarkAsCompensationFailed<TMessage>(cancellationToken);
-    protected Task<bool> IsAlreadyCompleted(CancellationToken cancellationToken = default) => Context.IsAlreadyCompleted<TMessage>(cancellationToken);
+    protected Task MarkAsCompensationFailed(CancellationToken cancellationToken = default) => Context.MarkAsCompensationFailed<TMessage>();
+    protected Task<bool> IsAlreadyCompleted(CancellationToken cancellationToken = default) => Context.IsAlreadyCompleted<TMessage>();
 }

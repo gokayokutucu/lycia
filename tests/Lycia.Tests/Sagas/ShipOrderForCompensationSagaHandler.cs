@@ -59,7 +59,7 @@ public class ShipOrderForCompensationSagaHandler :
             // Log, notify, halt chain, etc.
             Console.WriteLine($"❌ Compensation failed: {ex.Message}");
 
-            await Context.MarkAsCompensationFailed<OrderCreatedEvent>(cancellationToken);
+            await Context.MarkAsCompensationFailed<OrderCreatedEvent>();
             // Optionally: rethrow or store for manual retry
             //throw; // Or suppress and log for the retry system
         }

@@ -18,7 +18,7 @@ public class CreateOrderSagaHandler :
     /// </summary>
     public bool CompensateCalled { get; private set; }
     
-    public override async Task HandleStartAsync(CreateOrderCommand command)
+    public override async Task HandleStartAsync(CreateOrderCommand command, CancellationToken cancellationToken = default)
     {
         await Context.SendWithTracking(new ReserveInventoryCommand
         {
@@ -27,7 +27,7 @@ public class CreateOrderSagaHandler :
         .ThenMarkAsComplete();
     }
 
-    public override async Task CompensateStartAsync(CreateOrderCommand message)
+    public override async Task CompensateStartAsync(CreateOrderCommand message, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -40,8 +40,8 @@ public class CreateOrderSagaHandler :
             // Log, notify, halt chain, etc.
             Console.WriteLine($"❌ Compensation failed: {ex.Message}");
             
-            await Context.MarkAsCompensationFailed<CreateOrderCommand>();
-            // Optionally: rethrow or store for manual retry
+            await Context.MarkAsCompensationFailed<CreateOrderCommand>(ex);
+            // Optionally: rethrow or store for manual retrye
             throw; // Or suppress and log for retry system
         }
     }

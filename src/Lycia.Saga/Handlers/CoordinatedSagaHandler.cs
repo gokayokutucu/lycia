@@ -1,6 +1,8 @@
 using Lycia.Messaging;
 using Lycia.Saga.Abstractions;
+using Lycia.Saga.Configurations;
 using Lycia.Saga.Handlers.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace Lycia.Saga.Handlers;
 
@@ -16,7 +18,7 @@ public abstract class CoordinatedSagaHandler<TMessage, TSagaData> :
 {
     protected ISagaContext<IMessage, TSagaData> Context { get; private set; } = null!;
 
-    public void Initialize(ISagaContext<IMessage, TSagaData> context)
+    public void Initialize(ISagaContext<IMessage, TSagaData> context, IOptions<SagaOptions> sagaOptions)
     {
         Context = context;
     }
@@ -26,16 +28,16 @@ public abstract class CoordinatedSagaHandler<TMessage, TSagaData> :
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
-            await HandleAsync(message);  // Actual business logic
+            cancellationToken.ThrowIfCancellationRequested();
+            await HandleAsync(message, cancellationToken);  // Actual business logic
+        }
+        catch (OperationCanceledException ex)
+        {
+            await Context.MarkAsCancelled<TMessage>(ex);
         }
         catch (Exception ex)
         {
-            await Context.MarkAsFailed<TMessage>(new FailResponse()
-            {
-                Reason = "Saga step failed",
-                ExceptionType = ex.GetType().Name,
-                ExceptionDetail = ex.ToString()
-            }, cancellationToken);
+            await Context.MarkAsFailed<TMessage>(ex, cancellationToken);
         }
     }
     
@@ -44,11 +46,16 @@ public abstract class CoordinatedSagaHandler<TMessage, TSagaData> :
         Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             await CompensateAsync(message, cancellationToken);  // Actual business logic
         }
-        catch (Exception)
+        catch (OperationCanceledException ex)
         {
-            await Context.MarkAsCompensationFailed<TMessage>(cancellationToken);
+            await Context.MarkAsCancelled<TMessage>(ex);
+        }
+        catch (Exception ex)
+        {
+            await Context.MarkAsCompensationFailed<TMessage>(ex);
         }
     }
 
@@ -57,8 +64,8 @@ public abstract class CoordinatedSagaHandler<TMessage, TSagaData> :
     public virtual Task CompensateAsync(TMessage message, CancellationToken cancellationToken = default) => 
         Context.CompensateAndBubbleUp<TMessage>(cancellationToken);
     
-    protected Task MarkAsComplete(CancellationToken cancellationToken = default) => Context.MarkAsComplete<TMessage>(cancellationToken);
+    protected Task MarkAsComplete(CancellationToken cancellationToken = default) => Context.MarkAsComplete<TMessage>();
     protected Task MarkAsFailed(CancellationToken cancellationToken = default) => Context.MarkAsFailed<TMessage>(cancellationToken);
-    protected Task MarkAsCompensationFailed(CancellationToken cancellationToken = default) => Context.MarkAsCompensationFailed<TMessage>(cancellationToken);
-    protected Task<bool> IsAlreadyCompleted(CancellationToken cancellationToken = default) => Context.IsAlreadyCompleted<TMessage>(cancellationToken);
+    protected Task MarkAsCompensationFailed(CancellationToken cancellationToken = default) => Context.MarkAsCompensationFailed<TMessage>();
+    protected Task<bool> IsAlreadyCompleted(CancellationToken cancellationToken = default) => Context.IsAlreadyCompleted<TMessage>();
 }
