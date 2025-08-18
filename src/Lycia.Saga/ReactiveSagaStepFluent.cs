@@ -15,10 +15,10 @@ public class ReactiveSagaStepFluent<TInitialMessage>(
         return Activator.CreateInstance(closed, context, operation)!;
     }
     
-    public async Task ThenMarkAsComplete(CancellationToken cancellationToken = default)
+    public async Task ThenMarkAsComplete()
     {
         await operation();
-        await context.MarkAsComplete<TInitialMessage>(cancellationToken);
+        await context.MarkAsComplete<TInitialMessage>();
     }
 
     public async Task ThenMarkAsFailed(FailResponse fail, CancellationToken cancellationToken = default)
@@ -30,12 +30,12 @@ public class ReactiveSagaStepFluent<TInitialMessage>(
     public async Task ThenMarkAsCompensated(CancellationToken cancellationToken = default)
     {
         await operation();
-        await context.MarkAsCompensated<TInitialMessage>(cancellationToken);
+        await context.MarkAsCompensated<TInitialMessage>();
     }
 
-    public async Task ThenMarkAsCompensationFailed(CancellationToken cancellationToken = default)
+    public async Task ThenMarkAsCompensationFailed()
     {
         await operation();
-        await context.MarkAsCompensationFailed<TInitialMessage>(cancellationToken);
+        await context.MarkAsCompensationFailed<TInitialMessage>();
     }
 }

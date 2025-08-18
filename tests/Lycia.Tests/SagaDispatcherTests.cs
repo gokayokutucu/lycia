@@ -603,7 +603,7 @@ public class SagaDispatcherTests
         public override async Task HandleStartAsync(InitialCommand message, CancellationToken cancellationToken = default)
         {
             var next = new ParentEvent { ParentMessageId = message.MessageId };
-            await Context.PublishWithTracking(next).ThenMarkAsComplete(cancellationToken);
+            await Context.PublishWithTracking(next).ThenMarkAsComplete();
         }
 
         public override Task CompensateStartAsync(InitialCommand message, CancellationToken cancellationToken = default)
@@ -620,7 +620,7 @@ public class SagaDispatcherTests
         public override Task HandleAsync(ParentEvent message, CancellationToken cancellationToken = default)
         {
             var fail = new FailingEvent { ParentMessageId = message.MessageId };
-            return Context.PublishWithTracking(fail).ThenMarkAsComplete(cancellationToken);
+            return Context.PublishWithTracking(fail).ThenMarkAsComplete();
         }
 
         public override Task CompensateAsync(ParentEvent message, CancellationToken cancellationToken = default)
@@ -640,7 +640,7 @@ public class SagaDispatcherTests
             // Simulate a failure in the handler
             // Uncomment the next line to simulate a failure and trigger compensation
             // throw new Exception("Simulated failure in FailingCompensationSagaHandler");
-            Context.MarkAsComplete<FailingEvent>(cancellationToken);
+            Context.MarkAsComplete<FailingEvent>();
             return Task.CompletedTask;
         }
             //=> throw new InvalidOperationException("Fail!");

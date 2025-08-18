@@ -13,6 +13,6 @@ public class DeliverOrderSagaHandler : CoordinatedSagaHandler<OrderShippedEvent,
         {
             OrderId = command.OrderId
         }, cancellationToken)
-            .ThenMarkAsComplete(cancellationToken);
+            .ThenMarkAsComplete();
     }
 }

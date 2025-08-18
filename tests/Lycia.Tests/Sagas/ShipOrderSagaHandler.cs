@@ -25,7 +25,7 @@ public class ShipOrderSagaHandler : CoordinatedSagaHandler<OrderCreatedEvent, Cr
                 ShipmentTrackId = Guid.NewGuid(),
                 ShippedAt = DateTime.UtcNow
             })
-                .ThenMarkAsComplete(cancellationToken);
+                .ThenMarkAsComplete();
         }
         catch (Exception ex)
         {

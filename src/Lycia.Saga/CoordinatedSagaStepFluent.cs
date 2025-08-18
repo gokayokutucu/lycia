@@ -18,10 +18,10 @@ public class CoordinatedSagaStepFluent<TInitialMessage, TSagaData>(
         return Activator.CreateInstance(closed, context, operation)!;
     }
     
-    public async Task ThenMarkAsComplete(CancellationToken cancellationToken = default)
+    public async Task ThenMarkAsComplete()
     {
         await operation();
-        await context.MarkAsComplete<TInitialMessage>(cancellationToken);
+        await context.MarkAsComplete<TInitialMessage>();
     }
 
     public async Task ThenMarkAsFailed(FailResponse fail, CancellationToken cancellationToken = default)
@@ -36,9 +36,9 @@ public class CoordinatedSagaStepFluent<TInitialMessage, TSagaData>(
         await context.CompensateAndBubbleUp<TInitialMessage>(cancellationToken);
     }
 
-    public async Task ThenMarkAsCompensationFailed(CancellationToken cancellationToken = default)
+    public async Task ThenMarkAsCompensationFailed()
     {
         await operation();
-        await context.MarkAsCompensationFailed<TInitialMessage>(cancellationToken);
+        await context.MarkAsCompensationFailed<TInitialMessage>();
     }
 }

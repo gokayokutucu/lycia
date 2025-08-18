@@ -30,6 +30,6 @@ public class PaymentSagaHandler :
             OrderId = message.OrderId,
             ParentMessageId = message.MessageId
         }, cancellationToken);
-        await Context.MarkAsComplete<ProcessPaymentCommand>(cancellationToken);
+        await Context.MarkAsComplete<ProcessPaymentCommand>();
     }
 }

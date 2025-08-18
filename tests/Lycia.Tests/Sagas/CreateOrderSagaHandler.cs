@@ -24,7 +24,7 @@ public class CreateOrderSagaHandler :
                 OrderId = command.OrderId,
                 UserId = command.UserId,
                 TotalPrice = command.TotalPrice
-            }, cancellationToken).ThenMarkAsComplete(cancellationToken);
+            }, cancellationToken).ThenMarkAsComplete();
 
         #region Other way to publish an event
 
@@ -53,7 +53,7 @@ public class CreateOrderSagaHandler :
             // Log, notify, halt chain, etc.
             Console.WriteLine($"❌ Compensation failed: {ex.Message}");
 
-            await Context.MarkAsCompensationFailed<CreateOrderCommand>(ex, cancellationToken);
+            await Context.MarkAsCompensationFailed<CreateOrderCommand>(ex);
             // Optionally: rethrow or store for manual retry
             throw; // Or suppress and log for retry system
         }

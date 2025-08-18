@@ -30,7 +30,7 @@ public class ShippingSagaHandler :
             OrderId = evt.OrderId,
             ParentMessageId = evt.MessageId
         }, cancellationToken);
-        await Context.MarkAsComplete<PaymentSucceededEvent>(cancellationToken);
+        await Context.MarkAsComplete<PaymentSucceededEvent>();
     }
 
     public Task CompensateAsync(OrderShippingFailedEvent failed, CancellationToken cancellationToken = default)

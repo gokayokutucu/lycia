@@ -28,7 +28,7 @@ public class AuditShippingSagaHandler :
         }
         catch (Exception e)
         {
-            await Context.MarkAsCompensationFailed<PaymentProcessedEvent>(cancellationToken);
+            await Context.MarkAsCompensationFailed<PaymentProcessedEvent>();
             throw;
         }
     }
