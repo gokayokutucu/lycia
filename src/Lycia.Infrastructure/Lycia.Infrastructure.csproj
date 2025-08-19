@@ -6,7 +6,28 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<LangVersion>preview</LangVersion>
+
+		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+		<PackageId>Lycia.Infrastructure</PackageId>
+		<Version>1.0.0</Version>
+		<Authors>gokay.okutucu</Authors>
+		<Company>PeopleCert</Company>
+		<Description>Internal messaging infrastructure library for PeopleCert projects</Description>
+		<PackageTags>messaging internal</PackageTags>
+		<RepositoryUrl>https://github.com/gokayokutucu/lycia.git</RepositoryUrl>
 	</PropertyGroup>
+
+	<Target Name="PublishNupkgToShare" AfterTargets="Pack">
+		<ItemGroup>
+			<_Nupkg Include="$(PackageOutputPath)\$(PackageId).$(Version).nupkg" />
+		</ItemGroup>
+		<Copy
+		  SourceFiles="@(_Nupkg)"
+		  DestinationFolder="\\if-srv-nas\R&amp;D_Files\PASSPORT\gkuvandik\nuget-packages"
+		  SkipUnchangedFiles="true"
+		  Condition="Exists('%(Identity)')" />
+	</Target>
+	
 	<ItemGroup>
 		<ProjectReference Include="..\Lycia.Saga\Lycia.Saga.csproj" />
 	</ItemGroup>
