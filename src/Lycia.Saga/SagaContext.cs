@@ -170,9 +170,7 @@ public class SagaContext<TInitialMessage>(
 
     public Task<bool> IsAlreadyCompleted<T>() where T : IMessage
     {
-        StepMessages.TryGetValue((CurrentStep.GetType(), CurrentStep.MessageId), out var stepMessage);
-        if (stepMessage == null) throw new InvalidOperationException();
-        return SagaStore.IsStepCompletedAsync(SagaId, stepMessage.MessageId, CurrentStep.GetType(),
+        return SagaStore.IsStepCompletedAsync(SagaId, CurrentStep.MessageId, CurrentStep.GetType(),
             HandlerTypeOfCurrentStep);
     }
 }
@@ -483,9 +481,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
 
     public Task<bool> IsAlreadyCompleted<TAdapterStep>() where TAdapterStep : IMessage
     {
-        stepMessages.TryGetValue((CurrentStep.GetType(), CurrentStep.MessageId), out var stepMessage);
-        if (stepMessage == null) throw new InvalidOperationException();
-        return sagaStore.IsStepCompletedAsync(SagaId, stepMessage.MessageId, CurrentStep.GetType(),
+        return sagaStore.IsStepCompletedAsync(SagaId, CurrentStep.MessageId, CurrentStep.GetType(),
             HandlerTypeOfCurrentStep);
     }
 
