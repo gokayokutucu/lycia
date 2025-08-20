@@ -8,7 +8,7 @@ public class PaymentSagaHandler : ReactiveSagaHandler<InventoryReservedEvent>
 {
     public override async Task HandleAsync(InventoryReservedEvent evt, CancellationToken cancellationToken = default)
     {
-        var ok = PaymentService.SimulatePayment();
+        var ok = PaymentService.SimulatePayment(false);
         if (!ok)
         {
             await Context.Publish(new PaymentFailedEvent

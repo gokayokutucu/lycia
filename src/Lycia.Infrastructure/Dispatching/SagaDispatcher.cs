@@ -138,12 +138,11 @@ public class SagaDispatcher(
         {
             var sagaId = GetSagaId(message);
 
-            var methodName = message.GetType().IsSuccessResponse()
-                ? "HandleSuccessResponseAsync"
-                : "HandleAsyncInternal";
+            var msgType = message.GetType();
+            var methodName = FindMethodName(msgType);
 
             var delegateMethod = 
-                HandlerDelegateHelper.GetHandlerDelegate(handlerType, methodName, message.GetType());
+                HandlerDelegateHelper.GetHandlerDelegate(handlerType, methodName, msgType);
             await delegateMethod(handler, message, cancellationToken);
 
             await ValidateSagaStepCompletionAsync(message, handlerType, sagaId);
@@ -153,6 +152,22 @@ public class SagaDispatcher(
             // Optionally log or throw a descriptive error
             throw new InvalidOperationException($"Failed to invoke HandleAsync dynamically: {ex.Message}", ex);
         }
+    }
+
+    private static string FindMethodName(Type msgType)
+    {
+        if (typeof(FailedEventBase).IsAssignableFrom(msgType))
+        {
+            // Choreography: failed events should invoke ISagaCompensationHandler<TFailed>.CompensateAsync
+            return "CompensateAsync";
+        }
+        
+        if (msgType.IsSuccessResponse())
+        {
+           return "HandleSuccessResponseAsync";
+        }
+
+        return "HandleAsyncInternal";
     }
 
     private Guid GetSagaId(IMessage message)
