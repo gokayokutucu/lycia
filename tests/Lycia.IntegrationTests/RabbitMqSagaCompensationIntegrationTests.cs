@@ -60,7 +60,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
     public async Task CompensationChain_Should_Be_Idempotent_For_Multiple_Compensation_Attempts()
     {
         // Arrange: Setup saga chain handlers (grandparent -> parent -> child)
-        var applicationId = "TestApp";
+        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTests)}:{nameof(SagaChain_Should_Compensate_On_Failure)}:{Guid.NewGuid():N}";
         var handlerTypeGrandparent = typeof(GrandparentCompensationSagaHandler);
         var handlerTypeParent = typeof(ParentCompensationSagaHandler);
         var handlerTypeChild = typeof(ChildCompensationSagaHandler);
@@ -180,7 +180,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
     public async Task CompensationChain_Should_Halt_If_Child_Is_CompensationFailed()
     {
         // Arrange: Setup saga chain handlers (grandparent -> parent -> child)
-        var applicationId = "TestApp";
+        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTests)}:{nameof(SagaChain_Should_Compensate_On_Failure)}:{Guid.NewGuid():N}";
         var handlerTypeGrandparent = typeof(GrandparentCompensationSagaHandler);
         var handlerTypeParent = typeof(ParentCompensationSagaHandler);
         var handlerTypeChild = typeof(ChildCompensationSagaHandler);
@@ -292,7 +292,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
     public async Task CompensationChain_Should_Recursively_Compensate_Parent_And_Grandparent_When_Child_Is_Compensated()
     {
         // Arrange: Setup saga chain handlers (grandparent -> parent -> child)
-        var applicationId = "TestApp";
+        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTests)}:{nameof(SagaChain_Should_Compensate_On_Failure)}:{Guid.NewGuid():N}";
         var handlerTypeGrandparent = typeof(GrandparentCompensationSagaHandler);
         var handlerTypeParent = typeof(ParentCompensationSagaHandler);
         var handlerTypeChild = typeof(ChildCompensationSagaHandler);
@@ -411,7 +411,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         CompensationChain_Should_Recursively_Compensate_Parent_And_Grandparent_When_Steps_Are_Compensated()
     {
         // Arrange: Setup the saga chain with grandparent -> parent -> child handlers.
-        var applicationId = "TestApp";
+        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTests)}:{nameof(SagaChain_Should_Compensate_On_Failure)}:{Guid.NewGuid():N}";
         var handlerTypeGrandparent = typeof(GrandparentCompensationHandler);
         var handlerTypeParent = typeof(ParentCompensationHandler);
         var handlerTypeChild = typeof(ChildCompensationHandler);
@@ -500,7 +500,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
     public async Task SagaChain_Should_Compensate_On_Failure()
     {
         // Arrange: Set up EventBus and Redis-backed SagaStore
-        var applicationId = "TestApp";
+        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTests)}:{nameof(SagaChain_Should_Compensate_On_Failure)}:{Guid.NewGuid():N}";
         var handlerType = typeof(FailingSagaHandler);
 
         var queueName =

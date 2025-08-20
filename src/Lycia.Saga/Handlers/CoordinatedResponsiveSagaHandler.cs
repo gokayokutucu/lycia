@@ -21,7 +21,6 @@ public abstract class CoordinatedResponsiveSagaHandler<TMessage, TResponse, TSag
 
     protected async Task HandleAsyncInternal(TMessage message, CancellationToken cancellationToken = default)
     {
-        Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -39,7 +38,6 @@ public abstract class CoordinatedResponsiveSagaHandler<TMessage, TResponse, TSag
     
     protected async Task CompensateAsyncInternal(TMessage message, CancellationToken cancellationToken = default)
     {
-        Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
