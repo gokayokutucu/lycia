@@ -13,7 +13,7 @@ public class PaymentSagaHandler :
     public override async Task HandleAsync(ProcessPaymentCommand message, CancellationToken cancellationToken = default)
     {
         // Simulate payment process
-        var paymentSucceeded = PaymentService.SimulatePayment();
+        var paymentSucceeded = PaymentService.SimulatePayment(false);
 
         if (!paymentSucceeded)
         {
