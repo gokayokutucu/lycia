@@ -38,14 +38,16 @@ public class CreateOrderSagaHandler :
             
             await Context.MarkAsCompensationFailed<CreateOrderCommand>();
             // Optionally: rethrow or store for manual retry
-            throw; // Or suppress and log for retry system
+            throw; // Or suppress and log for a retry system
         }
     }
 
     // Optional – compensate on payment failure (reactive, not orchestration)
     public async Task CompensateAsync(PaymentFailedEvent failed, CancellationToken cancellationToken = default)
     {
-        if (await Context.IsAlreadyCompleted<CreateOrderCommand>()) return;
+        // Use IsAlreadyCompleted for idempotency check in side-compensation methods (that implement ISagaCompensationHandler interface)
+        // If the saga is already completed, skip compensation
+        if (await Context.IsAlreadyCompleted<PaymentFailedEvent>()) return;
         // e.g., notify user / mark order canceled / audit
     }
 
