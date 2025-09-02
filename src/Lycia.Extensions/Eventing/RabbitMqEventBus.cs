@@ -7,9 +7,7 @@ using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
-using System.Text;
 using Lycia.Saga.Helpers;
-
 using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Helpers;
 using Lycia.Saga.Extensions;
@@ -20,7 +18,7 @@ namespace Lycia.Extensions.Eventing;
 public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
 {
     private const string XMessageTtl = "x-message-ttl";
-    
+
     private readonly ConnectionFactory _factory;
     private readonly ILogger<RabbitMqEventBus> _logger;
     private IConnection? _connection;
@@ -29,15 +27,22 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
     private readonly List<AsyncEventingBasicConsumer> _consumers = [];
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private readonly EventBusOptions _options;
+    private readonly IMessageSerializer _serializer;
 
-    private RabbitMqEventBus(string? conn, ILogger<RabbitMqEventBus> logger, IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap, EventBusOptions options)
+    private RabbitMqEventBus(
+        string? conn,
+        ILogger<RabbitMqEventBus> logger,
+        IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap,
+        EventBusOptions options,
+        IMessageSerializer serializer)
     {
         _logger = logger;
         _queueTypeMap = queueTypeMap;
         _options = options;
+        _serializer = serializer ?? throw new InvalidOperationException("IMessageSerializer is null");
 
         if (conn == null) throw new InvalidOperationException("RabbitMqEventBus connection is null");
-        
+
         _factory = new ConnectionFactory
         {
             Uri = new Uri(conn),
@@ -50,9 +55,10 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         ILogger<RabbitMqEventBus> logger,
         IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap,
         EventBusOptions options,
+        IMessageSerializer serializer,
         CancellationToken cancellationToken = default)
     {
-        var bus = new RabbitMqEventBus(conn, logger, queueTypeMap, options);
+        var bus = new RabbitMqEventBus(conn, logger, queueTypeMap, options, serializer);
         await bus.ConnectAsync(cancellationToken).ConfigureAwait(false);
         return bus;
     }
@@ -93,7 +99,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
     }
 
     public async Task Publish<TEvent>(
-        TEvent @event, 
+        TEvent @event,
         Type? handlerType = null, //Discard handlerType as it's not used in RabbitMQ
         Guid? sagaId = null,
         CancellationToken cancellationToken = default)
@@ -101,7 +107,9 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
     {
         await EnsureChannelAsync(cancellationToken).ConfigureAwait(false);
         // routingKey equivalent to the exchange name in RabbitMQ terminology
-        var exchangeName = MessagingNamingHelper.GetExchangeName(typeof(TEvent)); // event.OrderCreatedEvent or response.OrderCreatedResponse
+        var exchangeName =
+            MessagingNamingHelper
+                .GetExchangeName(typeof(TEvent)); // event.OrderCreatedEvent or response.OrderCreatedResponse
 
         if (_channel == null)
         {
@@ -117,26 +125,42 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             autoDelete: false,
             arguments: null, cancellationToken: cancellationToken);
 
-        var headers = RabbitMqEventBusHelper.BuildMessageHeaders(@event, sagaId, typeof(TEvent), Constants.EventTypeHeader);
+        // Build base headers (Lycia metadata)
+        var headers =
+            RabbitMqEventBusHelper.BuildMessageHeaders(@event, sagaId, typeof(TEvent), Constants.EventTypeHeader);
+
+        // Ask serializer to produce a body and its own headers (content-type, lycia-type, schema metadata, etc.)
+        var (_, serCtx) = _serializer.CreateContextFor(typeof(TEvent));
+        var (body, serializerHeaders) = _serializer.Serialize(@event, serCtx);
+
+        // Merge serializer headers into base headers (serializer wins on conflicts)
+        foreach (var kv in serializerHeaders)
+            headers[kv.Key] = kv.Value;
+
         var properties = new BasicProperties
         {
             Persistent = true,
             Headers = headers
         };
 
-        var json = JsonHelper.SerializeSafe(@event);
-        var body = Encoding.UTF8.GetBytes(json);
+        // Set AMQP ContentType from headers (if provided by the serializer)
+        if (serializerHeaders.TryGetValue(_serializer.ContentTypeHeaderKey, out var ctObj)
+            && ctObj is string ct && !string.IsNullOrWhiteSpace(ct))
+        {
+            properties.ContentType = ct;
+        }
 
         await _channel.BasicPublishAsync(
             exchange: exchangeName,
             routingKey: exchangeName,
             mandatory: false,
             basicProperties: properties,
-            body: body, cancellationToken: cancellationToken);
+            body: body,
+            cancellationToken: cancellationToken);
     }
 
     public async Task Send<TCommand>(
-        TCommand command, 
+        TCommand command,
         Type? handlerType = null, //Discard handlerType as it's not used in RabbitMQ
         Guid? sagaId = null,
         CancellationToken cancellationToken = default) where TCommand : ICommand
@@ -144,38 +168,55 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         await EnsureChannelAsync(cancellationToken).ConfigureAwait(false);
 
         var exchangeName = MessagingNamingHelper.GetExchangeName(typeof(TCommand)); // command.CreateOrderCommand
-        var routingKey = MessagingNamingHelper.GetTopicRoutingKey(typeof(TCommand)); // e.g., "command.CreateOrderCommand.#"
+        var routingKey =
+            MessagingNamingHelper.GetTopicRoutingKey(typeof(TCommand)); // e.g., "command.CreateOrderCommand.#"
 
         if (_channel == null)
         {
             throw new InvalidOperationException(
                 "Channel is not initialized. Ensure RabbitMqEventBus is properly created.");
         }
-        
+
         await _channel.ExchangeDeclareAsync(
             exchange: exchangeName,
             type: ExchangeType.Direct,
             durable: true,
             autoDelete: false,
-            arguments: null, 
+            arguments: null,
             cancellationToken: cancellationToken);
 
-        var headers = RabbitMqEventBusHelper.BuildMessageHeaders(command, sagaId, typeof(TCommand), Constants.CommandTypeHeader);
+        // Build base headers (Lycia metadata)
+        var headers =
+            RabbitMqEventBusHelper.BuildMessageHeaders(command, sagaId, typeof(TCommand), Constants.CommandTypeHeader);
+
+        // Ask serializer to produce a body and its own headers
+        var (_, serCtx) = _serializer.CreateContextFor(typeof(TCommand));
+        var (body, serializerHeaders) = _serializer.Serialize(command, serCtx);
+
+        // Merge serializer headers (serializer wins on conflicts)
+        foreach (var kv in serializerHeaders)
+            headers[kv.Key] = kv.Value;
+
         var properties = new BasicProperties
         {
             Persistent = true,
             Headers = headers
         };
-        
-        var json = JsonHelper.SerializeSafe(command);
-        var body = Encoding.UTF8.GetBytes(json);
+
+        // Set AMQP ContentType from headers if present
+        if (serializerHeaders.TryGetValue(_serializer.ContentTypeHeaderKey, out var ctObj)
+            && ctObj is string ct && !string.IsNullOrWhiteSpace(ct))
+        {
+            properties.ContentType = ct;
+        }
 
         await _channel.BasicPublishAsync(
             exchange: exchangeName,
             routingKey: routingKey,
             mandatory: false,
             basicProperties: properties,
-            body: body, cancellationToken: cancellationToken);
+            body: body,
+            cancellationToken: cancellationToken);
     }
 
     private async Task PublishToDeadLetterQueueAsync(string dlqName, byte[] body, IReadOnlyBasicProperties props,
@@ -192,6 +233,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             {
                 dlqArgs[XMessageTtl] = (int)ttl.TotalMilliseconds;
             }
+
             await _channel.QueueDeclareAsync(
                 queue: dlqName,
                 durable: true,
@@ -239,15 +281,19 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         }
     }
 
-    private async IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType)> ConsumeAsync(
-        IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap, bool autoAck = true,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    private async
+        IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType, IReadOnlyDictionary<string, object?> Headers
+            )> ConsumeAsync(
+            IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap, bool autoAck = true,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (_channel == null)
             throw new InvalidOperationException(
                 "Channel is not initialized. Ensure RabbitMqEventBus is properly created.");
 
-        var messageQueue = new ConcurrentQueue<(byte[] Body, Type MessageType, Type HandlerType)>();
+        var messageQueue =
+            new ConcurrentQueue<(byte[] Body, Type MessageType, Type HandlerType, IReadOnlyDictionary<string, object?>
+                Headers)>();
 
         // queueName => e.g. Full format: event.OrderCreatedEvent.CreateOrderSagaHandler.OrderService
         foreach (var kvp in queueTypeMap)
@@ -257,20 +303,26 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             var handlerType = kvp.Value.HandlerType;
             // Ensure queue and exchange exist and are bound before subscribing the consumer.
             // These operations are idempotent.
-            var exchangeName = MessagingNamingHelper.GetExchangeName(messageType); // e.g., "event.OrderCreatedEvent" or "command.CreateOrderCommand" or "response.OrderCreatedResponse"
-            var routingKey = MessagingNamingHelper.GetTopicRoutingKey(messageType); // e.g., "event.OrderCreatedEvent.#" or "command.CreateOrderCommand.#" or "response.OrderCreatedResponse.#"
+            var exchangeName =
+                MessagingNamingHelper
+                    .GetExchangeName(
+                        messageType); // e.g., "event.OrderCreatedEvent" or "command.CreateOrderCommand" or "response.OrderCreatedResponse"
+            var routingKey =
+                MessagingNamingHelper
+                    .GetTopicRoutingKey(
+                        messageType); // e.g., "event.OrderCreatedEvent.#" or "command.CreateOrderCommand.#" or "response.OrderCreatedResponse.#"
 
             var exchangeType = messageType.IsSubclassOf(typeof(EventBase)) || messageType.IsSubclassOfResponseBase()
                 ? ExchangeType.Topic
                 : ExchangeType.Direct;
-            
+
             await _channel.ExchangeDeclareAsync(
                 exchange: exchangeName,
                 type: exchangeType,
                 durable: true,
                 autoDelete: false,
                 arguments: null, cancellationToken: cancellationToken);
-            
+
             // Declare the queue with DLX and DLQ arguments
             var queueArgs = await DeclareDeadLetter(queueName, cancellationToken);
             if (_options?.MessageTTL is { TotalMilliseconds: > 0 } ttl)
@@ -302,7 +354,9 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             {
                 try
                 {
-                    messageQueue.Enqueue((ea.Body.ToArray(), messageType, handlerType));
+                    var headers = ea.BasicProperties?.Headers as IReadOnlyDictionary<string, object?>
+                                  ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                    messageQueue.Enqueue((ea.Body.ToArray(), messageType, handlerType, headers));
                     await Task.CompletedTask;
                 }
                 catch (Exception ex)
@@ -333,12 +387,13 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         }
     }
 
-    private async Task<Dictionary<string, object?>> DeclareDeadLetter(string queueName, CancellationToken cancellationToken)
+    private async Task<Dictionary<string, object?>> DeclareDeadLetter(string queueName,
+        CancellationToken cancellationToken)
     {
         var dlxExchange = $"{queueName}.dlx";
         var dlqName = $"{queueName}.dlq";
-        
-        
+
+
         // DLX (Dead Letter Exchange) declare
         await _channel!.ExchangeDeclareAsync(
             exchange: dlxExchange,
@@ -372,7 +427,8 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         };
     }
 
-    public IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType)> ConsumeAsync(bool autoAck = true, CancellationToken cancellationToken = default)
+    public IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType, IReadOnlyDictionary<string, object?> Headers)> 
+        ConsumeAsync(bool autoAck = true, CancellationToken cancellationToken = default)
     {
         if (_queueTypeMap == null)
             throw new InvalidOperationException(

@@ -2,6 +2,7 @@
 using FluentAssertions;
 using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Eventing;
+using Lycia.Extensions.Serialization;
 using Lycia.Messaging;
 using Lycia.Saga.Handlers;
 using Lycia.Saga.Helpers;
@@ -74,11 +75,14 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
             MessageTTL = ttl
         };
 
+        var serializer = new NewtonsoftJsonMessageSerializer();
+
         await using (var consumerBus = await RabbitMqEventBus.CreateAsync(
                          RabbitMqConnectionString,
                          NullLogger<RabbitMqEventBus>.Instance,
                          queueTypeMap,
-                         eventBusOptions))
+                         eventBusOptions,
+                         serializer))
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5)); // Extra time for test
 
@@ -107,7 +111,8 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
                          RabbitMqConnectionString,
                          NullLogger<RabbitMqEventBus>.Instance,
                          queueTypeMap,
-                         eventBusOptions))
+                         eventBusOptions,
+                         serializer))
         {
             // Publish event
             var testEvent = new TestEvent
@@ -156,21 +161,25 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
             MessageTTL = TimeSpan.FromMinutes(5)
         };
 
+        var serializer = new NewtonsoftJsonMessageSerializer();
+
         var eventBus = await RabbitMqEventBus.CreateAsync(
             RabbitMqConnectionString,
             NullLogger<RabbitMqEventBus>.Instance,
             queueTypeMap,
-            eventBusOptions);
+            eventBusOptions,
+            serializer);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         bool received = false;
 
         var consumeTask = Task.Run(async () =>
         {
-            await foreach (var (body, messageType, _) in eventBus.ConsumeAsync(cancellationToken: cts.Token))
+            await foreach (var (body, messageType, handlerType, headers) in eventBus.ConsumeAsync(cancellationToken: cts.Token))
             {
-                var json = Encoding.UTF8.GetString(body);
-                var evt = System.Text.Json.JsonSerializer.Deserialize(json, messageType);
+                var normalizedHeaders = serializer.NormalizeTransportHeaders(headers);
+                var (_, ctx) = serializer.CreateContextFor(messageType);
+                var evt = serializer.Deserialize(body, normalizedHeaders, ctx);
 
                 evt.Should().BeOfType<TestEvent>();
                 ((TestEvent)evt).Message.Should().Be("Integration test message");
@@ -221,21 +230,25 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
             MessageTTL = TimeSpan.FromMinutes(5)
         };
 
+        var serializer = new NewtonsoftJsonMessageSerializer();
+
         var eventBus = await RabbitMqEventBus.CreateAsync(
             RabbitMqConnectionString,
             NullLogger<RabbitMqEventBus>.Instance,
             queueTypeMap,
-            eventBusOptions);
+            eventBusOptions,
+            serializer);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         int receivedCount = 0;
 
         var consumeTask = Task.Run(async () =>
         {
-            await foreach (var (body, messageType, _) in eventBus.ConsumeAsync(cancellationToken: cts.Token))
+            await foreach (var (body, messageType, handlerType, headers) in eventBus.ConsumeAsync(cancellationToken: cts.Token))
             {
-                var json = Encoding.UTF8.GetString(body);
-                var evt = System.Text.Json.JsonSerializer.Deserialize(json, messageType);
+                var normalizedHeaders = serializer.NormalizeTransportHeaders(headers);
+                var (_, ctx) = serializer.CreateContextFor(messageType);
+                var evt = serializer.Deserialize(body, normalizedHeaders, ctx);
                 evt.Should().BeOfType<TestEvent>();
                 ((TestEvent)evt).Message.Should().Be("Integration test message multi");
 
@@ -284,21 +297,25 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
             MessageTTL = TimeSpan.FromMinutes(5)
         };
 
+        var serializer = new NewtonsoftJsonMessageSerializer();
+
         var eventBus = await RabbitMqEventBus.CreateAsync(
             RabbitMqConnectionString,
             NullLogger<RabbitMqEventBus>.Instance,
             queueTypeMap,
-            eventBusOptions);
+            eventBusOptions,
+            serializer);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         bool received = false;
 
         var consumeTask = Task.Run(async () =>
         {
-            await foreach (var (body, messageType, _) in eventBus.ConsumeAsync(cancellationToken: cts.Token))
+            await foreach (var (body, messageType, handlerType, headers) in eventBus.ConsumeAsync(cancellationToken: cts.Token))
             {
-                var json = Encoding.UTF8.GetString(body);
-                var cmd = System.Text.Json.JsonSerializer.Deserialize(json, messageType);
+                var normalizedHeaders = serializer.NormalizeTransportHeaders(headers);
+                var (_, ctx) = serializer.CreateContextFor(messageType);
+                var cmd = serializer.Deserialize(body, normalizedHeaders, ctx);
 
                 cmd.Should().BeOfType<TestCommand>();
                 ((TestCommand)cmd).Message.Should().Be("Integration test command");

@@ -26,7 +26,7 @@ public class InMemoryEventBus(Lazy<ISagaDispatcher> sagaDispatcherLazy) : IEvent
         return sagaDispatcherLazy.Value.DispatchAsync(@event, handlerType, sagaId, cancellationToken);
     }
 
-    public IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType)> ConsumeAsync(bool autoAck = true, CancellationToken cancellationToken = default)
+    public IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType, IReadOnlyDictionary<string, object?> Headers)> ConsumeAsync(bool autoAck = true, CancellationToken cancellationToken = default)
     {
         throw new NotImplementedException();
     }

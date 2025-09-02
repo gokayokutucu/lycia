@@ -1,18 +1,18 @@
-using System.Text;
 using Lycia.Saga.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json;
 
 namespace Lycia.Extensions.Listener;
 
 public class RabbitMqListener(
     IServiceProvider serviceProvider,
     IEventBus eventBus,
-    ILogger<RabbitMqListener> logger)
+    ILogger<RabbitMqListener> logger,
+    IMessageSerializer serializer)
     : BackgroundService
 {
+    private readonly IMessageSerializer _serializer = serializer;
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("RabbitMqListener started");
@@ -21,21 +21,16 @@ public class RabbitMqListener(
 
         var sagaDispatcher = scope.ServiceProvider.GetRequiredService<ISagaDispatcher>();
         
-        await foreach (var (body, messageType, handlerType) in eventBus.ConsumeAsync(autoAck: true, cancellationToken:stoppingToken))
+        await foreach (var (body, messageType, handlerType, headers) in eventBus.ConsumeAsync(autoAck: true, cancellationToken:stoppingToken))
         {
             if (stoppingToken.IsCancellationRequested)
                 break;
 
             try
             {
-                var json = Encoding.UTF8.GetString(body);
-                var deserialized = JsonConvert.DeserializeObject(json, messageType);
-
-                if (deserialized == null)
-                {
-                    logger.LogWarning("Failed to deserialize message to type {MessageType}", messageType.Name);
-                    continue;
-                }
+                var (_, serCtx) = _serializer.CreateContextFor(messageType);
+                var normalizedHeaders = _serializer.NormalizeTransportHeaders(headers);
+                var deserialized = _serializer.Deserialize(body, normalizedHeaders, serCtx);
 
                 logger.LogInformation("Dispatching {MessageType} to SagaDispatcher", messageType.Name);
                 // Find the generic DispatchAsync<TMessage>(TMessage message, Type? handlerType, Guid? sagaId, CancellationToken cancellationToken) method
