@@ -7,3 +7,12 @@ Content-Type: application/json
   "userId": "a5b2cde2-1845-4b4a-a813-8a9d7d3e8b4b",
   "totalPrice": 150
 }
+
+
+### curl -X POST --location "http://localhost:5070/order" \ 
+### -H "Content-Type: application/json" \
+### -d '{
+### "orderId": "7c3bfb9e-96dc-4fa4-8123-63ea0c94f1f9",
+### "userId": "a5b2cde2-1845-4b4a-a813-8a9d7d3e8b4b",
+### "totalPrice": 150
+### }'

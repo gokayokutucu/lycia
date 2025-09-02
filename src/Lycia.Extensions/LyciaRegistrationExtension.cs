@@ -2,6 +2,7 @@ using System.Reflection;
 using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Eventing;
 using Lycia.Extensions.Listener;
+using Lycia.Extensions.Serialization;
 using Lycia.Extensions.Stores;
 using Lycia.Infrastructure.Compensating;
 using Lycia.Infrastructure.Dispatching;
@@ -43,6 +44,9 @@ public static class LyciaRegistrationExtension
         
         services.Configure<SagaOptions>(configuration.GetSection(SagaOptions.Saga));
         
+        // Production default registration for IMessageSerializer
+        services.TryAddSingleton<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
+        
         // Production default registration for ISagaIdGenerator
         services.TryAddScoped<ISagaIdGenerator, DefaultSagaIdGenerator>();
         // Production default registration for ISagaDispatcher
@@ -71,13 +75,14 @@ public static class LyciaRegistrationExtension
                 var conn = configuration["Lycia:EventBus:ConnectionString"]
                            ?? throw new InvalidOperationException("Lycia:EventBus:ConnectionString is not configured.");
                 var logger = provider.GetRequiredService<ILogger<RabbitMqEventBus>>();
+                var messageSerializer = provider.GetRequiredService<IMessageSerializer>();
 
                 var eventBusOptions = new EventBusOptions
                 {
                     ApplicationId = appId,
                     MessageTTL = TimeSpan.FromSeconds(ttlSeconds)
                 };
-                return RabbitMqEventBus.CreateAsync(conn, logger, queueTypeMap, eventBusOptions).GetAwaiter()
+                return RabbitMqEventBus.CreateAsync(conn, logger, queueTypeMap, eventBusOptions, messageSerializer).GetAwaiter()
                     .GetResult();
             });
 
@@ -111,6 +116,7 @@ public static class LyciaRegistrationExtension
     {
         services.TryAddSingleton(new SagaOptions());
         
+        services.TryAddSingleton<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
         services.TryAddScoped<ISagaIdGenerator, DefaultSagaIdGenerator>();
         services.TryAddScoped<ISagaDispatcher, SagaDispatcher>();
         services.TryAddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();

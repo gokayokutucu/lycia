@@ -1,4 +1,5 @@
 using Lycia.Extensions;
+using Lycia.Extensions.Serialization;
 using Lycia.Infrastructure.Compensating;
 using Lycia.Infrastructure.Dispatching;
 using Lycia.Infrastructure.Eventing;
@@ -31,6 +32,7 @@ public class SagaDispatcherTests
         services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
         services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.AddScoped<ISagaStore, InMemorySagaStore>();
+        services.AddScoped<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
         services.AddScoped<IEventBus>(sp =>
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
@@ -63,6 +65,7 @@ public class SagaDispatcherTests
         services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.AddScoped<ISagaStore, InMemorySagaStore>();
         services.AddScoped<ISagaDispatcher, SagaDispatcher>();
+        services.AddScoped<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
         services.AddScoped<IEventBus>(sp =>
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
@@ -104,6 +107,7 @@ public class SagaDispatcherTests
         services.AddScoped<ISagaDispatcher, SagaDispatcher>();
         services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.AddScoped<ISagaStore, InMemorySagaStore>();
+        services.AddScoped<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
         services.AddScoped<IEventBus>(sp =>
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
         services.AddScoped<SwallowingSagaHandler>();
@@ -131,6 +135,7 @@ public class SagaDispatcherTests
         services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
         services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.AddScoped<ISagaStore, InMemorySagaStore>();
+        services.AddScoped<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
         services.AddScoped<ISagaDispatcher, SagaDispatcher>();
         services.AddScoped<IEventBus>(sp =>
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
@@ -235,6 +240,7 @@ public class SagaDispatcherTests
         services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.AddScoped<ISagaDispatcher, SagaDispatcher>();
         services.AddScoped<ISagaStore, InMemorySagaStore>();
+        services.AddScoped<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
         services.AddScoped<IEventBus>(sp =>
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
@@ -320,6 +326,7 @@ public class SagaDispatcherTests
         services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
         services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.AddScoped<ISagaStore, InMemorySagaStore>();
+        services.AddScoped<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
         services.AddScoped<ISagaDispatcher, SagaDispatcher>();
         services.AddScoped<IEventBus>(sp =>
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
@@ -370,6 +377,7 @@ public class SagaDispatcherTests
         services.AddScoped<ISagaIdGenerator, TestSagaIdGenerator>();
         services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.AddScoped<ISagaDispatcher, SagaDispatcher>();
+        services.AddScoped<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
         services.AddScoped<ISagaStore, InMemorySagaStore>();
         services.AddScoped<IEventBus>(sp =>
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
@@ -398,6 +406,7 @@ public class SagaDispatcherTests
         services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.AddScoped<ISagaStore, InMemorySagaStore>();
         services.AddScoped<ISagaDispatcher, SagaDispatcher>();
+        services.AddScoped<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
         services.AddScoped<IEventBus>(sp =>
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
@@ -448,6 +457,7 @@ public class SagaDispatcherTests
         services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
         services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.AddScoped<ISagaStore, InMemorySagaStore>();
+        services.AddScoped<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
         services.AddScoped<ISagaDispatcher, SagaDispatcher>();
         services.AddScoped<IEventBus>(sp =>
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
@@ -513,6 +523,7 @@ public class SagaDispatcherTests
         services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.AddScoped<ISagaStore, InMemorySagaStore>();
         services.AddScoped<ISagaDispatcher, SagaDispatcher>();
+        services.AddScoped<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
         services.AddScoped<IEventBus>(sp =>
             new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
@@ -561,6 +572,7 @@ public class SagaDispatcherTests
         var services = new ServiceCollection();
         services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
         services.AddScoped<ISagaStore, InMemorySagaStore>();
+        services.AddScoped<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
         services.AddScoped<ISagaDispatcher, SagaDispatcher>();
         services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
         services.AddScoped<IEventBus>(sp =>
