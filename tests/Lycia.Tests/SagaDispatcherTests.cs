@@ -182,12 +182,6 @@ public class SagaDispatcherTests
         // Arrange
         var fixedSagaId = Guid.NewGuid();
         var services = new ServiceCollection();
-        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
         // Register all relevant SagaHandlers
         var configuration = new ConfigurationBuilder()
@@ -198,7 +192,10 @@ public class SagaDispatcherTests
             .Build();
 
         services.AddLyciaInMemory(configuration)
-            .AddSagas(typeof(CreateOrderSagaHandler), typeof(ShipOrderForCompensationSagaHandler));
+            .AddSagas(typeof(CreateOrderSagaHandler), typeof(ShipOrderForCompensationSagaHandler))
+            .Build();
+        
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
 
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();

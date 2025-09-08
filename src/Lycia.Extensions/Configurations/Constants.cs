@@ -14,5 +14,8 @@ public static class Constants
     public const string EventTypeHeader = "EventType";
     public const string CommandTypeHeader = "CommandType";
     public const string PublishedAtHeader = "PublishedAt";
+    
+    public const string ProviderRedis = "Redis";
+    public const string ProviderRabbitMq = "RabbitMQ";
 
 }
