@@ -9,18 +9,18 @@ This document provides an in-depth look into the architecture, components, confi
 ### Core Components
 
 - **SagaDispatcher**
-  - Routes incoming messages to the appropriate handler.
-  - Performs idempotency checks.
-  - Catches exceptions and routes them through the error flow.
+  - Routes incoming messages to the appropriate handler
+  - Performs idempotency checks
+  - Catches exceptions and routes them through the error flow
 
 - **SagaCompensationCoordinator**
-  - Executes compensation chains in reverse.
-  - Performs cycle detection and valid state transitions.
-  - Used for orchestrated and reactive saga compensation.
+  - Executes compensation chains in reverse
+  - Performs cycle detection and valid state transitions
+  - Used for orchestrated and reactive saga compensation
 
 - **SagaContext**
   - Manages step state and message-specific state.
-  - Includes methods like `MarkAsComplete<T>()`, `MarkAsFailed<T>()`, `MarkAsCancelled<T>()`.
+  - Includes methods like `MarkAsComplete<T>()`, `MarkAsFailed<T>()`, `MarkAsCancelled<T>()`
 
 ---
 
@@ -28,14 +28,14 @@ This document provides an in-depth look into the architecture, components, confi
 
 ### Idempotency
 
-- `Context.IsAlreadyCompleted<T>()` helps guard against duplicate handling.
+- `Context.IsAlreadyCompleted<T>()` helps guard against duplicate handling
 - Global default: `SagaOptions.DefaultIdempotency`
 - Per-handler override: `protected bool EnforceIdempotency`
 
 ### Cancellation / Timeout / Retry
 
-- CancellationToken flows through all handlers.
-- `Context.MarkAsCancelled<T>()` updates status.
+- CancellationToken flows through all handlers
+- `Context.MarkAsCancelled<T>()` updates status
 - Hooks planned:
   - `IRetryPolicy` (Polly support pluggable)
   - `Lycia.Scheduling` module for delayed message processing
@@ -149,13 +149,13 @@ Lycia enforces a consistent naming convention across store and bus implementatio
 
 - **RedisSagaStore**
   - Keys use the format: `lycia:saga:{ApplicationId}:{SagaId}:{HandlerType}`
-  - Compensation chains are traceable via `ParentMessageId` embedded in context headers.
-  - All keys are prefixed with `lycia:` to ensure namespace isolation.
+  - Compensation chains are traceable via `ParentMessageId` embedded in context headers
+  - All keys are prefixed with `lycia:` to ensure namespace isolation
 
 - **RabbitMqEventBus**
   - Routing keys use the pattern: `{applicationId}.{messageType}`
   - Headers include standardized fields such as `lycia-type`, `lycia-schema-id`, `lycia-schema-ver`
-  - All events carry `CorrelationId`, `SagaId`, and `MessageId` to support distributed tracing.
+  - All events carry `CorrelationId`, `SagaId`, and `MessageId` to support distributed tracing
 
 ---
 
@@ -164,15 +164,15 @@ Lycia enforces a consistent naming convention across store and bus implementatio
 Understanding `MessageId` and `CorrelationId` is essential for building traceable and idempotent saga workflows in Lycia.
 
 - **MessageId**
-  - A unique identifier for the individual message instance.
-  - May remain the same or change across publish/retry/replay depending on the transport.
-  - Used for deduplication, logging, tracing, and replay logic.
+  - A unique identifier for the individual message instance
+  - May remain the same or change across publish/retry/replay depending on the transport
+  - Used for deduplication, logging, tracing, and replay logic
   - Answers: *“Is this message uniquely identifiable?”*
 
 - **CorrelationId**
-  - Used to group multiple messages as part of a single saga or business workflow.
-  - For example, `OrderCreated` → `OrderShipped` → `OrderDelivered` may share the same `CorrelationId`.
-  - Used for tracing, distributed logging, and Saga correlation.
+  - Used to group multiple messages as part of a single saga or business workflow
+  - For example, `OrderCreated` → `OrderShipped` → `OrderDelivered` may share the same `CorrelationId`
+  - Used for tracing, distributed logging, and Saga correlation
   - Answers: *“Which workflow or saga does this message belong to?”*
 
 ---
