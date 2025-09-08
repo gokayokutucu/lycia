@@ -30,7 +30,6 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
     private readonly IMessageSerializer _serializer;
 
     private RabbitMqEventBus(
-        string? conn,
         ILogger<RabbitMqEventBus> logger,
         IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap,
         EventBusOptions options,
@@ -41,24 +40,23 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         _options = options;
         _serializer = serializer ?? throw new InvalidOperationException("IMessageSerializer is null");
 
-        if (conn == null) throw new InvalidOperationException("RabbitMqEventBus connection is null");
+        if (options.ConnectionString == null) throw new InvalidOperationException("RabbitMqEventBus connection is null");
 
         _factory = new ConnectionFactory
         {
-            Uri = new Uri(conn),
+            Uri = new Uri(options.ConnectionString),
             AutomaticRecoveryEnabled = true
         };
     }
 
     public static async Task<RabbitMqEventBus> CreateAsync(
-        string? conn,
         ILogger<RabbitMqEventBus> logger,
         IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap,
         EventBusOptions options,
         IMessageSerializer serializer,
         CancellationToken cancellationToken = default)
     {
-        var bus = new RabbitMqEventBus(conn, logger, queueTypeMap, options, serializer);
+        var bus = new RabbitMqEventBus(logger, queueTypeMap, options, serializer);
         await bus.ConnectAsync(cancellationToken).ConfigureAwait(false);
         return bus;
     }
@@ -282,8 +280,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
     }
 
     private async
-        IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType, IReadOnlyDictionary<string, object?> Headers
-            )> ConsumeAsync(
+        IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType, IReadOnlyDictionary<string, object?> Headers)> ConsumeAsync(
             IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap, bool autoAck = true,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {

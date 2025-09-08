@@ -12,7 +12,8 @@ builder.Services.AddOpenApi();
 
 builder.Services
     .AddLycia(builder.Configuration)
-    .AddSagasFromCurrentAssembly();
+    .AddSagasFromCurrentAssembly()
+    .Build();
 
 var app = builder.Build();
 

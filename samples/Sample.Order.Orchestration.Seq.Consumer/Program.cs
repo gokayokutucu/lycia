@@ -5,7 +5,8 @@ var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services
     .AddLycia(builder.Configuration)
-    .AddSagasFromCurrentAssembly();
+    .AddSagasFromCurrentAssembly()
+    .Build();
 
 var host = builder.Build();
 await host.RunAsync();

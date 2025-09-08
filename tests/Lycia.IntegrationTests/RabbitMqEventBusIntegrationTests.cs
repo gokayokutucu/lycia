@@ -72,13 +72,13 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         var eventBusOptions = new EventBusOptions
         {
             ApplicationId = applicationId,
-            MessageTTL = ttl
+            MessageTTL = ttl,
+            ConnectionString = RabbitMqConnectionString
         };
 
         var serializer = new NewtonsoftJsonMessageSerializer();
 
         await using (var consumerBus = await RabbitMqEventBus.CreateAsync(
-                         RabbitMqConnectionString,
                          NullLogger<RabbitMqEventBus>.Instance,
                          queueTypeMap,
                          eventBusOptions,
@@ -108,7 +108,6 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         await Task.Delay(500);
 
         await using (var publisherBus = await RabbitMqEventBus.CreateAsync(
-                         RabbitMqConnectionString,
                          NullLogger<RabbitMqEventBus>.Instance,
                          queueTypeMap,
                          eventBusOptions,
@@ -158,13 +157,13 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         var eventBusOptions = new EventBusOptions
         {
             ApplicationId = applicationId,
-            MessageTTL = TimeSpan.FromMinutes(5)
+            MessageTTL = TimeSpan.FromMinutes(5),
+            ConnectionString = RabbitMqConnectionString
         };
 
         var serializer = new NewtonsoftJsonMessageSerializer();
 
         var eventBus = await RabbitMqEventBus.CreateAsync(
-            RabbitMqConnectionString,
             NullLogger<RabbitMqEventBus>.Instance,
             queueTypeMap,
             eventBusOptions,
@@ -227,13 +226,13 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         var eventBusOptions = new EventBusOptions
         {
             ApplicationId = applicationId,
-            MessageTTL = TimeSpan.FromMinutes(5)
+            MessageTTL = TimeSpan.FromMinutes(5),
+            ConnectionString = RabbitMqConnectionString
         };
 
         var serializer = new NewtonsoftJsonMessageSerializer();
 
         var eventBus = await RabbitMqEventBus.CreateAsync(
-            RabbitMqConnectionString,
             NullLogger<RabbitMqEventBus>.Instance,
             queueTypeMap,
             eventBusOptions,
@@ -294,13 +293,13 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         var eventBusOptions = new EventBusOptions
         {
             ApplicationId = applicationId,
-            MessageTTL = TimeSpan.FromMinutes(5)
+            MessageTTL = TimeSpan.FromMinutes(5),
+            ConnectionString = RabbitMqConnectionString
         };
 
         var serializer = new NewtonsoftJsonMessageSerializer();
 
         var eventBus = await RabbitMqEventBus.CreateAsync(
-            RabbitMqConnectionString,
             NullLogger<RabbitMqEventBus>.Instance,
             queueTypeMap,
             eventBusOptions,

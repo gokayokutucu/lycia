@@ -95,9 +95,12 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         };
         var serializer = new NewtonsoftJsonMessageSerializer();
         var eventBusOptions = new EventBusOptions
-            { ApplicationId = applicationId, MessageTTL = TimeSpan.FromSeconds(10) };
+        {
+            ApplicationId = applicationId, 
+            MessageTTL = TimeSpan.FromSeconds(10),
+            ConnectionString = this.RabbitMqConnectionString
+        };
         var eventBus = await RabbitMqEventBus.CreateAsync(
-            RabbitMqConnectionString,
             NullLogger<RabbitMqEventBus>.Instance,
             queueTypeMap,
             eventBusOptions,
@@ -225,9 +228,12 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         };
         var serializer = new NewtonsoftJsonMessageSerializer();
         var eventBusOptions = new EventBusOptions
-            { ApplicationId = applicationId, MessageTTL = TimeSpan.FromSeconds(10) };
+        {
+            ApplicationId = applicationId, 
+            MessageTTL = TimeSpan.FromSeconds(10),
+            ConnectionString = RabbitMqConnectionString
+        };
         var eventBus = await RabbitMqEventBus.CreateAsync(
-            RabbitMqConnectionString,
             NullLogger<RabbitMqEventBus>.Instance,
             queueTypeMap,
             eventBusOptions,
@@ -340,8 +346,13 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
             { childQueueName, (typeof(DummyChildEvent), typeof(ChildCompensationSagaHandler)) },
         };
         var eventBusOptions = new EventBusOptions
-            { ApplicationId = applicationId, MessageTTL = TimeSpan.FromSeconds(10) };
-        var eventBus = await RabbitMqEventBus.CreateAsync(RabbitMqConnectionString,
+        {
+            
+            ApplicationId = applicationId, 
+            MessageTTL = TimeSpan.FromSeconds(10),
+            ConnectionString = RabbitMqConnectionString
+        };
+        var eventBus = await RabbitMqEventBus.CreateAsync(
             NullLogger<RabbitMqEventBus>.Instance, queueTypeMap, eventBusOptions, serializer);
 
         var redis = await ConnectionMultiplexer.ConnectAsync(RedisEndpoint);
@@ -445,9 +456,13 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         var queueTypeMap = new Dictionary<string, (Type, Type)> { { queueName, (typeof(DummyEvent), typeof(ChildCompensationHandler)) } };
         var serializer = new NewtonsoftJsonMessageSerializer();
         var eventBusOptions = new EventBusOptions
-            { ApplicationId = applicationId, MessageTTL = TimeSpan.FromSeconds(10) };
+        {
+            ApplicationId = applicationId, 
+            MessageTTL = TimeSpan.FromSeconds(10),
+            ConnectionString = RabbitMqConnectionString
+        };
         var eventBus = await RabbitMqEventBus.CreateAsync(
-            RabbitMqConnectionString, NullLogger<RabbitMqEventBus>.Instance, queueTypeMap, eventBusOptions, serializer);
+            NullLogger<RabbitMqEventBus>.Instance, queueTypeMap, eventBusOptions, serializer);
 
         var redis = await ConnectionMultiplexer.ConnectAsync(RedisEndpoint);
         var redisDb = redis.GetDatabase();
@@ -518,11 +533,14 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
             Saga.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(TestSagaCommand), handlerType, applicationId);
         var queueTypeMap = new Dictionary<string, (Type, Type)> { { queueName, (typeof(TestSagaCommand), typeof(FailingSagaHandler)) } };
         var eventBusOptions = new EventBusOptions
-            { ApplicationId = applicationId, MessageTTL = TimeSpan.FromSeconds(30) };
+        {
+            ApplicationId = applicationId, 
+            MessageTTL = TimeSpan.FromSeconds(30),
+            ConnectionString = RabbitMqConnectionString
+        };
 
         var serializer = new NewtonsoftJsonMessageSerializer();
         var eventBus = await RabbitMqEventBus.CreateAsync(
-            RabbitMqConnectionString,
             NullLogger<RabbitMqEventBus>.Instance,
             queueTypeMap,
             eventBusOptions,
