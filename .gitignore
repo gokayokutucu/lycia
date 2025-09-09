@@ -36,6 +36,9 @@ bld/
 .idea/
 *.sln.iml
 
+# Junie settings
+.junie/
+
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt
 
