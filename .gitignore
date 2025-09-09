@@ -137,3 +137,6 @@ Thumbs.db
 # Resharper
 _ReSharper*/
 *.[Rr]e[Ss]harper
+
+# git2txt
+lycia.txt
