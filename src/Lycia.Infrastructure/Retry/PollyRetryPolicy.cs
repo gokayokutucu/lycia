@@ -1,13 +1,14 @@
 using Lycia.Saga.Exceptions;
 using Polly;
 using Polly.Retry;
-using IRetryPolicy = Lycia.Saga.Abstractions.IRetryPolicy;
+using Retry_IRetryPolicy = Lycia.Infrastructure.Retry.IRetryPolicy;
 
-namespace Lycia.Extensions.Retry;
+namespace Lycia.Infrastructure.Retry;
 
-public class PollyRetryPolicy : IRetryPolicy
+public class PollyRetryPolicy : Retry_IRetryPolicy
 {
     private readonly AsyncRetryPolicy _policy;
+    public event Action<RetryContext>? OnRetry;
 
     public PollyRetryPolicy()
     {
@@ -24,7 +25,8 @@ public class PollyRetryPolicy : IRetryPolicy
                 },
                 onRetry: (exception, timeSpan, retryCount, _) =>
                 {
-                    Console.WriteLine($"[Retry] Attempt {retryCount} after {timeSpan.TotalSeconds}s: {exception.Message}");
+                    var ctx = new RetryContext(exception, retryCount, timeSpan);
+                    OnRetry?.Invoke(ctx);
                 });
     }
 
