@@ -18,7 +18,7 @@ public static class HandlerDelegateHelper
             return dlg;
 
         // Try to find the method directly on the concrete type (public or non-public)
-        var method = FindMethod(handlerType, methodName, messageType, withCancellationToken: true)
+        var method =    FindMethod(handlerType, methodName, messageType, withCancellationToken: true)
                      ?? FindMethod(handlerType, methodName, messageType, withCancellationToken: false)
                      ?? FindOnInterfaces(handlerType, methodName, messageType, withCancellationToken: true)
                      ?? FindOnInterfaces(handlerType, methodName, messageType, withCancellationToken: false);

@@ -5,13 +5,16 @@ using Lycia.Messaging;
 
 namespace Lycia.Saga.Abstractions;
 
-public interface ISagaContext<TInitialMessage>
-    where TInitialMessage : IMessage
+public interface ISagaContext
 {
     Guid SagaId { get; }
     Type HandlerTypeOfCurrentStep { get; }
     ISagaStore SagaStore { get; }
+}
 
+public interface ISagaContext<TInitialMessage> : ISagaContext
+    where TInitialMessage : IMessage
+{
     Task Send<T>(T command, CancellationToken cancellationToken = default) where T : ICommand;
     Task Publish<T>(T @event, CancellationToken cancellationToken = default) where T : IEvent;
     
@@ -38,7 +41,7 @@ public interface ISagaContext<TInitialMessage>
     Task<bool> IsAlreadyCompleted<T>() where T : IMessage;
 }
 
-public interface ISagaContext<TInitialMessage, TSagaData> : ISagaContext<TInitialMessage>
+public interface ISagaContext<TInitialMessage, out TSagaData> : ISagaContext<TInitialMessage>
     where TSagaData : SagaData
     where TInitialMessage : IMessage
 {

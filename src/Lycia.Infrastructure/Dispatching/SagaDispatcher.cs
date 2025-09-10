@@ -7,7 +7,9 @@ using Lycia.Saga.Extensions;
 using Lycia.Saga.Handlers;
 using Lycia.Saga.Handlers.Abstractions;
 using Lycia.Saga.Helpers;
+using Lycia.Saga.Middleware;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Lycia.Infrastructure.Dispatching;
 
@@ -17,7 +19,8 @@ namespace Lycia.Infrastructure.Dispatching;
 public class SagaDispatcher(
     ISagaStore sagaStore,
     ISagaIdGenerator sagaIdGenerator,
-    IServiceProvider serviceProvider)
+    IServiceProvider serviceProvider,
+    ILogger<SagaDispatcher> logger)
     : ISagaDispatcher
 {
     private async Task DispatchByMessageTypeAsync<TMessage>(TMessage message, Type? handlerType, Guid? sagaId,
@@ -25,7 +28,7 @@ public class SagaDispatcher(
     {
         if (handlerType == null)
         {
-            // log null handlerType
+            logger.LogWarning("No handler type resolved for message {MessageType}", typeof(TMessage).Name);
             return;
         }
 
@@ -54,7 +57,7 @@ public class SagaDispatcher(
 
         if (IsSuccessResponse(messageType))
         {
-            Console.WriteLine($"[Dispatch] Dispatching {messageType.Name} to {handlerType!.Name}");
+            logger?.LogInformation("Dispatching {Message} to {Handler}", messageType.Name, handlerType!.Name);
             await InvokeHandlerAsync(serviceProvider.GetServices(handlerType), message,
                 cancellationToken: cancellationToken);
         }
@@ -66,7 +69,7 @@ public class SagaDispatcher(
                 ExceptionType = message.GetType().Name,
                 OccurredAt = DateTime.UtcNow
             };
-            Console.WriteLine($"[Dispatch] Dispatching {messageType.Name} to {handlerType?.Name}");
+            logger?.LogInformation("Dispatching {Message} to {Handler}", messageType.Name, handlerType?.Name);
             await InvokeHandlerAsync(serviceProvider.GetServices(handlerType!), message, sagaId, fail,
                 cancellationToken);
         }
@@ -118,7 +121,7 @@ public class SagaDispatcher(
         
         if (!IsSupportedSagaHandler(handlerType)) return;
         
-        await SagaContextFactory.InitializeForHandlerAsync(
+        var createdContext = await SagaContextFactory.InitializeForHandlerAsync(
             handler,
             sagaId!.Value,
             message,
@@ -129,7 +132,33 @@ public class SagaDispatcher(
             serviceProvider, 
             cancellationToken);
         
-        await HandleSagaAsync(message, handler, handlerType, cancellationToken);
+        // Build middleware pipeline and execute handler through it
+        var middlewares = serviceProvider.GetServices<ISagaMiddleware>();
+        var orderedTypes = serviceProvider.GetService<IReadOnlyList<Type>>();
+        var pipeline = new Middleware.SagaMiddlewarePipeline(middlewares, serviceProvider, orderedTypes);
+        var ctx = new SagaContextInvocationContext
+        {
+            Message = message,
+            SagaContext = createdContext as ISagaContext,
+            HandlerType = handlerType,
+            SagaId = sagaId,
+            CancellationToken = cancellationToken
+        };
+        
+        var sagaContextAccessor = serviceProvider.GetService<ISagaContextAccessor>();
+
+        // Set current saga context in accessor if available
+        var previous = sagaContextAccessor?.Current;
+        try
+        {
+            if (sagaContextAccessor != null)
+                sagaContextAccessor.Current = createdContext as ISagaContext;
+            await pipeline.InvokeAsync(ctx, () => HandleSagaAsync(message, handler, handlerType, cancellationToken));
+        }
+        finally
+        {
+            if (sagaContextAccessor != null) sagaContextAccessor.Current = previous;
+        }
     }
 
     private async Task HandleSagaAsync(IMessage message, object? handler, Type handlerType, CancellationToken cancellationToken)
@@ -152,8 +181,8 @@ public class SagaDispatcher(
         }
         catch (Exception ex)
         {
-            // Optionally log or throw a descriptive error
-            throw new InvalidOperationException($"Failed to invoke HandleAsync dynamically: {ex.Message}", ex);
+            logger?.LogError(ex, "Failed to invoke saga handler dynamically: {Message}", ex.Message);
+            throw new SagaDispatchException($"Failed to invoke HandleAsync dynamically: {ex.Message}", ex);
         }
     }
 
@@ -196,7 +225,7 @@ public class SagaDispatcher(
             await sagaStore.IsStepCompletedAsync(sagaId, message.MessageId, stepTypeToCheck, handlerType);
         if (!alreadyMarked)
         {
-            Console.WriteLine($"Step for {stepTypeToCheck.Name} was not marked as completed, failed, or compensated.");
+            logger?.LogWarning("Step for {Step} was not marked as completed, failed, or compensated.", stepTypeToCheck.Name);
             // If you want to throw an exception, uncomment the line below:
             // throw new InvalidOperationException($"Step {stepTypeToCheck.Name} was not marked as completed/failed/compensated.");
         }

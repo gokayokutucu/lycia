@@ -17,6 +17,7 @@ using Lycia.Saga;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Handlers;
 using Lycia.Saga.Handlers.Abstractions;
+using Lycia.Saga.Helpers;
 using Lycia.Tests.Helpers;
 using Lycia.Tests.Messages;
 using Microsoft.Extensions.DependencyInjection;
@@ -132,7 +133,11 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
             new RedisSagaStore(redisDb, eventBus, dummySagaIdGenerator,
                 sp.GetRequiredService<ISagaCompensationCoordinator>(), sagaStoreOptions));
         services.AddSingleton<ISagaDispatcher>(sp =>
-            new SagaDispatcher(sp.GetRequiredService<ISagaStore>(), dummySagaIdGenerator, sp));
+            new SagaDispatcher(
+                sp.GetRequiredService<ISagaStore>(),
+                dummySagaIdGenerator,
+                sp,
+                NullLogger<SagaDispatcher>.Instance));
 
         var serviceProvider = services.BuildServiceProvider();
 
@@ -265,7 +270,11 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
             new RedisSagaStore(redisDb, eventBus, dummySagaIdGenerator,
                 sp.GetRequiredService<ISagaCompensationCoordinator>(), sagaStoreOptions));
         services.AddSingleton<ISagaDispatcher>(sp =>
-            new SagaDispatcher(sp.GetRequiredService<ISagaStore>(), dummySagaIdGenerator, sp));
+            new SagaDispatcher(
+                sp.GetRequiredService<ISagaStore>(),
+                dummySagaIdGenerator,
+                sp,
+                NullLogger<SagaDispatcher>.Instance));
 
 
         var serviceProvider = services.BuildServiceProvider();
@@ -382,7 +391,11 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
                 sp.GetRequiredService<ISagaCompensationCoordinator>(), sagaStoreOptions));
 
         services.AddSingleton<ISagaDispatcher>(sp =>
-            new SagaDispatcher(sp.GetRequiredService<ISagaStore>(), dummySagaIdGenerator, sp));
+            new SagaDispatcher(
+                sp.GetRequiredService<ISagaStore>(),
+                dummySagaIdGenerator,
+                sp,
+                NullLogger<SagaDispatcher>.Instance));
 
         var serviceProvider = services.BuildServiceProvider();
 

@@ -3,7 +3,6 @@
 // https://www.apache.org/licenses/LICENSE-2.0
 using System.Reflection;
 using Lycia.Messaging;
-using Lycia.Saga.Common;
 using Lycia.Saga.Handlers;
 using Lycia.Saga.Handlers.Abstractions;
 using Lycia.Saga.Helpers;
@@ -15,10 +14,14 @@ using Lycia.Extensions.Stores;
 using Lycia.Infrastructure.Compensating;
 using Lycia.Infrastructure.Dispatching;
 using Lycia.Infrastructure.Eventing;
+using Lycia.Infrastructure.Middleware;
+using Lycia.Infrastructure.Retry;
 using Lycia.Infrastructure.Stores;
 using Lycia.Saga.Abstractions;
+using Lycia.Saga.Common;
 using Lycia.Saga.Configurations;
 using Lycia.Saga.Extensions;
+using Lycia.Saga.Middleware;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -45,6 +48,7 @@ namespace Lycia.Extensions
         /// </summary>
         public static LyciaBuilder AddLycia(this IServiceCollection services, IConfiguration configuration)
         {
+            services.AddLogging();
             var rootAppId = configuration["ApplicationId"];
             var commonTtlSeconds = configuration.GetValue<int?>("Lycia:CommonTTL");
             
@@ -96,6 +100,7 @@ namespace Lycia.Extensions
             services.TryAddScoped<ISagaIdGenerator, DefaultSagaIdGenerator>();
             services.TryAddScoped<ISagaDispatcher, SagaDispatcher>();
             services.TryAddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
+            services.TryAddScoped<ISagaContextAccessor, SagaContextAccessor>();
 
             // Serializer default
             services.TryAddSingleton<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
@@ -147,10 +152,34 @@ namespace Lycia.Extensions
                 var redis = sp.GetRequiredService<IDatabase>();
                 return new RedisSagaStore(redis, eventBus, idGen, compCoord, storeOpts);
             });
-            
+
+            RegisterMiddlewareAndPolicies(services);
+
             services.AddHostedService<RabbitMqListener>();
 
+            // Health checks
+            services.AddHealthChecks().AddCheck<Helpers.LyciaHealthCheck>("Lycia");
+
             return new LyciaBuilder(services, configuration);
+        }
+
+        private static void RegisterMiddlewareAndPolicies(IServiceCollection services)
+        {
+            // Default retry policy (Polly-based). Can be overridden by registering IRetryPolicy before Build().
+            services.TryAddSingleton<IRetryPolicy, PollyRetryPolicy>();
+
+            // 1) Ensure default middlewares are available as ISagaMiddleware (idempotent, allow multiple implementations)
+            services.TryAddEnumerable(ServiceDescriptor.Scoped(typeof(ISagaMiddleware), typeof(LoggingMiddleware)));
+            services.TryAddEnumerable(ServiceDescriptor.Scoped(typeof(ISagaMiddleware), typeof(RetryMiddleware)));
+
+            // 2) Default ordered pipeline: Logging first, then Retry
+            //    This will only be used if the host app does NOT call UseSagaMiddleware(Action<>)
+            //    because that overload registers its own IReadOnlyList<Type>.
+            services.TryAddScoped<IReadOnlyList<Type>>(_ => new List<Type>
+            {
+                typeof(LoggingMiddleware),
+                typeof(RetryMiddleware)
+            });
         }
 
         private static void ConfigureRedisEventStore(IServiceCollection services, IConfigurationSection storeSection)
@@ -177,6 +206,7 @@ namespace Lycia.Extensions
         public static LyciaBuilder AddLyciaInMemory(this IServiceCollection services, IConfiguration? configuration = null)
         {
             configuration ??= new ConfigurationBuilder().AddInMemoryCollection().Build();
+            services.AddLogging();
 
             // Bind minimal options with sensible defaults
             services
@@ -224,7 +254,9 @@ namespace Lycia.Extensions
             services.TryAddSingleton<IDictionary<string, (Type MessageType, Type HandlerType)>>(sp =>
                 new Dictionary<string, (Type, Type)>(StringComparer.OrdinalIgnoreCase));
 
-            // Return builder for handler registration and final Build()
+            RegisterMiddlewareAndPolicies(services);
+            // Health checks for in-memory setup as well (trivial pass)
+            services.AddHealthChecks().AddCheck<Helpers.LyciaHealthCheck>("Lycia");
             return new LyciaBuilder(services, configuration);
         }
     }
@@ -251,6 +283,12 @@ namespace Lycia.Extensions
         // ---------------------------
         // Overrides
         // ---------------------------
+        /// <summary>
+        /// Configures the message serializer for the system by removing any existing implementation
+        /// and registering a new one of the specified type.
+        /// </summary>
+        /// <typeparam name="TSerializer">The type of the message serializer to register. Must implement <see cref="IMessageSerializer"/>.</typeparam>
+        /// <returns>The current instance of <see cref="LyciaBuilder"/> for further configuration.</returns>
         public LyciaBuilder UseMessageSerializer<TSerializer>() where TSerializer : class, IMessageSerializer
         {
             _services.RemoveAll(typeof(IMessageSerializer));
@@ -258,6 +296,13 @@ namespace Lycia.Extensions
             return this;
         }
 
+        /// <summary>
+        /// Configures the application to use a specific implementation of the IEventBus interface.
+        /// This method removes any previously registered event bus and registers the provided type
+        /// as the singleton implementation of the event bus.
+        /// </summary>
+        /// <typeparam name="TEventBus">The type of the event bus to use, which must implement the IEventBus interface.</typeparam>
+        /// <returns>A LyciaBuilder instance to allow further configuration chaining.</returns>
         public LyciaBuilder UseEventBus<TEventBus>() where TEventBus : class, IEventBus
         {
             _services.RemoveAll(typeof(IEventBus));
@@ -270,6 +315,93 @@ namespace Lycia.Extensions
             _services.RemoveAll(typeof(ISagaStore));
             _services.AddSingleton<ISagaStore, TSagaStore>();
             return this;
+        }
+
+        /// <summary>
+        /// Configures and registers saga middleware in a pipeline for handling saga behaviors such as logging and retry policies.
+        /// </summary>
+        /// <param name="configure">An optional configuration action to customize the saga middleware pipeline, such as adding specific middleware components.</param>
+        /// <returns>An updated instance of <see cref="LyciaBuilder"/>, allowing further configuration.</returns>
+        /// <exception cref="InvalidOperationException">Thrown if an invalid middleware type is specified in the configuration.</exception>
+        public LyciaBuilder UseSagaMiddleware(Action<SagaMiddlewareOptions>? configure)
+        {
+            if (configure == null) return this;
+            var options = new SagaMiddlewareOptions();
+            configure(options);
+
+            // Slot-based plan: fixed positions for Lycia-known categories, replacements by interface
+            //  - ILoggingSagaMiddleware slot (default: LoggingMiddleware)
+            //  - IRetrySagaMiddleware   slot (default: RetryMiddleware)
+            var slotMap = new Dictionary<Type, Type>
+            {
+                { typeof(ILoggingSagaMiddleware), typeof(LoggingMiddleware) },
+                { typeof(IRetrySagaMiddleware),   typeof(RetryMiddleware)   }
+            };
+
+            // Extra middlewares which only implement ISagaMiddleware (no known slot)
+            var extras = new List<Type>();
+
+            foreach (var t in options.Middlewares)
+            {
+                if (t == null) continue;
+
+                if (typeof(ILoggingSagaMiddleware).IsAssignableFrom(t))
+                {
+                    // Replace logging slot
+                    slotMap[typeof(ILoggingSagaMiddleware)] = t;
+                    RemoveMiddlewareImplementation(typeof(LoggingMiddleware));
+                }
+                else if (typeof(IRetrySagaMiddleware).IsAssignableFrom(t))
+                {
+                    // Replace retry slot
+                    slotMap[typeof(IRetrySagaMiddleware)] = t;
+                    RemoveMiddlewareImplementation(typeof(RetryMiddleware));
+                }
+                else if (typeof(ISagaMiddleware).IsAssignableFrom(t))
+                {
+                    // No known slot → append later in the given order
+                    if (!extras.Contains(t)) extras.Add(t);
+                }
+                else
+                {
+                    throw new InvalidOperationException($"Type {t.FullName} does not implement ISagaMiddleware.");
+                }
+            }
+
+            // Build the final ordered list: Logging → Retry → extras (in user order)
+            var ordered = new List<Type>
+            {
+                slotMap[typeof(ILoggingSagaMiddleware)],
+                slotMap[typeof(IRetrySagaMiddleware)]
+            };
+
+            // avoid duplicates when extras accidentally include defaults
+            foreach (var t in extras.Where(t => !ordered.Contains(t)))
+            {
+                ordered.Add(t);
+            }
+
+            // Register each middleware as ISagaMiddleware scoped in DI, avoiding duplicates
+            foreach (var t in from t in ordered let exists = _services.Any(sd => sd.ServiceType == typeof(ISagaMiddleware) && sd.ImplementationType == t) where !exists select t)
+            {
+                _services.AddScoped(typeof(ISagaMiddleware), t);
+            }
+
+            // Register ordered list for pipeline resolution
+            _services.RemoveAll(typeof(IReadOnlyList<Type>));
+            _services.AddScoped<IReadOnlyList<Type>>(_ => ordered);
+            return this;
+
+            // Helper to remove a specific ISagaMiddleware implementation mapping
+            void RemoveMiddlewareImplementation(Type impl)
+            {
+                for (var i = _services.Count - 1; i >= 0; i--)
+                {
+                    var sd = _services[i];
+                    if (sd.ServiceType == typeof(ISagaMiddleware) && sd.ImplementationType == impl)
+                        _services.RemoveAt(i);
+                }
+            }
         }
 
         // ---------------------------
