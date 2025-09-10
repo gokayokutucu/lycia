@@ -26,7 +26,7 @@ public class RedisSagaStore(
     ISagaIdGenerator sagaIdGenerator,
     ISagaCompensationCoordinator sagaCompensationCoordinator,
     SagaStoreOptions? options)
-    : ISagaStore
+    : ISagaStore, Lycia.Saga.Abstractions.ISagaStoreHealthCheck
 {
     private readonly SagaStoreOptions _options = options ?? new SagaStoreOptions();
 
@@ -323,4 +323,17 @@ public class RedisSagaStore(
         => !string.IsNullOrWhiteSpace(_options.ApplicationId)
             ? _options.ApplicationId
             : throw new InvalidOperationException("ApplicationId is required");
+
+    public async Task<bool> PingAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await redisDb.PingAsync();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 }
