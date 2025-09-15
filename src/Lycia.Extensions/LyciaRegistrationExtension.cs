@@ -27,7 +27,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Polly.Retry;
 using StackExchange.Redis;
+using IRetryPolicy = Lycia.Infrastructure.Retry.IRetryPolicy;
 
 namespace Lycia.Extensions
 {
@@ -162,6 +164,28 @@ namespace Lycia.Extensions
 
             return new LyciaBuilder(services, configuration);
         }
+        
+        /// <summary>
+        /// Adds Lycia and allows inline configuration of LyciaBuilder. 
+        /// All Configure* methods are only valid inside this action.
+        /// </summary>
+        public static LyciaBuilder AddLycia(
+            this IServiceCollection services,
+            Action<LyciaBuilder> configure,
+            IConfiguration configuration)
+        {
+            var builder = AddLycia(services, configuration);
+            builder.SetInlineConfigure(true);
+            try
+            {
+                configure.Invoke(builder);
+            }
+            finally
+            {
+                builder.SetInlineConfigure(false);
+            }
+            return builder;
+        }
 
         private static void RegisterMiddlewareAndPolicies(IServiceCollection services)
         {
@@ -266,6 +290,7 @@ namespace Lycia.Extensions
     /// </summary>
     public sealed class LyciaBuilder
     {
+        private bool _inlineConfigureGate;
         private readonly IServiceCollection _services;
         private readonly IConfiguration _configuration;
         private readonly List<Assembly> _assemblies = new();
@@ -278,6 +303,15 @@ namespace Lycia.Extensions
             _services = services;
             _configuration = configuration;
             _appIdCache = _configuration["ApplicationId"] ?? throw new InvalidOperationException("ApplicationId is not configured.");
+        }
+        
+        internal void SetInlineConfigure(bool enabled) => _inlineConfigureGate = enabled;
+
+        private void EnsureInlineConfigure(string method)
+        {
+            if (!_inlineConfigureGate)
+                throw new InvalidOperationException(
+                    $"{method} can only be called inside AddLycia(o => {{ ... }}, configuration) block.");
         }
 
         // ---------------------------
@@ -524,6 +558,7 @@ namespace Lycia.Extensions
         /// <returns>Returns the current <see cref="LyciaBuilder"/> instance for chaining further configuration.</returns>
         public LyciaBuilder ConfigureSaga(Action<SagaOptions>? configure)
         {
+            EnsureInlineConfigure(nameof(ConfigureSaga));
             if (configure != null) _services.PostConfigure(configure);
             return this;
         }
@@ -535,6 +570,7 @@ namespace Lycia.Extensions
         /// <returns>A <see cref="LyciaBuilder"/> instance to continue configuring the application with a fluent interface.</returns>
         public LyciaBuilder ConfigureEventBus(Action<EventBusOptions>? configure)
         {
+            EnsureInlineConfigure(nameof(ConfigureSaga));
             if (configure != null) _services.PostConfigure(configure);
             return this;
         }
@@ -547,7 +583,24 @@ namespace Lycia.Extensions
         /// <returns>The <see cref="LyciaBuilder"/> instance to enable further configuration chaining.</returns>
         public LyciaBuilder ConfigureSagaStore(Action<SagaStoreOptions>? configure)
         {
+            EnsureInlineConfigure(nameof(ConfigureSaga));
             if (configure != null) _services.PostConfigure(configure);
+            return this;
+        }
+        
+        public LyciaBuilder ConfigureRetry(Action<RetryStrategyOptions>? configure)
+        {
+            EnsureInlineConfigure(nameof(ConfigureSaga));
+            if (configure != null) _services.PostConfigure(configure);
+            return this;
+        }
+
+        // appsettings: "Lycia:Retry"
+        public LyciaBuilder ConfigureRetry()
+        {
+            EnsureInlineConfigure(nameof(ConfigureSaga));
+            _services.AddOptions<RetryStrategyOptions>()
+                .Bind(_configuration.GetSection("Lycia:Retry"));
             return this;
         }
 
