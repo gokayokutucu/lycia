@@ -1,33 +1,46 @@
 using Lycia.Saga.Exceptions;
+using Microsoft.Extensions.Options;
 using Polly;
 using Polly.Retry;
-using Retry_IRetryPolicy = Lycia.Infrastructure.Retry.IRetryPolicy;
+using IamRetryPolicy = Lycia.Infrastructure.Retry.IRetryPolicy;
 
 namespace Lycia.Infrastructure.Retry;
 
-public class PollyRetryPolicy : Retry_IRetryPolicy
+public class PollyRetryPolicy : IamRetryPolicy
 {
-    private readonly AsyncRetryPolicy _policy;
+    private readonly ResiliencePipeline _pipeline;
     public event Action<RetryContext>? OnRetry;
 
-    public PollyRetryPolicy()
+    public PollyRetryPolicy(IOptions<RetryStrategyOptions>? options)
     {
-        _policy = Policy
-            .Handle<LyciaSagaException>(ex => ex is TransientSagaException)
-            .Or<TimeoutException>()
-            .WaitAndRetryAsync(
-                retryCount: 3,
-                sleepDurationProvider: (retryAttempt, context) =>
-                {
-                    context.TryGetValue("lastException", out var exceptionObj);
-                    var exception = exceptionObj as Exception;
-                    return GetDelay(exception, retryAttempt);
-                },
-                onRetry: (exception, timeSpan, retryCount, _) =>
-                {
-                    var ctx = new RetryContext(exception, retryCount, timeSpan);
-                    OnRetry?.Invoke(ctx);
-                });
+        var src = options?.Value;
+        
+        var opts = new RetryStrategyOptions
+        {
+            MaxRetryAttempts = src?.MaxRetryAttempts is > 0 ? src.MaxRetryAttempts : 3,
+            BackoffType      = src?.BackoffType ?? DelayBackoffType.Exponential,
+            Delay            = src?.Delay ?? TimeSpan.FromSeconds(1),
+            MaxDelay         = src?.MaxDelay,                 
+            UseJitter        = src?.UseJitter ?? true,
+            ShouldHandle     = src?.ShouldHandle
+                               ?? new PredicateBuilder()
+                                   .Handle<TransientSagaException>()
+                                   .Handle<TimeoutException>()
+        };
+
+        var prevOnRetry = src?.OnRetry;
+        opts.OnRetry = async args =>
+        {
+            if (prevOnRetry is not null)
+                await prevOnRetry(args).ConfigureAwait(false);
+
+            var ctx = new RetryContext(args.Outcome.Exception!, args.AttemptNumber, args.RetryDelay);
+            OnRetry?.Invoke(ctx);
+        };
+
+        _pipeline = new ResiliencePipelineBuilder()
+            .AddRetry(opts)
+            .Build();
     }
 
     public bool ShouldRetry(Exception? exception, int currentRetryCount)
@@ -35,30 +48,16 @@ public class PollyRetryPolicy : Retry_IRetryPolicy
         return exception is TransientSagaException or TimeoutException && currentRetryCount < 3;
     }
 
-    public TimeSpan GetDelay(Exception? exception, int retryCount)
+    public TimeSpan GetDelay(Exception? exception, int currentRetryCount)
     {
         return exception switch
         {
             TimeoutException => TimeSpan.FromSeconds(1),
             TransientSagaException => TimeSpan.FromSeconds(3),
-            _ => TimeSpan.FromSeconds(Math.Pow(2, retryCount))
+            _ => TimeSpan.FromSeconds(Math.Pow(2, currentRetryCount))
         };
     }
 
-    public Task ExecuteAsync(Func<Task> action, CancellationToken cancellationToken = default)
-    {
-        var context = new Context();
-        return _policy.ExecuteAsync(async (ctx, ct) =>
-        {
-            try
-            {
-                await action();
-            }
-            catch (Exception ex)
-            {
-                ctx["lastException"] = ex;
-                throw;
-            }
-        }, context, cancellationToken);
-    }
+    public ValueTask ExecuteAsync(Func<Task> action, CancellationToken cancellationToken = default)
+        => _pipeline.ExecuteAsync(static (act, _) => new ValueTask(act()), action, cancellationToken);
 }

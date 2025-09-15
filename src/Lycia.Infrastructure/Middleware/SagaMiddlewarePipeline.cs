@@ -5,35 +5,53 @@ namespace Lycia.Infrastructure.Middleware;
 
 public sealed class SagaMiddlewarePipeline
 {
-    private readonly ISagaMiddleware[] _middlewares;
+    private readonly List<ISagaMiddleware> _middlewares;
 
-    public SagaMiddlewarePipeline(IEnumerable<ISagaMiddleware> middlewares, IServiceProvider sp, IReadOnlyList<Type>? orderedTypes = null)
+    // Constructor used by dispatcher: pass resolved middlewares and optional ordered types
+    public SagaMiddlewarePipeline(
+        IEnumerable<ISagaMiddleware> middlewares,
+        IServiceProvider serviceProvider,
+        IReadOnlyList<Type>? orderedTypes = null)
     {
         if (orderedTypes == null || orderedTypes.Count == 0)
         {
-            _middlewares = middlewares?.ToArray() ?? [];
+            _middlewares = middlewares.ToList();
+            return;
         }
-        else
+
+        var all = serviceProvider.GetServices<ISagaMiddleware>().ToList();
+        _middlewares = OrderByTypes(all, orderedTypes);
+    }
+
+    // Back-compat constructor used by some tests: pass only ordered types and service provider
+    public SagaMiddlewarePipeline(
+        IEnumerable<Type> orderedTypes,
+        IServiceProvider serviceProvider)
+    {
+        var types = orderedTypes.ToArray();
+        var all = serviceProvider.GetServices<ISagaMiddleware>().ToList();
+        _middlewares = OrderByTypes(all, types);
+    }
+
+    private static List<ISagaMiddleware> OrderByTypes(List<ISagaMiddleware> all, IReadOnlyList<Type> orderedTypes)
+    {
+        var list = new List<ISagaMiddleware>(orderedTypes.Count);
+
+        foreach (var t in orderedTypes)
         {
-            // Resolve in specified order
-            // Middlewares are registered as ISagaMiddleware, not as self; so resolve all and then order by type
-            var list = new List<ISagaMiddleware>(orderedTypes.Count);
-            var all = sp.GetServices<ISagaMiddleware>().ToList();
-
-            list.AddRange(orderedTypes
-                .Select(t => 
-                    all.FirstOrDefault(m => m.GetType() == t) 
-                    ?? all.FirstOrDefault(t.IsInstanceOfType))
-                .OfType<ISagaMiddleware>());
-
-            _middlewares = list.ToArray();
+            var match = all.FirstOrDefault(m => m.GetType() == t)
+                        ?? all.FirstOrDefault(t.IsInstanceOfType);
+            if (match != null && !list.Contains(match))
+                list.Add(match);
         }
+
+        return list;
     }
 
     public Task InvokeAsync(SagaContextInvocationContext context, Func<Task> terminal)
     {
-        Func<Task> next = terminal;
-        for (var i = _middlewares.Length - 1; i >= 0; i--)
+        var next = terminal;
+        for (var i = _middlewares.Count - 1; i >= 0; i--)
         {
             var current = _middlewares[i];
             var innerNext = next;

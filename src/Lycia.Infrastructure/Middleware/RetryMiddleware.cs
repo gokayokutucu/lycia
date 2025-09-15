@@ -11,6 +11,6 @@ public sealed class RetryMiddleware(IRetryPolicy retryPolicy) : IRetrySagaMiddle
     public Task InvokeAsync(SagaContextInvocationContext context, Func<Task> next)
     {
         // Do not hardcode any retry logic here; delegate to the policy abstraction
-        return retryPolicy.ExecuteAsync(next, context.CancellationToken);
+        return retryPolicy.ExecuteAsync(next, context.CancellationToken).AsTask();
     }
 }
