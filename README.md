@@ -32,7 +32,8 @@ services.AddLycia(Configuration)
   - *Coordinated Saga* → central orchestrator-based saga management  
   - *Reactive Saga* → event-driven choreography approach  
 
-- Built-in support for **idempotency**, **timeouts**, and **retries**  
+- Built-in support for **idempotency**, **timeouts**, and **in-process retries with Polly, Ack/Nack + DLQ support on RabbitMQ**  
+- **Default Middleware Pipeline (Logging + Retry, replaceable via UseSagaMiddleware)**  
 - **Extensibility**: Easily plug in custom implementations of `IMessageSerializer`, `IEventBus`, or `ISagaStore`.
 
 ---
@@ -92,7 +93,8 @@ public class InventorySagaHandler :
 - Kafka support  
 - Schema registry (Avro/Protobuf) integration  
 - Advanced observability (metrics, tracing, logging)  
-- Native support for Outbox/Inbox pattern
+- Native support for Outbox/Inbox pattern  
+- Advanced retry customization, scheduling module
 
 ## License
 
@@ -103,12 +105,14 @@ This project is licensed under the [Apache 2.0 License](LICENSE).
 
 In addition to minimal setup and clear semantics, Lycia offers:
 
-- **SagaDispatcher** and **CompensationCoordinator** core components
-- **Built-in Idempotency** and cancellation flow (`MarkAsCancelled<T>()`)
-- **Custom Retry Hooks** planned via `IRetryPolicy` abstraction
-- **Choreography & Orchestration** support via `ReactiveSagaHandler<T>` and `StartCoordinatedSagaHandler<T>`
-- **RedisSagaStore** built-in extension support with TTL, CAS, parent-child message tracing
-- **RabbitMQ EventBus** built-in extension support with Dead Letter Queue (DLQ) and header normalization
-- **Fluent Configuration API**: Easily plug your custom serializers, stores and buses
-- **Detailed Integration Tests** for Redis, RabbitMQ, Compensation logic
+- **SagaDispatcher** and **CompensationCoordinator** core components  
+- **Built-in Idempotency** and cancellation flow (`MarkAsCancelled<T>()`)  
+- **Custom Retry Hooks** finalized via `IRetryPolicy` (with Polly-based default implementation, configurable via `ConfigureRetry`), supporting exponential backoff, jitter, and per-exception retry strategies  
+- **Choreography & Orchestration** support via `ReactiveSagaHandler<T>` and `StartCoordinatedSagaHandler<T>`  
+- **RedisSagaStore** built-in extension support with TTL, CAS, parent-child message tracing  
+- **RabbitMQ EventBus** built-in extension support with Dead Letter Queue (DLQ) and header normalization  
+- **ISagaContextAccessor** for contextual saga state access  
+- **Fluent Middleware Pipeline**: Default logging and retry middleware, replaceable via middleware slots (`ILoggingSagaMiddleware`, `IRetrySagaMiddleware`)  
+- **Fluent Configuration API**: Easily plug your custom serializers, stores and buses  
+- **Detailed Integration Tests** for Redis, RabbitMQ (including Ack/Nack/DLQ behavior), Compensation logic  
 - **Appsettings.json Support**: Environment-based saga configuration
