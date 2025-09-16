@@ -4,6 +4,7 @@
 // For Lazy<T>
 
 using Lycia.Messaging;
+using Lycia.Saga;
 using Lycia.Saga.Abstractions; // ISagaDispatcher is likely here or in Lycia.Infrastructure.Abstractions
 
 namespace Lycia.Infrastructure.Eventing;
@@ -30,6 +31,11 @@ public class InMemoryEventBus(Lazy<ISagaDispatcher> sagaDispatcherLazy) : IEvent
     }
 
     public IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType, IReadOnlyDictionary<string, object?> Headers)> ConsumeAsync(bool autoAck = true, CancellationToken cancellationToken = default)
+    {
+        throw new NotImplementedException();
+    }
+
+    public IAsyncEnumerable<IncomingMessage> ConsumeWithAckAsync(CancellationToken cancellationToken = default)
     {
         throw new NotImplementedException();
     }

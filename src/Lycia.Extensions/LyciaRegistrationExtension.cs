@@ -259,6 +259,7 @@ namespace Lycia.Extensions
 
             // Core services
             services.TryAddScoped<ISagaIdGenerator, DefaultSagaIdGenerator>();
+            services.TryAddScoped<ISagaContextAccessor, SagaContextAccessor>();
             services.TryAddScoped<ISagaDispatcher, SagaDispatcher>();
             services.TryAddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
 

@@ -113,13 +113,6 @@ public class SagaDispatcherTests
     {
         var fixedSagaId = Guid.NewGuid();
         var services = new ServiceCollection();
-        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
         
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string>
@@ -131,6 +124,8 @@ public class SagaDispatcherTests
             .AddSaga(typeof(SwallowingSagaHandler))
             .Build();
 
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
 
@@ -151,13 +146,6 @@ public class SagaDispatcherTests
         // Arrange
         var fixedSagaId = Guid.NewGuid();
         var services = new ServiceCollection();
-        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
         // Register all relevant SagaHandlers
         var configuration = new ConfigurationBuilder()
@@ -170,6 +158,8 @@ public class SagaDispatcherTests
             .AddSagas(typeof(CreateOrderSagaHandler), typeof(ShipOrderSagaHandler), typeof(AuditOrderSagaHandler))
             .Build();
 
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
         var store = provider.GetRequiredService<ISagaStore>();
@@ -258,14 +248,7 @@ public class SagaDispatcherTests
         var services = new ServiceCollection();
 
         var fixedSagaId = Guid.Parse("00000000-0000-0000-0000-000000000001");
-        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
-
+        
         // Register all relevant SagaHandlers
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string>
@@ -277,6 +260,7 @@ public class SagaDispatcherTests
             .AddSagas(typeof(CreateOrderSagaHandler), typeof(ShipOrderSagaHandler), typeof(DeliverOrderSagaHandler))
             .Build();
 
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
 
         var serviceProvider = services.BuildServiceProvider();
         var sagaStore = serviceProvider.GetRequiredService<ISagaStore>();
@@ -352,13 +336,6 @@ public class SagaDispatcherTests
         var fixedSagaId = Guid.NewGuid();
 
         var services = new ServiceCollection();
-        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
         
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string>
@@ -371,6 +348,8 @@ public class SagaDispatcherTests
             .AddSagas(typeof(CreateOrderSagaHandler), typeof(ShipOrderForCompensationSagaHandler))
             .Build();
 
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        
         var provider = services.BuildServiceProvider();
 
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
@@ -410,13 +389,6 @@ public class SagaDispatcherTests
     public async Task DispatchAsync_NoHandlerRegistered_ShouldNotThrow()
     {
         var services = new ServiceCollection();
-        services.AddScoped<ISagaIdGenerator, TestSagaIdGenerator>();
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
         
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string>
@@ -427,6 +399,8 @@ public class SagaDispatcherTests
         
         services.AddLyciaInMemory(configuration)
             .Build();
+        
+        services.AddScoped<ISagaIdGenerator, TestSagaIdGenerator>();
         
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
@@ -449,13 +423,6 @@ public class SagaDispatcherTests
         // Arrange
         var fixedSagaId = Guid.NewGuid();
         var services = new ServiceCollection();
-        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string>
@@ -469,6 +436,8 @@ public class SagaDispatcherTests
             .AddSagas(typeof(CreateOrderSagaHandler), typeof(ShipOrderForCompensationSagaHandler))
             .Build();
 
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
         var store = provider.GetRequiredService<ISagaStore>();
@@ -508,13 +477,6 @@ public class SagaDispatcherTests
     {
         var services = new ServiceCollection();
         var fixedSagaId = Guid.NewGuid();
-        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
         
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string>
@@ -526,6 +488,8 @@ public class SagaDispatcherTests
         services.AddLyciaInMemory(configuration)
             .AddSagas(typeof(CreateOrderSagaHandler), typeof(ShipOrderSagaHandler), typeof(DeliverOrderSagaHandler))
             .Build();
+
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
 
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
@@ -580,13 +544,6 @@ public class SagaDispatcherTests
     {
         var services = new ServiceCollection();
         var fixedSagaId = Guid.NewGuid();
-        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string>
@@ -599,6 +556,8 @@ public class SagaDispatcherTests
             .AddSagas(typeof(CreateOrderSagaHandler))
             .Build();
 
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
         var store = provider.GetRequiredService<ISagaStore>();
@@ -639,13 +598,6 @@ public class SagaDispatcherTests
         // Arrange
         var fixedSagaId = Guid.NewGuid();
         var services = new ServiceCollection();
-        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
         
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string>
@@ -658,6 +610,8 @@ public class SagaDispatcherTests
             .AddSaga(typeof(TestStartReactiveCompensateHandler))
             .Build();
 
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
 
