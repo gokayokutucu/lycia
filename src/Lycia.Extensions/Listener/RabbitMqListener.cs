@@ -24,8 +24,9 @@ public class RabbitMqListener(
 
         var sagaDispatcher = scope.ServiceProvider.GetRequiredService<ISagaDispatcher>();
         
-        await foreach (var (body, messageType, handlerType, headers) in eventBus.ConsumeAsync(autoAck: true, cancellationToken:stoppingToken))
+        await foreach (var msg in eventBus.ConsumeWithAckAsync(stoppingToken))
         {
+            var (body, messageType, handlerType, headers, ack, nack) = msg;
             if (stoppingToken.IsCancellationRequested)
                 break;
 
@@ -66,10 +67,15 @@ public class RabbitMqListener(
                     continue;
                 }
                 await dispatchTask;
+                await ack();
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, "Error while processing message of type {MessageType}", messageType.Name);
+                try
+                {
+                    await nack(false);
+                } catch (Exception nackEx) { logger.LogWarning(nackEx, "Nack failed for {MessageType}", messageType.Name); }
                 // Optional: DLQ/retry/metrics logic.
             }
         }

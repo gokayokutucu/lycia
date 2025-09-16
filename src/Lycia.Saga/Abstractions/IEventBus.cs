@@ -62,4 +62,20 @@ public interface IEventBus
     ///     An asynchronous stream (<see cref="IAsyncEnumerable{T}"/>) yielding a tuple consisting of the raw message body (<see cref="byte[]"/>) and its corresponding <see cref="Type"/>.
     /// </returns>
     IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType, IReadOnlyDictionary<string, object?> Headers)> ConsumeAsync(bool autoAck = true, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Consumes messages from a message broker with explicit acknowledgment support.
+    /// Allows manual handling of acknowledgment and negative acknowledgment of messages
+    /// for fine-grained control over message processing.
+    /// </summary>
+    /// <param name="cancellationToken">
+    /// A token to observe while waiting for the asynchronous operation to complete.
+    /// This token can be used to cancel the consumption process.
+    /// </param>
+    /// <returns>
+    /// An asynchronous enumerable of <see cref="IncomingMessage"/> objects that contain
+    /// the message data, metadata, and acknowledgment methods for handling consumed messages.
+    /// </returns>
+    IAsyncEnumerable<IncomingMessage> ConsumeWithAckAsync(
+        [EnumeratorCancellation] CancellationToken cancellationToken = default);
 }

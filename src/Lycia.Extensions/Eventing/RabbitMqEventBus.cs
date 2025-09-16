@@ -13,6 +13,7 @@ using System.Runtime.CompilerServices;
 using Lycia.Saga.Helpers;
 using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Helpers;
+using Lycia.Saga;
 using Lycia.Saga.Extensions;
 using Constants = Lycia.Extensions.Configurations.Constants;
 
@@ -43,7 +44,8 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         _options = options;
         _serializer = serializer ?? throw new InvalidOperationException("IMessageSerializer is null");
 
-        if (options.ConnectionString == null) throw new InvalidOperationException("RabbitMqEventBus connection is null");
+        if (options.ConnectionString == null)
+            throw new InvalidOperationException("RabbitMqEventBus connection is null");
 
         _factory = new ConnectionFactory
         {
@@ -281,9 +283,22 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             _logger.LogError(ex, "Failed to publish message to dead letter queue: {DlqName}", dlqName);
         }
     }
+    
+    
+    public IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType, IReadOnlyDictionary<string, object?>
+            Headers)>
+        ConsumeAsync(bool autoAck = true, CancellationToken cancellationToken = default)
+    {
+        if (_queueTypeMap == null)
+            throw new InvalidOperationException(
+                "Queue/message type map is not configured for this event bus instance.");
+        return ConsumeAsync(_queueTypeMap, autoAck, cancellationToken);
+    }
+
 
     private async
-        IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType, IReadOnlyDictionary<string, object?> Headers)> ConsumeAsync(
+        IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType, IReadOnlyDictionary<string, object?> Headers
+            )> ConsumeAsync(
             IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap, bool autoAck = true,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
@@ -386,6 +401,98 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             await Task.Delay(50, cancellationToken);
         }
     }
+    
+    public async IAsyncEnumerable<IncomingMessage> ConsumeWithAckAsync(
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        if (_channel == null)
+            throw new InvalidOperationException(
+                "Channel is not initialized. Ensure RabbitMqEventBus is properly created.");
+        if (_queueTypeMap == null)
+            throw new InvalidOperationException(
+                "Queue/message type map is not configured for this event bus instance.");
+
+        var queue = new ConcurrentQueue<IncomingMessage>();
+
+        foreach (var kvp in _queueTypeMap)
+        {
+            var queueName = kvp.Key;
+            var messageType = kvp.Value.MessageType;
+            var handlerType = kvp.Value.HandlerType;
+
+            var exchangeName = MessagingNamingHelper.GetExchangeName(messageType);
+            var routingKey = MessagingNamingHelper.GetTopicRoutingKey(messageType);
+            var exchangeType = messageType.IsSubclassOf(typeof(EventBase)) || messageType.IsSubclassOfResponseBase()
+                ? ExchangeType.Topic
+                : ExchangeType.Direct;
+
+            await _channel.ExchangeDeclareAsync(
+                exchange: exchangeName,
+                type: exchangeType,
+                durable: true,
+                autoDelete: false,
+                arguments: null, cancellationToken: cancellationToken);
+
+            var queueArgs = await DeclareDeadLetter(queueName, cancellationToken).ConfigureAwait(false);
+            if (_options?.MessageTTL is { TotalMilliseconds: > 0 } ttl)
+                queueArgs[XMessageTtl] = (int)ttl.TotalMilliseconds;
+
+            await _channel.QueueDeclareAsync(
+                queue: queueName,
+                durable: true,
+                exclusive: false,
+                autoDelete: false,
+                arguments: queueArgs.Count > 0 ? queueArgs : null,
+                cancellationToken: cancellationToken);
+
+            // Bind queue to exchange with queue name as a routing key
+            await _channel.QueueBindAsync(
+                queue: queueName,
+                exchange: exchangeName,
+                routingKey: routingKey,
+                arguments: null,
+                cancellationToken: cancellationToken);
+
+            var consumer = new AsyncEventingBasicConsumer(_channel);
+            consumer.ReceivedAsync += async (_, ea) =>
+            {
+                try
+                {
+                    var headers = ea.BasicProperties?.Headers as IReadOnlyDictionary<string, object?>
+                                  ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+
+                    ValueTask Ack() => _channel!.BasicAckAsync(ea.DeliveryTag, multiple: false,
+                        cancellationToken: cancellationToken);
+
+                    ValueTask Nack(bool requeue) => _channel!.BasicNackAsync(ea.DeliveryTag, multiple: false,
+                        requeue: requeue, cancellationToken: cancellationToken);
+
+                    queue.Enqueue(new IncomingMessage(ea.Body.ToArray(), messageType, handlerType, headers, Ack, Nack));
+                    await Task.CompletedTask;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "Failed to enqueue message for queue '{QueueName}' and type '{MessageType}'", queueName,
+                        messageType.FullName);
+                    await PublishToDeadLetterQueueAsync(queueName + ".dlq", ea.Body.ToArray(), ea.BasicProperties,
+                        cancellationToken).ConfigureAwait(false);
+                }
+            };
+
+            await _channel.BasicConsumeAsync(queue: queueName, autoAck: false, consumer: consumer,
+                cancellationToken: cancellationToken);
+            _consumers.Add(consumer);
+        }
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            while (queue.TryDequeue(out var msg))
+                yield return msg;
+
+            await Task.Delay(50, cancellationToken);
+        }
+    }
 
     private async Task<Dictionary<string, object?>> DeclareDeadLetter(string queueName,
         CancellationToken cancellationToken)
@@ -426,16 +533,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             ["x-dead-letter-routing-key"] = dlqName
         };
     }
-
-    public IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType, IReadOnlyDictionary<string, object?> Headers)> 
-        ConsumeAsync(bool autoAck = true, CancellationToken cancellationToken = default)
-    {
-        if (_queueTypeMap == null)
-            throw new InvalidOperationException(
-                "Queue/message type map is not configured for this event bus instance.");
-        return ConsumeAsync(_queueTypeMap, autoAck, cancellationToken);
-    }
-
+    
     /// <summary>
     /// Performs application-defined tasks associated with freeing, releasing, or
     /// resetting unmanaged resources asynchronously.</summary>
