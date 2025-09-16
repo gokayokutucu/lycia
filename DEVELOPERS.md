@@ -36,9 +36,10 @@ This document provides an in-depth look into the architecture, components, confi
 
 - CancellationToken flows through all handlers
 - `Context.MarkAsCancelled<T>()` updates status
-- Hooks planned:
-  - `IRetryPolicy` (Polly support pluggable)
-  - `Lycia.Scheduling` module for delayed message processing
+- Hooks finalized:
+  - `IRetryPolicy` (with Polly-based default implementation, configurable via ConfigureRetry)
+  - Supports exponential backoff, jitter, and per-exception retry strategies
+  - `Lycia.Scheduling` module for delayed message processing and extended scheduling for delayed retries
 
 ### Compensation Flow
 
@@ -51,7 +52,8 @@ This document provides an in-depth look into the architecture, components, confi
 
 ### Logging & Observability
 
-
+- **ILogger Integration**: Replaces previous Console.WriteLine usage for structured logging
+- **ISagaContextAccessor**: Provides ambient saga context access in async flows
 - **Status Tracking**: Every step has a `StepStatus`: `None`, `Started`, `Completed`, `Failed`, `Compensated`, `CompensationFailed`, `Cancelled`.  
   Transitions are strictly validated; invalid transitions (e.g., compensating an already-compensated step) are rejected.
 
@@ -98,7 +100,7 @@ A lightweight, non-persistent store ideal for unit tests or in-memory dev scenar
 
 ## 🧪 Integration Tests
 
-- `RabbitMqEventBusIntegrationTests` – verifies serialization headers
+- `RabbitMqEventBusIntegrationTests` – verifies serialization headers and Ack/Nack/DLQ behavior
 - `RedisSagaStoreIntegrationTests` – includes cancellation and TTL testing
 - `RabbitMqSagaCompensationIntegrationTests` – full compensation logic
 - `FakeSagaContext` test doubles used instead of heavy mocks
@@ -133,7 +135,7 @@ A lightweight, non-persistent store ideal for unit tests or in-memory dev scenar
 ## 🔮 Roadmap
 
 - Add support for Avro / Protobuf with Schema Registry
-- Finalize `IRetryPolicy` and `Lycia.Scheduling` module
+- Finalize `IRetryPolicy` (done) and extend `Lycia.Scheduling` module for delayed retries
 - Improve distributed tracing and observability
 - Add Outbox/Inbox pattern with persistence layer
 
@@ -156,6 +158,10 @@ Lycia enforces a consistent naming convention across store and bus implementatio
   - Routing keys use the pattern: `{applicationId}.{messageType}`
   - Headers include standardized fields such as `lycia-type`, `lycia-schema-id`, `lycia-schema-ver`
   - All events carry `CorrelationId`, `SagaId`, and `MessageId` to support distributed tracing
+
+- **Middleware Slots**
+  - Middleware interfaces such as `ILoggingSagaMiddleware` and `IRetrySagaMiddleware` exist for logging and retry logic
+  - These middleware components are replaceable to customize the pipeline
 
 ---
 
