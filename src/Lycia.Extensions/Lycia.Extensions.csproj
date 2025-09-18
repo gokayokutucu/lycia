@@ -43,8 +43,13 @@
         <LyciaMinVersion>1.17.0-beta</LyciaMinVersion> <!-- default -->
     </PropertyGroup>
 
+    <ItemGroup>
+        <InternalsVisibleTo Include="Lycia.Extensions.Scheduling.Redis" />
+    </ItemGroup>
+
     <!-- Local development: project-to-project -->
     <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' != 'true'">
+        <ProjectReference Include="..\Lycia.Scheduling\Lycia.Scheduling.csproj" PrivateAssets="All"/>
         <ProjectReference Include="..\Lycia\Lycia.csproj" PrivateAssets="All"/>
         <ProjectReference Include="..\Lycia.Saga\Lycia.Saga.csproj" PrivateAssets="All"/>
     </ItemGroup>

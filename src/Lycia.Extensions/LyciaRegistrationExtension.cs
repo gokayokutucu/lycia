@@ -320,7 +320,12 @@ public static class LyciaRegistrationExtensions
             _appIdCache = _configuration["ApplicationId"] ?? throw new InvalidOperationException("ApplicationId is not configured.");
         }
         
-        internal void SetInlineConfigure(bool enabled) => _inlineConfigureGate = enabled;
+    // --- bridge for external extensions (kept internal) ---
+    internal IServiceCollection Services => _services;
+    internal IConfiguration ConfigurationRoot => _configuration;
+    internal void ThrowIfNotInline(string method) => EnsureInlineConfigure(method);
+        
+    internal void SetInlineConfigure(bool enabled) => _inlineConfigureGate = enabled;
 
         private void EnsureInlineConfigure(string method)
         {
