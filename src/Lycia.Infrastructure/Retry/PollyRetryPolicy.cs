@@ -6,6 +6,7 @@ using IamRetryPolicy = Lycia.Infrastructure.Retry.IRetryPolicy;
 
 namespace Lycia.Infrastructure.Retry;
 
+// TODO: Take a look at LyciaRetryOptions and see if we can integrate it better with Polly's capabilities for net standard2.0
 public class PollyRetryPolicy : IamRetryPolicy
 {
     private readonly ResiliencePipeline _pipeline;

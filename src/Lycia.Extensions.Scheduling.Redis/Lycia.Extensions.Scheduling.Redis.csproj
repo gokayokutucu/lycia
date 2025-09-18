@@ -1,0 +1,28 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <AssemblyName>Lycia.Extensions.Scheduling.Redis</AssemblyName>
+        <TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
+        <LangVersion>preview</LangVersion>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.CSharp" Version="4.7.0" />
+        <PackageReference Include="Microsoft.Extensions.Configuration" Version="9.0.9" />
+        <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.9" />
+        <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="9.0.9" />
+        <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.9" />
+        <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="9.0.9" />
+        <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+        <PackageReference Include="Serilog" Version="4.3.0" />
+        <PackageReference Include="StackExchange.Redis" Version="2.8.37" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\Lycia.Extensions\Lycia.Extensions.csproj" />
+      <ProjectReference Include="..\Lycia.Scheduling\Lycia.Scheduling.csproj" />
+    </ItemGroup>
+
+</Project>

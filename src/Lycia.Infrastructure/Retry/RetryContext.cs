@@ -1,8 +1,15 @@
 namespace Lycia.Infrastructure.Retry;
 
-public sealed record RetryContext(Exception Exception, int Attempt, TimeSpan Delay)
+public sealed class RetryContext
 {
-    public Exception Exception { get; } = Exception;
-    public int Attempt { get; } = Attempt;
-    public TimeSpan Delay { get; } = Delay;
+    public Exception Exception { get; private set; }
+    public int Attempt { get; private set; }
+    public TimeSpan Delay { get; private set; }
+
+    public RetryContext(Exception exception, int attempt, TimeSpan delay)
+    {
+        Exception = exception;
+        Attempt = attempt;
+        Delay = delay;
+    }
 }

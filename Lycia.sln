@@ -30,6 +30,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Order.Choreography.C
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sample.Order.Orchestration.Seq.Consumer", "samples\Sample.Order.Orchestration.Seq.Consumer\Sample.Order.Orchestration.Seq.Consumer.csproj", "{162A2960-9663-4650-91B9-69C2CE0283E7}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Scheduling", "src\Lycia.Scheduling\Lycia.Scheduling.csproj", "{BFACE679-9E83-42F8-8EDD-5B9E1A00A972}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Extensions.Scheduling.Redis", "src\Lycia.Extensions.Scheduling.Redis\Lycia.Extensions.Scheduling.Redis.csproj", "{1F72ECEC-0949-486F-85DF-2DD23D0EC203}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -84,6 +88,14 @@ Global
 		{162A2960-9663-4650-91B9-69C2CE0283E7}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{162A2960-9663-4650-91B9-69C2CE0283E7}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{162A2960-9663-4650-91B9-69C2CE0283E7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BFACE679-9E83-42F8-8EDD-5B9E1A00A972}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BFACE679-9E83-42F8-8EDD-5B9E1A00A972}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BFACE679-9E83-42F8-8EDD-5B9E1A00A972}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BFACE679-9E83-42F8-8EDD-5B9E1A00A972}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1F72ECEC-0949-486F-85DF-2DD23D0EC203}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1F72ECEC-0949-486F-85DF-2DD23D0EC203}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1F72ECEC-0949-486F-85DF-2DD23D0EC203}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1F72ECEC-0949-486F-85DF-2DD23D0EC203}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{A0A37466-E91D-4199-ABD2-679F8A3A9731} = {BC1E10B1-10E1-456F-9496-6DA354303160}
@@ -98,5 +110,7 @@ Global
 		{9194D736-D70F-4C02-A38B-F7C0DB38788B} = {BC1E10B1-10E1-456F-9496-6DA354303160}
 		{3CEE35A8-FE87-46F7-9B38-5A6C28CE176A} = {BC1E10B1-10E1-456F-9496-6DA354303160}
 		{162A2960-9663-4650-91B9-69C2CE0283E7} = {BC1E10B1-10E1-456F-9496-6DA354303160}
+		{BFACE679-9E83-42F8-8EDD-5B9E1A00A972} = {59E39671-6EFC-4EE2-B70F-DF6955451C7C}
+		{1F72ECEC-0949-486F-85DF-2DD23D0EC203} = {59E39671-6EFC-4EE2-B70F-DF6955451C7C}
 	EndGlobalSection
 EndGlobal

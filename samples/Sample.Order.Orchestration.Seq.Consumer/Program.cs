@@ -3,6 +3,7 @@
 // https://www.apache.org/licenses/LICENSE-2.0
 using Lycia.Extensions;
 using Lycia.Extensions.Logging;
+using Lycia.Extensions.Scheduling.Redis;
 using Lycia.Saga.Exceptions;
 using Polly;
 using Serilog;
@@ -15,28 +16,40 @@ Log.Logger = new LoggerConfiguration()
     .CreateLogger();
 
 builder.Services
-    .AddLycia(builder.Configuration)
-    // .AddLycia(o=>
-    // {
-    //     o.ConfigureRetry(r =>
-    //     {
-    //         r.MaxRetryAttempts = 5;
-    //         r.BackoffType      = DelayBackoffType.Exponential;
-    //         r.Delay            = TimeSpan.FromMilliseconds(500);
-    //         r.MaxDelay         = TimeSpan.FromSeconds(10);
-    //         r.UseJitter        = true;
-    //
-    //         r.ShouldHandle = new PredicateBuilder()
-    //             .Handle<TransientSagaException>()
-    //             .Handle<TimeoutException>();
-    //     });
-    // }, builder.Configuration)
+    //.AddLycia(builder.Configuration)
+    .AddLycia(o=>
+    {
+        o.ConfigureRetry(r =>
+        {
+            r.MaxRetryAttempts = 5;
+            r.BackoffType      = DelayBackoffType.Exponential;
+            r.Delay            = TimeSpan.FromMilliseconds(500);
+            r.MaxDelay         = TimeSpan.FromSeconds(10);
+            r.UseJitter        = true;
+    
+            r.ShouldHandle = new PredicateBuilder()
+                .Handle<TransientSagaException>()
+                .Handle<TimeoutException>();
+        });
+        o.ConfigureScheduling(s =>
+        {
+                s.UseRedis()
+                .SetPollInterval(TimeSpan.FromSeconds(2))
+                .SetBatchSize(200);
+        });
+    }, builder.Configuration)
     // .AddLycia(o=>
     // {
     //     o.ConfigureEventBus(b =>
     //     {
     //         b.WithOutbox<EfCoreOutboxStore>()
     //             .WithRetryPolicy<PollyBasedRetry>();
+    //     });
+    //     o.ConfigureScheduling(s =>
+    //     {
+    //         s.UseRedis(configSection: "Lycia:Scheduling:Redis"); // connection string, appId
+    //         s.PollInterval(TimeSpan.FromSeconds(1));
+    //         s.BatchSize(100);
     //     });
     // }, builder.Configuration)
     .UseSagaMiddleware(opt =>
