@@ -9,6 +9,7 @@ public interface ILyciaContainerBuilder
 {
     ContainerBuilder Builder { get; }
     System.Configuration.Configuration? Configuration { get; }
+    LyciaOptions Options { get; }
     IDictionary<string, (Type MessageType, Type HandlerType)> QueueTypeMap { get; }
 }
 
@@ -38,7 +39,6 @@ public class LyciaContainerBuilder : ILyciaContainerBuilder
         QueueTypeMap = queueTypeMap ?? new Dictionary<string, (Type MessageType, Type HandlerType)>();
     }
 
-    public LyciaOptions Options { get; set; }
     public IDictionary<string, (Type MessageType, Type HandlerType)> QueueTypeMap { get; }
     /// <summary>
     /// Service collection of the app
@@ -48,4 +48,5 @@ public class LyciaContainerBuilder : ILyciaContainerBuilder
     /// Configurations of the app
     /// </summary>
     public System.Configuration.Configuration? Configuration { get; set; }
+    public LyciaOptions Options { get; set; }
 }

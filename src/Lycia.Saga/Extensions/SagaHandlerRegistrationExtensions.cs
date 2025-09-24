@@ -90,7 +90,11 @@ public static class SagaHandlerRegistrationExtensions
 
     public static ILyciaContainerBuilder AddSagasFromAssemblies(this ILyciaContainerBuilder builder, params Assembly[] assemblies)
     {
-        var appId = builder.Configuration?.AppSettings.Settings["ApplicationId"]?.Value ?? throw new InvalidOperationException("ApplicationId is not configured.");
+        var appId = builder.Configuration is null 
+            ? builder.Options?.ApplicationId 
+                    ?? throw new InvalidOperationException("ApplicationId is not configured.")
+            : builder.Configuration?.AppSettings.Settings["ApplicationId"]?.Value 
+                    ?? throw new InvalidOperationException("ApplicationId is not configured.");
 
         foreach (var assembly in assemblies)
         {
