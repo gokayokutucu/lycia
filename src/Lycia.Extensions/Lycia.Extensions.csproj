@@ -5,13 +5,28 @@
         <LangVersion>preview</LangVersion>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <Authors>M. Gokay Okutucu</Authors>
+        <Description>Lycia.Extensions provides pluggable modules and integrations for the Lycia Saga framework.
+            It offers ready-to-use extensions for configuration, middleware, retry, scheduling, and observability:
+            - Fluent DI registration (AddLycia with ConfigureSaga, ConfigureEventBus, ConfigureRetry, ConfigureScheduling)
+            - Built-in retry policies with Polly integration
+            - Configurable middleware slots (logging, retry, custom middlewares)
+            - Health check integration (IHealthCheck)
+            - Scheduling extensions with Redis-based storage
+
+            Keep your Saga setup modular, extensible, and production-grade. Add only the components you need.
+        </Description>
+        <Copyright>Copyright (c) 2025 M. Gokay Okutucu</Copyright>
+        <PackageProjectUrl>https://github.com/gokayokutucu/lycia</PackageProjectUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <PackageLicenseUrl>https://raw.githubusercontent.com/gokayokutucu/lycia/refs/heads/main/LICENSE</PackageLicenseUrl>
+        <RepositoryUrl>https://github.com/gokayokutucu/lycia</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PackageTags>saga distributed-transaction workflow orchestration choreography idempotency retry timeout compensation middleware rabbitmq redis microservices event-driven</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>
-        <InternalsVisibleTo Include="Lycia.Extensions.Scheduling.Redis" />
-    </ItemGroup>
-
-    <ItemGroup>
+        <PackageReference Include="Nerdbank.GitVersioning" Version="3.*" PrivateAssets="all"/>
         <PackageReference Include="Microsoft.CSharp" Version="4.7.0"/>
         <PackageReference Include="Microsoft.Extensions.Configuration" Version="9.0.9"/>
         <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.9"/>
@@ -28,7 +43,10 @@
     <ItemGroup>
         <ProjectReference Include="..\Lycia.Infrastructure\Lycia.Infrastructure.csproj"/>
         <ProjectReference Include="..\Lycia.Saga\Lycia.Saga.csproj"/>
-        <ProjectReference Include="..\Lycia.Scheduling\Lycia.Scheduling.csproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <Folder Include="Retry\"/>
     </ItemGroup>
 
 </Project>
