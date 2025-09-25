@@ -4,16 +4,16 @@
 using Newtonsoft.Json;
 using Lycia.Messaging;
 using Lycia.Messaging.Enums;
-using Lycia.Saga;
-using Lycia.Saga.Abstractions;
-using Lycia.Saga.Extensions;
-using Lycia.Saga.Helpers;
+using Lycia;
+using Lycia.Abstractions;
+using Lycia.Extensions;
+using Lycia.Helpers;
 using StackExchange.Redis;
 using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Helpers;
 using Lycia.Infrastructure.Helpers;
-using Lycia.Saga.Enums;
-using Lycia.Saga.Exceptions;
+using Lycia.Enums;
+using Lycia.Exceptions;
 
 namespace Lycia.Extensions.Stores;
 
@@ -26,7 +26,7 @@ public class RedisSagaStore(
     ISagaIdGenerator sagaIdGenerator,
     ISagaCompensationCoordinator sagaCompensationCoordinator,
     SagaStoreOptions? options)
-    : ISagaStore, Lycia.Saga.Abstractions.ISagaStoreHealthCheck
+    : ISagaStore, Lycia.Abstractions.ISagaStoreHealthCheck
 {
     private readonly SagaStoreOptions _options = options ?? new SagaStoreOptions();
 

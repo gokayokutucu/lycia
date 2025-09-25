@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
+        <LangVersion>preview</LangVersion>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <Authors>M. Gokay Okutucu</Authors>
+        <Description>Lycia is a lightweight, production-ready Saga infrastructure for .NET (netstandard2.0+).
+            It provides idempotent distributed transaction orchestration with built-in support for:
+            - Compensation flows (orchestration and choreography)
+            - SagaDispatcher with middleware pipeline
+            - Retry, cancellation, and timeout policies
+            - Redis and in-memory saga stores
+            - RabbitMQ and in-memory event bus integrations
+            - Structured logging, observability, and DLQ support
+
+            Designed for microservices and cloud-native architectures, Lycia helps you build reliable workflows and long-running transactions without boilerplate code.
+        </Description>
+        <Copyright>Copyright (c) 2025 M. Gokay Okutucu</Copyright>
+        <PackageProjectUrl>https://github.com/gokayokutucu/lycia</PackageProjectUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <RepositoryUrl>https://github.com/gokayokutucu/lycia</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PackageTags>saga distributed-transaction workflow orchestration choreography idempotency retry timeout compensation middleware rabbitmq redis microservices event-driven</PackageTags>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Lycia.Messaging\Lycia.Messaging.csproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Nerdbank.GitVersioning" Version="3.*" PrivateAssets="all"/>
+        <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="9.0.9"/>
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.9"/>
+        <PackageReference Include="Microsoft.Extensions.Options" Version="9.0.9"/>
+        <PackageReference Include="Newtonsoft.Json" Version="13.0.3"/>
+        <PackageReference Include="Scrutor" Version="6.0.1"/>
+        <PackageReference Include="System.Configuration.ConfigurationManager" Version="9.0.9"/>
+    </ItemGroup>
+
+</Project>

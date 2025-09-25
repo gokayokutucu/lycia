@@ -2,7 +2,7 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Messaging", "src\Lycia.Messaging\Lycia.Messaging.csproj", "{BD73C6EC-E726-4B73-9F7B-F10E06B2D6C3}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Saga", "src\Lycia.Saga\Lycia.Saga.csproj", "{A49DCEDA-15C8-410A-9ECD-229644DE5559}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia", "src\Lycia\Lycia.csproj", "{A49DCEDA-15C8-410A-9ECD-229644DE5559}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Infrastructure", "src\Lycia.Infrastructure\Lycia.Infrastructure.csproj", "{C57C60D9-A8CC-4055-A8F3-D4DBB13156B4}"
 EndProject

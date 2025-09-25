@@ -1,4 +1,4 @@
-using Lycia.Saga.Abstractions;
+using Lycia.Abstractions;
 using Microsoft.Extensions.Options;
 
 namespace Lycia.Extensions.Eventing.Outbox;
