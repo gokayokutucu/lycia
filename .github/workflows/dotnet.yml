@@ -1,0 +1,60 @@
+name: Publish NuGet
+
+on:
+  push:
+    branches: [ main ]         # pre-release (beta) packs
+    tags: [ 'v*' ]             # stable tag → for stable packs
+    paths:
+      - 'src/**'
+      - '**/*.csproj'
+      - '**/*.props'
+      - '**/*.targets'
+      - 'version.json'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (full history + tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # It is for NB.GV {height} and tags
+          fetch-tags: true
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            9.0.x
+            8.0.x
+            6.0.x
+
+      - name: Restore
+        run: dotnet restore Lycia.sln
+
+      - name: Build (Release)
+        run: dotnet build Lycia.sln -c Release --no-restore
+
+      # Write log for nbvg
+      - name: Show computed version (optional)
+        run: |
+          dotnet tool install -g nbgv || true
+          nbgv get-version
+
+      # ---- Pack each public package explicitly ----
+      - name: Pack Lycia.Saga
+        run: dotnet pack src/Lycia.Saga/Lycia.Saga.csproj -c Release -o ./nupkgs
+        # not: we don't use --no-build at all → NB.GV pack target should run
+
+      - name: Pack Lycia.Extensions
+        run: dotnet pack src/Lycia.Extensions/Lycia.Extensions.csproj -c Release -o ./nupkgs
+
+      # (For upcoming extensions)
+      # - name: Pack Lycia.Scheduling
+      #   run: dotnet pack src/Lycia.Scheduling/Lycia.Scheduling.csproj -c Release -o ./nupkgs
+      # - name: Pack Lycia.Extensions.Scheduling.Redis
+      #   run: dotnet pack src/Lycia.Extensions.Scheduling.Redis/Lycia.Extensions.Scheduling.Redis.csproj -c Release -o ./nupkgs
+
+      - name: Publish to NuGet.org
+        run: dotnet nuget push "nupkgs/*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ secrets.NUGET_API_KEY }}" --skip-duplicate
