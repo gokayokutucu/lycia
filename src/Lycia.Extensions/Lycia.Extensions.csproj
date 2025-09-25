@@ -41,7 +41,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Lycia.Infrastructure\Lycia.Infrastructure.csproj"/>
-        <ProjectReference Include="..\Lycia.Saga\Lycia.Saga.csproj"/>
+        <ProjectReference Include="..\Lycia\Lycia.csproj" />
     </ItemGroup>
 
     <ItemGroup>

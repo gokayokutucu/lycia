@@ -25,7 +25,7 @@
 
     <ItemGroup>
       <ProjectReference Include="..\..\src\Lycia.Extensions\Lycia.Extensions.csproj" />
-      <ProjectReference Include="..\..\src\Lycia.Saga\Lycia.Saga.csproj" />
+      <ProjectReference Include="..\..\src\Lycia\Lycia.csproj" />
       <ProjectReference Include="..\Lycia.Tests.Helpers\Lycia.Tests.Helpers.csproj" />
       <ProjectReference Include="..\Lycia.Tests\Lycia.Tests.csproj" />
     </ItemGroup>

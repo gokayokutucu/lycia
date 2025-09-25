@@ -19,7 +19,7 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\..\src\Lycia.Saga\Lycia.Saga.csproj" />
+      <ProjectReference Include="..\..\src\Lycia\Lycia.csproj" />
     </ItemGroup>
 
 </Project>
