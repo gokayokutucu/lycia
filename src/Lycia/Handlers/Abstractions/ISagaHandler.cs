@@ -1,0 +1,23 @@
+// Copyright 2023 Lycia Contributors
+// Licensed under the Apache License, Version 2.0
+// https://www.apache.org/licenses/LICENSE-2.0
+
+using Lycia.Abstractions;
+using Lycia.Configurations;
+using Lycia.Messaging;
+using Microsoft.Extensions.Options;
+
+namespace Lycia.Handlers.Abstractions;
+
+public interface ISagaHandler<TMessage> 
+    where TMessage : IMessage
+{
+    void Initialize(ISagaContext<IMessage> context, IOptions<SagaOptions> sagaOptions);
+}
+
+public interface ISagaHandler<TMessage, TSagaData> 
+    where TMessage: IMessage
+    where TSagaData : SagaData
+{
+    void Initialize(ISagaContext<IMessage, TSagaData> context, IOptions<SagaOptions> sagaOptions);
+}

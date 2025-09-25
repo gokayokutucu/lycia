@@ -1,5 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
-using Lycia.Saga.Middleware;
+using Lycia.Middleware;
 
 namespace Lycia.Infrastructure.Middleware;
 
