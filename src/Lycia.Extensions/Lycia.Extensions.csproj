@@ -1,33 +1,52 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
-    <LangVersion>preview</LangVersion>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
+    <PropertyGroup>
+        <TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
+        <LangVersion>preview</LangVersion>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <Authors>M. Gokay Okutucu</Authors>
+        <Description>Lycia.Extensions provides pluggable modules and integrations for the Lycia Saga framework.
+            It offers ready-to-use extensions for configuration, middleware, retry, scheduling, and observability:
+            - Fluent DI registration (AddLycia with ConfigureSaga, ConfigureEventBus, ConfigureRetry, ConfigureScheduling)
+            - Built-in retry policies with Polly integration
+            - Configurable middleware slots (logging, retry, custom middlewares)
+            - Health check integration (IHealthCheck)
+            - Scheduling extensions with Redis-based storage
 
-  <ItemGroup>
-    <PackageReference Include="Microsoft.CSharp" Version="4.7.0" />
-    <PackageReference Include="Microsoft.Extensions.Configuration" Version="9.0.9" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.9" />
-    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="9.0.9" />
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.9" />
-    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="9.0.9" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-    <PackageReference Include="Polly" Version="8.6.3" />
-    <PackageReference Include="RabbitMQ.Client" Version="7.1.2" />
-    <PackageReference Include="Serilog" Version="4.3.0" />
-    <PackageReference Include="StackExchange.Redis" Version="2.8.37" />
-  </ItemGroup>
+            Keep your Saga setup modular, extensible, and production-grade. Add only the components you need.
+        </Description>
+        <Copyright>Copyright (c) 2025 M. Gokay Okutucu</Copyright>
+        <PackageProjectUrl>https://github.com/gokayokutucu/lycia</PackageProjectUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <PackageLicenseUrl>https://raw.githubusercontent.com/gokayokutucu/lycia/refs/heads/main/LICENSE</PackageLicenseUrl>
+        <RepositoryUrl>https://github.com/gokayokutucu/lycia</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PackageTags>saga distributed-transaction workflow orchestration choreography idempotency retry timeout compensation middleware rabbitmq redis microservices event-driven</PackageTags>
+    </PropertyGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\Lycia.Infrastructure\Lycia.Infrastructure.csproj" />
-    <ProjectReference Include="..\Lycia.Saga\Lycia.Saga.csproj" />
-  </ItemGroup>
+    <ItemGroup>
+        <PackageReference Include="Nerdbank.GitVersioning" Version="3.*" PrivateAssets="all"/>
+        <PackageReference Include="Microsoft.CSharp" Version="4.7.0"/>
+        <PackageReference Include="Microsoft.Extensions.Configuration" Version="9.0.9"/>
+        <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.9"/>
+        <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="9.0.9"/>
+        <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.9"/>
+        <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="9.0.9"/>
+        <PackageReference Include="Newtonsoft.Json" Version="13.0.3"/>
+        <PackageReference Include="Polly" Version="8.6.3"/>
+        <PackageReference Include="RabbitMQ.Client" Version="7.1.2"/>
+        <PackageReference Include="Serilog" Version="4.3.0"/>
+        <PackageReference Include="StackExchange.Redis" Version="2.8.37"/>
+    </ItemGroup>
 
-  <ItemGroup>
-    <Folder Include="Retry\" />
-  </ItemGroup>
+    <ItemGroup>
+        <ProjectReference Include="..\Lycia.Infrastructure\Lycia.Infrastructure.csproj"/>
+        <ProjectReference Include="..\Lycia.Saga\Lycia.Saga.csproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <Folder Include="Retry\"/>
+    </ItemGroup>
 
 </Project>
