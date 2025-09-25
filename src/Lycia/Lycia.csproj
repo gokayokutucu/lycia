@@ -18,6 +18,7 @@
             Designed for microservices and cloud-native architectures, Lycia helps you build reliable workflows and long-running transactions without boilerplate code.
         </Description>
         <Copyright>Copyright (c) 2025 M. Gokay Okutucu</Copyright>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
         <PackageProjectUrl>https://github.com/gokayokutucu/lycia</PackageProjectUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <RepositoryUrl>https://github.com/gokayokutucu/lycia</RepositoryUrl>
@@ -37,6 +38,10 @@
         <PackageReference Include="Newtonsoft.Json" Version="13.0.3"/>
         <PackageReference Include="Scrutor" Version="6.0.1"/>
         <PackageReference Include="System.Configuration.ConfigurationManager" Version="9.0.9"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="..\..\README.md" Pack="true" PackagePath="" />
     </ItemGroup>
 
 </Project>
