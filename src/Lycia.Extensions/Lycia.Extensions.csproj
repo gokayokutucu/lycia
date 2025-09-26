@@ -2,10 +2,10 @@
 
 	<PropertyGroup>
 		<TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
-		<GenerateReferenceAssembly>false</GenerateReferenceAssembly>
+		<LangVersion>preview</LangVersion>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
-		<LangVersion>preview</LangVersion>
+		<GenerateReferenceAssembly>false</GenerateReferenceAssembly>
 
 		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 		<PackageId>Lycia.Extensions</PackageId>
@@ -28,58 +28,68 @@
 		  Condition="Exists('%(Identity)')" />
 	</Target>
 
-
-	<!-- netstandard2.0 -->
-	<ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
-		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-		<PackageReference Include="RabbitMQ.Client" Version="6.2.1" />
-		<PackageReference Include="StackExchange.Redis" Version="2.0.601" />
-		<PackageReference Include="Pipelines.Sockets.Unofficial" Version="2.2.8" />
-		<PackageReference Include="System.IO.Pipelines" Version="5.0.1" />
-		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="6.0.0" />
-		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="6.0.0" />
-		<PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="6.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Primitives" Version="6.0.0" />
-		<PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="6.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="6.0.0" />
-	</ItemGroup>
-
-	<!-- net8.0 -->
-	<ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
-		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-		<PackageReference Include="RabbitMQ.Client" Version="7.1.2" />
-		<PackageReference Include="StackExchange.Redis" Version="2.8.41" />
-		<PackageReference Include="Pipelines.Sockets.Unofficial" Version="2.2.8" />
-		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
-		<PackageReference Include="System.IO.Pipelines" Version="8.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Primitives" Version="8.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
-	</ItemGroup>
-
-	<!-- net9.0 (preview) -->
-	<ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
-		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-		<PackageReference Include="RabbitMQ.Client" Version="7.1.2" />
-		<PackageReference Include="StackExchange.Redis" Version="2.8.41" />
-		<PackageReference Include="Pipelines.Sockets.Unofficial" Version="2.2.8" />
-		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
-		<PackageReference Include="System.IO.Pipelines" Version="8.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Primitives" Version="8.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
-	</ItemGroup>
 	<ItemGroup>
-		<PackageReference Include="Autofac" Version="7.1.0" />
-		<PackageReference Include="Autofac.Extensions.DependencyInjection" Version="8.0.0" />
-		<PackageReference Include="Autofac.WebApi2" Version="6.1.1" />
-		<PackageReference Include="Microsoft.CSharp" Version="4.7.0" />
+		<Folder Include="Retry\" />
 	</ItemGroup>
-
 	<ItemGroup>
 		<ProjectReference Include="..\Lycia.Infrastructure\Lycia.Infrastructure.csproj" />
 		<ProjectReference Include="..\Lycia.Saga\Lycia.Saga.csproj" />
 	</ItemGroup>
 
+
+	<!-- netstandard2.0 -->
+	<ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+		<PackageReference Include="RabbitMQ.Client" Version="6.2.1" />
+		<PackageReference Include="StackExchange.Redis" Version="2.0.601" />
+		<PackageReference Include="System.IO.Pipelines" Version="5.0.1" />
+		<PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.0.0" />
+		<PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="6.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Configuration" Version="6.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="6.0.0" />
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="6.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="6.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Logging" Version="6.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="6.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="6.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Primitives" Version="6.0.0" />
+	</ItemGroup>
+
+	<!-- net8.0 -->
+	<ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
+		<PackageReference Include="RabbitMQ.Client" Version="7.1.2" />
+		<PackageReference Include="StackExchange.Redis" Version="2.8.41" />
+		<PackageReference Include="System.IO.Pipelines" Version="8.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.0.0" />
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+		<PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="8.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Primitives" Version="8.0.0" />
+	</ItemGroup>
+
+	<!-- net9.0 (preview) -->
+	<ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
+		<PackageReference Include="RabbitMQ.Client" Version="7.1.2" />
+		<PackageReference Include="StackExchange.Redis" Version="2.8.41" />
+		<PackageReference Include="System.IO.Pipelines" Version="9.0.9" />
+		<PackageReference Include="Microsoft.Extensions.Configuration" Version="9.0.9" />
+		<PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.9" />
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.9" />
+		<PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="9.0.9" />
+		<PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.9" />
+		<PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="9.0.9" />
+		<PackageReference Include="Microsoft.Extensions.Primitives" Version="9.0.9" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Autofac" Version="7.1.0" />
+		<PackageReference Include="Autofac.Extensions.DependencyInjection" Version="8.0.0" />
+		<PackageReference Include="Autofac.WebApi2" Version="6.1.1" />
+		<PackageReference Include="Microsoft.CSharp" Version="4.7.0" />
+		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+		<PackageReference Include="Pipelines.Sockets.Unofficial" Version="2.2.8" />
+		<PackageReference Include="Polly" Version="8.6.3" />
+		<PackageReference Include="Serilog" Version="4.3.0" />
+	</ItemGroup>
 </Project>

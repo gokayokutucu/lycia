@@ -1,4 +1,6 @@
-using System.Text.Json;
+// Copyright 2023 Lycia Contributors
+// Licensed under the Apache License, Version 2.0
+// https://www.apache.org/licenses/LICENSE-2.0
 using FluentAssertions;
 using StackExchange.Redis;
 using Testcontainers.RabbitMq;
@@ -6,6 +8,7 @@ using Testcontainers.Redis;
 using Lycia.Messaging;
 using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Eventing;
+using Lycia.Extensions.Serialization;
 using Lycia.Extensions.Stores;
 using Lycia.Infrastructure.Compensating;
 using Lycia.Infrastructure.Dispatching;
@@ -14,6 +17,7 @@ using Lycia.Saga;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Handlers;
 using Lycia.Saga.Handlers.Abstractions;
+using Lycia.Saga.Helpers;
 using Lycia.Tests.Helpers;
 using Lycia.Tests.Messages;
 using Microsoft.Extensions.DependencyInjection;
@@ -60,7 +64,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
     public async Task CompensationChain_Should_Be_Idempotent_For_Multiple_Compensation_Attempts()
     {
         // Arrange: Setup saga chain handlers (grandparent -> parent -> child)
-        var applicationId = "TestApp";
+        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTests)}:{nameof(SagaChain_Should_Compensate_On_Failure)}:{Guid.NewGuid():N}";
         var handlerTypeGrandparent = typeof(GrandparentCompensationSagaHandler);
         var handlerTypeParent = typeof(ParentCompensationSagaHandler);
         var handlerTypeChild = typeof(ChildCompensationSagaHandler);
@@ -93,10 +97,18 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
             { parentQueueName, (typeof(DummyParentEvent), typeof(ParentCompensationSagaHandler)) },
             { childQueueName, (typeof(DummyChildEvent), typeof(ChildCompensationSagaHandler)) },
         };
+        var serializer = new NewtonsoftJsonMessageSerializer();
         var eventBusOptions = new EventBusOptions
-            { ApplicationId = applicationId, MessageTTL = TimeSpan.FromSeconds(10) };
-        var eventBus = await RabbitMqEventBus.CreateAsync(RabbitMqConnectionString,
-            NullLogger<RabbitMqEventBus>.Instance, queueTypeMap, eventBusOptions);
+        {
+            ApplicationId = applicationId, 
+            MessageTTL = TimeSpan.FromSeconds(10),
+            ConnectionString = this.RabbitMqConnectionString
+        };
+        var eventBus = await RabbitMqEventBus.CreateAsync(
+            NullLogger<RabbitMqEventBus>.Instance,
+            queueTypeMap,
+            eventBusOptions,
+            serializer);
 
         var redis = await ConnectionMultiplexer.ConnectAsync(RedisEndpoint);
         var redisDb = redis.GetDatabase();
@@ -113,15 +125,19 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         services.AddSingleton<GrandparentCompensationSagaHandler>();
         services.AddSingleton<ParentCompensationSagaHandler>();
         services.AddSingleton<ChildCompensationSagaHandler>();
-
+        services.AddSingleton<IMessageSerializer>(serializer);
         services.AddSingleton<IEventBus>(eventBus);
         services.AddSingleton<ISagaCompensationCoordinator>(sp =>
-            new SagaCompensationCoordinator(sp, dummySagaIdGenerator));
+            new SagaCompensationCoordinator(sp, dummySagaIdGenerator, serializer));
         services.AddSingleton<ISagaStore>(sp =>
             new RedisSagaStore(redisDb, eventBus, dummySagaIdGenerator,
                 sp.GetRequiredService<ISagaCompensationCoordinator>(), sagaStoreOptions));
         services.AddSingleton<ISagaDispatcher>(sp =>
-            new SagaDispatcher(sp.GetRequiredService<ISagaStore>(), dummySagaIdGenerator, sp));
+            new SagaDispatcher(
+                sp.GetRequiredService<ISagaStore>(),
+                dummySagaIdGenerator,
+                sp,
+                NullLogger<SagaDispatcher>.Instance));
 
         var serviceProvider = services.BuildServiceProvider();
 
@@ -180,7 +196,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
     public async Task CompensationChain_Should_Halt_If_Child_Is_CompensationFailed()
     {
         // Arrange: Setup saga chain handlers (grandparent -> parent -> child)
-        var applicationId = "TestApp";
+        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTests)}:{nameof(SagaChain_Should_Compensate_On_Failure)}:{Guid.NewGuid():N}";
         var handlerTypeGrandparent = typeof(GrandparentCompensationSagaHandler);
         var handlerTypeParent = typeof(ParentCompensationSagaHandler);
         var handlerTypeChild = typeof(ChildCompensationSagaHandler);
@@ -218,11 +234,18 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
             { parentQueueName, (typeof(DummyParentEvent), typeof(ParentCompensationSagaHandler)) },
             { childQueueName, (typeof(DummyChildEvent), typeof(ChildCompensationSagaHandler)) },
         };
-        
+        var serializer = new NewtonsoftJsonMessageSerializer();
         var eventBusOptions = new EventBusOptions
-            { ApplicationId = applicationId, MessageTTL = TimeSpan.FromSeconds(10) };
-        var eventBus = await RabbitMqEventBus.CreateAsync(RabbitMqConnectionString,
-            NullLogger<RabbitMqEventBus>.Instance, queueTypeMap, eventBusOptions);
+        {
+            ApplicationId = applicationId, 
+            MessageTTL = TimeSpan.FromSeconds(10),
+            ConnectionString = RabbitMqConnectionString
+        };
+        var eventBus = await RabbitMqEventBus.CreateAsync(
+            NullLogger<RabbitMqEventBus>.Instance,
+            queueTypeMap,
+            eventBusOptions,
+            serializer);
 
         var redis = await ConnectionMultiplexer.ConnectAsync(RedisEndpoint);
         var redisDb = redis.GetDatabase();
@@ -239,16 +262,19 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         services.AddSingleton<GrandparentCompensationSagaHandler>();
         services.AddSingleton<ParentCompensationSagaHandler>();
         services.AddSingleton<ChildCompensationSagaHandler>();
-
+        services.AddSingleton<IMessageSerializer>(serializer);
         services.AddSingleton<IEventBus>(eventBus);
         services.AddSingleton<ISagaCompensationCoordinator>(sp =>
-            new SagaCompensationCoordinator(sp, dummySagaIdGenerator));
+            new SagaCompensationCoordinator(sp, dummySagaIdGenerator, serializer));
         services.AddSingleton<ISagaStore>(sp =>
             new RedisSagaStore(redisDb, eventBus, dummySagaIdGenerator,
                 sp.GetRequiredService<ISagaCompensationCoordinator>(), sagaStoreOptions));
-
         services.AddSingleton<ISagaDispatcher>(sp =>
-            new SagaDispatcher(sp.GetRequiredService<ISagaStore>(), dummySagaIdGenerator, sp));
+            new SagaDispatcher(
+                sp.GetRequiredService<ISagaStore>(),
+                dummySagaIdGenerator,
+                sp,
+                NullLogger<SagaDispatcher>.Instance));
 
 
         var serviceProvider = services.BuildServiceProvider();
@@ -292,10 +318,12 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
     public async Task CompensationChain_Should_Recursively_Compensate_Parent_And_Grandparent_When_Child_Is_Compensated()
     {
         // Arrange: Setup saga chain handlers (grandparent -> parent -> child)
-        var applicationId = "TestApp";
+        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTests)}:{nameof(SagaChain_Should_Compensate_On_Failure)}:{Guid.NewGuid():N}";
         var handlerTypeGrandparent = typeof(GrandparentCompensationSagaHandler);
         var handlerTypeParent = typeof(ParentCompensationSagaHandler);
         var handlerTypeChild = typeof(ChildCompensationSagaHandler);
+        
+        var serializer = new NewtonsoftJsonMessageSerializer();
 
         // Unique IDs for saga and each step
         var sagaId = Guid.NewGuid();
@@ -330,9 +358,14 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
             { childQueueName, (typeof(DummyChildEvent), typeof(ChildCompensationSagaHandler)) },
         };
         var eventBusOptions = new EventBusOptions
-            { ApplicationId = applicationId, MessageTTL = TimeSpan.FromSeconds(10) };
-        var eventBus = await RabbitMqEventBus.CreateAsync(RabbitMqConnectionString,
-            NullLogger<RabbitMqEventBus>.Instance, queueTypeMap, eventBusOptions);
+        {
+            
+            ApplicationId = applicationId, 
+            MessageTTL = TimeSpan.FromSeconds(10),
+            ConnectionString = RabbitMqConnectionString
+        };
+        var eventBus = await RabbitMqEventBus.CreateAsync(
+            NullLogger<RabbitMqEventBus>.Instance, queueTypeMap, eventBusOptions, serializer);
 
         var redis = await ConnectionMultiplexer.ConnectAsync(RedisEndpoint);
         var redisDb = redis.GetDatabase();
@@ -352,13 +385,17 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
 
         services.AddSingleton<IEventBus>(eventBus);
         services.AddSingleton<ISagaCompensationCoordinator>(sp =>
-            new SagaCompensationCoordinator(sp, dummySagaIdGenerator));
+            new SagaCompensationCoordinator(sp, dummySagaIdGenerator, serializer));
         services.AddSingleton<ISagaStore>(sp =>
             new RedisSagaStore(redisDb, eventBus, dummySagaIdGenerator,
                 sp.GetRequiredService<ISagaCompensationCoordinator>(), sagaStoreOptions));
 
         services.AddSingleton<ISagaDispatcher>(sp =>
-            new SagaDispatcher(sp.GetRequiredService<ISagaStore>(), dummySagaIdGenerator, sp));
+            new SagaDispatcher(
+                sp.GetRequiredService<ISagaStore>(),
+                dummySagaIdGenerator,
+                sp,
+                NullLogger<SagaDispatcher>.Instance));
 
         var serviceProvider = services.BuildServiceProvider();
 
@@ -411,7 +448,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         CompensationChain_Should_Recursively_Compensate_Parent_And_Grandparent_When_Steps_Are_Compensated()
     {
         // Arrange: Setup the saga chain with grandparent -> parent -> child handlers.
-        var applicationId = "TestApp";
+        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTests)}:{nameof(SagaChain_Should_Compensate_On_Failure)}:{Guid.NewGuid():N}";
         var handlerTypeGrandparent = typeof(GrandparentCompensationHandler);
         var handlerTypeParent = typeof(ParentCompensationHandler);
         var handlerTypeChild = typeof(ChildCompensationHandler);
@@ -433,10 +470,15 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         var queueName =
             Saga.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyEvent), handlerTypeChild, applicationId);
         var queueTypeMap = new Dictionary<string, (Type, Type)> { { queueName, (typeof(DummyEvent), typeof(ChildCompensationHandler)) } };
+        var serializer = new NewtonsoftJsonMessageSerializer();
         var eventBusOptions = new EventBusOptions
-            { ApplicationId = applicationId, MessageTTL = TimeSpan.FromSeconds(10) };
+        {
+            ApplicationId = applicationId, 
+            MessageTTL = TimeSpan.FromSeconds(10),
+            ConnectionString = RabbitMqConnectionString
+        };
         var eventBus = await RabbitMqEventBus.CreateAsync(
-            RabbitMqConnectionString, NullLogger<RabbitMqEventBus>.Instance, queueTypeMap, eventBusOptions);
+            NullLogger<RabbitMqEventBus>.Instance, queueTypeMap, eventBusOptions, serializer);
 
         var redis = await ConnectionMultiplexer.ConnectAsync(RedisEndpoint);
         var redisDb = redis.GetDatabase();
@@ -453,10 +495,10 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         services.AddSingleton<ISagaCompensationHandler<DummyEvent>, GrandparentCompensationHandler>();
         services.AddSingleton<ISagaCompensationHandler<DummyEvent>, ParentCompensationHandler>();
         services.AddSingleton<ISagaCompensationHandler<DummyEvent>, ChildCompensationHandler>();
-
+        services.AddSingleton<IMessageSerializer>(serializer);
         services.AddSingleton<IEventBus>(eventBus);
         services.AddSingleton<ISagaCompensationCoordinator>(sp =>
-            new SagaCompensationCoordinator(sp, dummySagaIdGenerator));
+            new SagaCompensationCoordinator(sp, dummySagaIdGenerator, serializer));
         services.AddSingleton<ISagaStore>(sp =>
             new RedisSagaStore(redisDb, eventBus, dummySagaIdGenerator,
                 sp.GetRequiredService<ISagaCompensationCoordinator>(), sagaStoreOptions));
@@ -500,20 +542,25 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
     public async Task SagaChain_Should_Compensate_On_Failure()
     {
         // Arrange: Set up EventBus and Redis-backed SagaStore
-        var applicationId = "TestApp";
+        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTests)}:{nameof(SagaChain_Should_Compensate_On_Failure)}:{Guid.NewGuid():N}";
         var handlerType = typeof(FailingSagaHandler);
 
         var queueName =
             Saga.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(TestSagaCommand), handlerType, applicationId);
         var queueTypeMap = new Dictionary<string, (Type, Type)> { { queueName, (typeof(TestSagaCommand), typeof(FailingSagaHandler)) } };
         var eventBusOptions = new EventBusOptions
-            { ApplicationId = applicationId, MessageTTL = TimeSpan.FromSeconds(30) };
+        {
+            ApplicationId = applicationId, 
+            MessageTTL = TimeSpan.FromSeconds(30),
+            ConnectionString = RabbitMqConnectionString
+        };
 
+        var serializer = new NewtonsoftJsonMessageSerializer();
         var eventBus = await RabbitMqEventBus.CreateAsync(
-            RabbitMqConnectionString,
             NullLogger<RabbitMqEventBus>.Instance,
             queueTypeMap,
-            eventBusOptions);
+            eventBusOptions,
+            serializer);
 
         // Set up Redis connection and store
         var redis = await ConnectionMultiplexer.ConnectAsync(RedisEndpoint);
@@ -550,9 +597,11 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         {
             try
             {
-                await foreach (var (body, messageType, _) in eventBus.ConsumeAsync(cancellationToken: cts.Token))
+                await foreach (var (body, messageType, _, headers) in eventBus.ConsumeAsync(cancellationToken: cts.Token))
                 {
-                    if (JsonSerializer.Deserialize(body, messageType) is not TestSagaCommand msg) continue;
+                    var (_, serCtx) = serializer.CreateContextFor(messageType);
+                    var normalized = serializer.NormalizeTransportHeaders(headers);
+                    if (serializer.Deserialize(body, normalized, serCtx) is not TestSagaCommand msg) continue;
                     receivedMessages.Add(msg);
 
                     // Log step as Failed on exception

@@ -1,6 +1,11 @@
+// Copyright 2023 Lycia Contributors
+// Licensed under the Apache License, Version 2.0
+// https://www.apache.org/licenses/LICENSE-2.0
 // For Lazy<T>
 
+#if NET8_0_OR_GREATER
 using Lycia.Messaging;
+using Lycia.Saga;
 using Lycia.Saga.Abstractions; // ISagaDispatcher is likely here or in Lycia.Infrastructure.Abstractions
 
 namespace Lycia.Infrastructure.Eventing;
@@ -26,8 +31,14 @@ public class InMemoryEventBus(Lazy<ISagaDispatcher> sagaDispatcherLazy) : IEvent
         return sagaDispatcherLazy.Value.DispatchAsync(@event, handlerType, sagaId, cancellationToken);
     }
 
-    public IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType)> ConsumeAsync(bool autoAck = true, CancellationToken cancellationToken = default)
+    public IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType, IReadOnlyDictionary<string, object?> Headers)> ConsumeAsync(bool autoAck = true, CancellationToken cancellationToken = default)
     {
         throw new NotImplementedException();
     }
-}
+
+    public IAsyncEnumerable<IncomingMessage> ConsumeWithAckAsync(CancellationToken cancellationToken = default)
+    {
+        throw new NotImplementedException();
+    }
+} 
+#endif

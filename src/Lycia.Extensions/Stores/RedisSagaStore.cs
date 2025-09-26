@@ -1,4 +1,7 @@
-﻿using Newtonsoft.Json;
+﻿// Copyright 2023 Lycia Contributors
+// Licensed under the Apache License, Version 2.0
+// https://www.apache.org/licenses/LICENSE-2.0
+using Newtonsoft.Json;
 using Lycia.Messaging;
 using Lycia.Messaging.Enums;
 using Lycia.Saga;
@@ -23,7 +26,7 @@ public class RedisSagaStore(
     ISagaIdGenerator sagaIdGenerator,
     ISagaCompensationCoordinator sagaCompensationCoordinator,
     SagaStoreOptions? options)
-    : ISagaStore
+    : ISagaStore, Lycia.Saga.Abstractions.ISagaStoreHealthCheck
 {
     private readonly SagaStoreOptions _options = options ?? new SagaStoreOptions();
 
@@ -320,4 +323,17 @@ public class RedisSagaStore(
         => !string.IsNullOrWhiteSpace(_options.ApplicationId)
             ? _options.ApplicationId
             : throw new InvalidOperationException("ApplicationId is required");
+
+    public async Task<bool> PingAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await redisDb.PingAsync();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 }

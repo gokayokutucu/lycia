@@ -2,20 +2,14 @@
 using Autofac.Extensions.DependencyInjection;
 using Autofac.Integration.WebApi;
 using Lycia.Extensions;
-using Lycia.Saga.Abstractions;
-using Lycia.Saga.Extensions;
+using Lycia.Extensions.Logging;
+using Lycia.Infrastructure.Middleware;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using System.Configuration;
-using System.Linq;
+using System;
 using System.Reflection;
 using System.Web.Http;
-using System.Web.Mvc;
-using System.Web.Optimization;
 using System.Web.Routing;
-using ConfigurationBuilder = Microsoft.Extensions.Configuration.ConfigurationBuilder;
-using ConfigurationManager = System.Configuration.ConfigurationManager;
 
 namespace Sample_Net48.Order.Choreography.Api
 {
@@ -23,19 +17,46 @@ namespace Sample_Net48.Order.Choreography.Api
     {
         protected void Application_Start()
         {
-            var services = new ServiceCollection();
-            services.AddLogging(b => b.AddDebug().SetMinimumLevel(LogLevel.Debug));
+            var basePath = AppDomain.CurrentDomain.BaseDirectory;
+            var env = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "stage";
 
-            var serviceProvider = services.BuildServiceProvider();
+            var configuration = new ConfigurationBuilder()
+                .SetBasePath(basePath)
+                .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+                .AddJsonFile($"appsettings.{env.ToLower()}.json", optional: true, reloadOnChange: true)
+                .AddEnvironmentVariables()
+                .Build();
 
             var builder = new ContainerBuilder();
-            builder.RegisterApiControllers(Assembly.GetExecutingAssembly());
-            builder.Populate(services);
 
-            var config = System.Web.Configuration.WebConfigurationManager.OpenWebConfiguration("~");
+            var asm = Assembly.GetExecutingAssembly();
+            builder.RegisterApiControllers(asm);
+            builder.RegisterWebApiFilterProvider(GlobalConfiguration.Configuration);
+            builder.RegisterWebApiModelBinderProvider();
 
-            builder.AddLycia(config)
-                .AddSagasFromCurrentAssembly();
+            builder.RegisterInstance(configuration).As<IConfiguration>().SingleInstance();
+
+            var loggerFactory = LoggerFactory.Create(b =>
+            {
+                b.AddDebug();
+                b.SetMinimumLevel(LogLevel.Debug);
+            });
+            builder.RegisterInstance(loggerFactory).As<ILoggerFactory>().SingleInstance();
+            builder.RegisterGeneric(typeof(Logger<>)).As(typeof(ILogger<>)).SingleInstance();
+
+            builder
+                .AddLycia(configuration)
+                .UseSagaMiddleware(opt =>
+                {
+                    opt.AddMiddleware<SerilogLoggingMiddleware>();
+                    opt.AddMiddleware<RetryMiddleware>();
+                })
+                .AddSagasFromCurrentAssembly()
+                .Build();
+
+            //builder.Register(ctx => new AutofacServiceProvider(ctx.Resolve<ILifetimeScope>()))
+            //   .As<IServiceProvider>()
+            //   .InstancePerLifetimeScope();
 
             var container = builder.Build();
 

@@ -1,5 +1,6 @@
 using Autofac.Core;
 using Lycia.Extensions;
+using Lycia.Extensions.Logging;
 using Lycia.Saga.Extensions;
 using Microsoft.EntityFrameworkCore;
 using Sample_Net90.Choreography.Api.EndPoints;
@@ -24,10 +25,16 @@ public class Program
 
         builder.Services.AddInfrastructureServices(builder.Configuration);
         builder.Services.AddApplicationServices(builder.Configuration);
-        //builder.Services
-        //    .AddLycia(builder.Configuration)
-        //    .AddSagasFromCurrentAssembly()
-        //    ;
+        builder.Services
+            .AddLycia(builder.Configuration)
+            .UseSagaMiddleware(opt =>
+            {
+                opt.AddMiddleware<SerilogLoggingMiddleware>();
+                //opt.AddMiddleware<RetryMiddleware>();
+            })
+            .AddSagasFromCurrentAssembly()
+            .Build();
+
 
         var app = builder.Build();
 
@@ -35,7 +42,7 @@ public class Program
         {
             var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             dbContext.Database.Migrate();
-            dbContext.CreateAuditInfrastructure();
+            //dbContext.CreateAuditInfrastructure();
         }
 
 

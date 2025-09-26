@@ -17,9 +17,9 @@ namespace Sample_Net48.Order.Choreography.Api.Controllers
         {
             
         }
-        public async Task Post([FromBody]CreateOrderCommand command)
+        public void Post([FromBody]CreateOrderCommand command)
         {
-            await _eventBus.Send(command);
+            _eventBus.Send(command);
         }
     }
 }

@@ -1,18 +1,22 @@
-using System.Text;
+// Copyright 2023 Lycia Contributors
+// Licensed under the Apache License, Version 2.0
+// https://www.apache.org/licenses/LICENSE-2.0
+#if NET8_0_OR_GREATER
 using Lycia.Saga.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json;
 
 namespace Lycia.Extensions.Listener;
 
 public class RabbitMqListener(
     IServiceProvider serviceProvider,
     IEventBus eventBus,
-    ILogger<RabbitMqListener> logger)
+    ILogger<RabbitMqListener> logger,
+    IMessageSerializer serializer)
     : BackgroundService
 {
+    private readonly IMessageSerializer _serializer = serializer;
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("RabbitMqListener started");
@@ -20,22 +24,18 @@ public class RabbitMqListener(
         using var scope = serviceProvider.CreateScope();
 
         var sagaDispatcher = scope.ServiceProvider.GetRequiredService<ISagaDispatcher>();
-        
-        await foreach (var (body, messageType, handlerType) in eventBus.ConsumeAsync(autoAck: true, cancellationToken:stoppingToken))
+
+        await foreach (var msg in eventBus.ConsumeWithAckAsync(stoppingToken))
         {
+            var (body, messageType, handlerType, headers, ack, nack) = msg;
             if (stoppingToken.IsCancellationRequested)
                 break;
 
             try
             {
-                var json = Encoding.UTF8.GetString(body);
-                var deserialized = JsonConvert.DeserializeObject(json, messageType);
-
-                if (deserialized == null)
-                {
-                    logger.LogWarning("Failed to deserialize message to type {MessageType}", messageType.Name);
-                    continue;
-                }
+                var (_, serCtx) = _serializer.CreateContextFor(messageType);
+                var normalizedHeaders = _serializer.NormalizeTransportHeaders(headers);
+                var deserialized = _serializer.Deserialize(body, normalizedHeaders, serCtx);
 
                 logger.LogInformation("Dispatching {MessageType} to SagaDispatcher", messageType.Name);
                 // Find the generic DispatchAsync<TMessage>(TMessage message, Type? handlerType, Guid? sagaId, CancellationToken cancellationToken) method
@@ -50,7 +50,7 @@ public class RabbitMqListener(
                     logger.LogWarning("No suitable DispatchAsync<TMessage> found for message type {MessageType}", messageType.Name);
                     continue;
                 }
-                
+
                 var sagaIdProp = deserialized.GetType().GetProperty("SagaId");
                 Guid? sagaId = null;
                 if (sagaIdProp != null && sagaIdProp.GetValue(deserialized) is Guid id && id != Guid.Empty)
@@ -68,14 +68,21 @@ public class RabbitMqListener(
                     continue;
                 }
                 await dispatchTask;
+                await ack();
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, "Error while processing message of type {MessageType}", messageType.Name);
+                try
+                {
+                    await nack(false);
+                }
+                catch (Exception nackEx) { logger.LogWarning(nackEx, "Nack failed for {MessageType}", messageType.Name); }
                 // Optional: DLQ/retry/metrics logic.
             }
         }
 
         logger.LogInformation("RabbitMqListener stopped");
     }
-}
+} 
+#endif

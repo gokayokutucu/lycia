@@ -1,3 +1,6 @@
+// Copyright 2023 Lycia Contributors
+// Licensed under the Apache License, Version 2.0
+// https://www.apache.org/licenses/LICENSE-2.0
 using Lycia.Saga.Handlers;
 using Sample.Shared.Messages.Events;
 using Sample.Shared.Services;
@@ -8,7 +11,7 @@ public class PaymentSagaHandler : ReactiveSagaHandler<InventoryReservedEvent>
 {
     public override async Task HandleAsync(InventoryReservedEvent evt, CancellationToken cancellationToken = default)
     {
-        var ok = PaymentService.SimulatePayment();
+        var ok = PaymentService.SimulatePayment(false);
         if (!ok)
         {
             await Context.Publish(new PaymentFailedEvent

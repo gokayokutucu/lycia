@@ -1,14 +1,14 @@
+// Copyright 2023 Lycia Contributors
+// Licensed under the Apache License, Version 2.0
+// https://www.apache.org/licenses/LICENSE-2.0
 namespace Lycia.Extensions.Configurations;
 
 public class SagaStoreOptions
 {
-#if NETSTANDARD2_0
+    public static string SectionName => "Lycia:EventStore";
     public string? ApplicationId { get; set; }
     public TimeSpan? StepLogTtl { get; set; }= TimeSpan.FromSeconds(Constants.Ttl);
     public int LogMaxRetryCount { get; set; } = 5;
-#else
-    public string? ApplicationId { get; init; }
-    public TimeSpan? StepLogTtl { get; init; } = TimeSpan.FromSeconds(Constants.Ttl);
-    public int LogMaxRetryCount { get; init; } = 5;
-#endif
+    public string? Provider { get; set; }
+    public string? ConnectionString { get; set; }
 }

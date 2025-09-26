@@ -1,3 +1,6 @@
+// Copyright 2023 Lycia Contributors
+// Licensed under the Apache License, Version 2.0
+// https://www.apache.org/licenses/LICENSE-2.0
 using Lycia.Messaging;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Configurations;
@@ -21,7 +24,6 @@ public abstract class CoordinatedResponsiveSagaHandler<TMessage, TResponse, TSag
 
     protected async Task HandleAsyncInternal(TMessage message, CancellationToken cancellationToken = default)
     {
-        Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -39,7 +41,6 @@ public abstract class CoordinatedResponsiveSagaHandler<TMessage, TResponse, TSag
     
     protected async Task CompensateAsyncInternal(TMessage message, CancellationToken cancellationToken = default)
     {
-        Context.RegisterStepMessage(message); // Mapping the message to the saga context
         try
         {
             cancellationToken.ThrowIfCancellationRequested();

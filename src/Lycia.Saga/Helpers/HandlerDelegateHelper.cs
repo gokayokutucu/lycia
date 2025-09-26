@@ -1,3 +1,6 @@
+// Copyright 2023 Lycia Contributors
+// Licensed under the Apache License, Version 2.0
+// https://www.apache.org/licenses/LICENSE-2.0
 using System.Collections.Concurrent;
 using System.Linq.Expressions;
 using System.Reflection;
@@ -15,7 +18,7 @@ public static class HandlerDelegateHelper
             return dlg;
 
         // Try to find the method directly on the concrete type (public or non-public)
-        var method = FindMethod(handlerType, methodName, messageType, withCancellationToken: true)
+        var method =    FindMethod(handlerType, methodName, messageType, withCancellationToken: true)
                      ?? FindMethod(handlerType, methodName, messageType, withCancellationToken: false)
                      ?? FindOnInterfaces(handlerType, methodName, messageType, withCancellationToken: true)
                      ?? FindOnInterfaces(handlerType, methodName, messageType, withCancellationToken: false);

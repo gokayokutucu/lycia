@@ -1,3 +1,7 @@
+// Copyright 2023 Lycia Contributors
+// Licensed under the Apache License, Version 2.0
+// https://www.apache.org/licenses/LICENSE-2.0
+using Lycia.Extensions.Serialization;
 using Lycia.Infrastructure.Compensating;
 using Lycia.Infrastructure.Stores;
 using Lycia.Saga.Abstractions;
@@ -38,6 +42,7 @@ public class SagaCompensationCoordinatorTests
             });
 
         var services = new ServiceCollection();
+        services.AddSingleton<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
         var eventBusMock = Mock.Of<IEventBus>();
         var sagaIdGen = Mock.Of<ISagaIdGenerator>();
         var dummyCoordinator = Mock.Of<ISagaCompensationCoordinator>();
@@ -47,7 +52,7 @@ public class SagaCompensationCoordinatorTests
         services.AddSingleton<ISagaStore>(store);
         services.AddSingleton<IEventBus>(eventBusMock);
         var provider = services.BuildServiceProvider();
-        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
+        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen, provider.GetRequiredService<IMessageSerializer>());
 
         // Act
         await coordinator.CompensateAsync(sagaId, typeof(DummyEvent), handlerMock.Object.GetType(), dummyEvent, null);
@@ -70,6 +75,7 @@ public class SagaCompensationCoordinatorTests
         NoOpHandler.Invocations.Clear();
 
         var services = new ServiceCollection();
+        services.AddSingleton<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
         var eventBusMock = Mock.Of<IEventBus>();
         var sagaIdGen = Mock.Of<ISagaIdGenerator>();
         var dummyCoordinator = Mock.Of<ISagaCompensationCoordinator>();
@@ -91,7 +97,7 @@ public class SagaCompensationCoordinatorTests
         services.AddSingleton<ISagaCompensationHandler<DummyEvent>>(handler);
         services.AddSingleton<IEventBus>(eventBusMock);
         var provider = services.BuildServiceProvider();
-        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
+        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen, provider.GetRequiredService<IMessageSerializer>());
 
         // Act
         await coordinator.CompensateAsync(sagaId, stepType, typeof(NoOpHandler), payload, null);
@@ -225,6 +231,7 @@ public class SagaCompensationCoordinatorTests
 
         // Register service provider with handlers
         var services = new ServiceCollection();
+        services.AddSingleton<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
         var eventBusMock = Mock.Of<IEventBus>();
         var sagaIdGen = new TestSagaIdGenerator(sagaId);
         var dummyCoordinator = Mock.Of<ISagaCompensationCoordinator>();
@@ -252,7 +259,7 @@ public class SagaCompensationCoordinatorTests
         services.AddSingleton<ISagaCompensationHandler<DummyEvent>, ChildCompensationHandler>();
 
         var provider = services.BuildServiceProvider();
-        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
+        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen, provider.GetRequiredService<IMessageSerializer>());
 
         // Act
         await coordinator.CompensateAsync(sagaId, stepType, typeof(ChildCompensationSagaHandler), child, null);
@@ -277,6 +284,7 @@ public class SagaCompensationCoordinatorTests
             .Verifiable();
 
         var services = new ServiceCollection();
+        services.AddSingleton<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
         var eventBusMock = new Mock<IEventBus>().Object;
         var sagaIdGen = Mock.Of<ISagaIdGenerator>();
         var dummyCoordinator = Mock.Of<ISagaCompensationCoordinator>();
@@ -299,7 +307,7 @@ public class SagaCompensationCoordinatorTests
         services.AddSingleton(handlerMock.Object);
 
         var provider = services.BuildServiceProvider();
-        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
+        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen, provider.GetRequiredService<IMessageSerializer>());
 
         // Act
         // use ISagaCompensationHandler<DummyEvent> to ensure correct type resolution
@@ -352,6 +360,7 @@ public class SagaCompensationCoordinatorTests
         ChildCompensationHandler.Invocations.Clear();
 
         var services = new ServiceCollection();
+        services.AddSingleton<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
         var eventBusMock = Mock.Of<IEventBus>();
         var sagaIdGen = new TestSagaIdGenerator(fixedSagaId);
         var dummyCoordinator = Mock.Of<ISagaCompensationCoordinator>();
@@ -381,7 +390,7 @@ public class SagaCompensationCoordinatorTests
         services.AddSingleton<ChildCompensationHandler>();
 
         var provider = services.BuildServiceProvider();
-        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
+        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen, provider.GetRequiredService<IMessageSerializer>());
 
         // Act
         await coordinator.CompensateParentAsync(fixedSagaId, stepType, typeof(ChildCompensationHandler), child);
@@ -416,11 +425,12 @@ public class SagaCompensationCoordinatorTests
         await store.LogStepAsync(sagaId, messageId, Guid.Empty, stepType, StepStatus.Failed, typeof(object), payload, (SagaStepFailureInfo?)null);
 
         var services = new ServiceCollection();
+        services.AddSingleton<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
         services.AddSingleton<IEventBus>(eventBusMock);
         services.AddSingleton<ISagaStore>(store);
 
         var provider = services.BuildServiceProvider();
-        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
+        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen, provider.GetRequiredService<IMessageSerializer>());
 
         // Act + Assert
         // Use ICompensationHandler with a type that has no registered handler
@@ -447,6 +457,7 @@ public class SagaCompensationCoordinatorTests
         ParentCompensationHandler.Invocations.Clear();
         var services = new ServiceCollection();
         var eventBusMock = Mock.Of<IEventBus>();
+        var messageSerializer = Mock.Of<IMessageSerializer>();
         var sagaIdGen = new TestSagaIdGenerator(sagaId);
         var dummyCoordinator = Mock.Of<ISagaCompensationCoordinator>();
         var store = new InMemorySagaStore(eventBusMock, sagaIdGen, dummyCoordinator);
@@ -456,9 +467,10 @@ public class SagaCompensationCoordinatorTests
         services.AddSingleton<ISagaStore>(store);
         services.AddSingleton<ISagaCompensationHandler<DummyEvent>, ParentCompensationHandler>();
         services.AddSingleton<IEventBus>(eventBusMock);
+        services.AddSingleton<IMessageSerializer>(messageSerializer);
 
         var provider = services.BuildServiceProvider();
-        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen);
+        var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen, messageSerializer);
 
         // Act
         await coordinator.CompensateParentAsync(sagaId, typeof(DummyEvent), typeof(ParentCompensationHandler), root);

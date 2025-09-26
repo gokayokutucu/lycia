@@ -1,5 +1,8 @@
+// Copyright 2023 Lycia Contributors
+// Licensed under the Apache License, Version 2.0
+// https://www.apache.org/licenses/LICENSE-2.0
+using System.Text;
 using Lycia.Infrastructure.Extensions;
-using Lycia.Infrastructure.Helpers;
 using Lycia.Messaging;
 using Lycia.Messaging.Enums;
 using Lycia.Saga.Abstractions;
@@ -14,7 +17,10 @@ using MoreLinq;
 
 namespace Lycia.Infrastructure.Compensating;
 
-public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISagaIdGenerator sagaIdGenerator)
+public class SagaCompensationCoordinator(
+    IServiceProvider serviceProvider, 
+    ISagaIdGenerator sagaIdGenerator,
+    IMessageSerializer serializer)
     : ISagaCompensationCoordinator
 {
     /// <summary>
@@ -56,7 +62,10 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
         var payloadType = Type.GetType(step.Value.MessageTypeName);
         if (stepType == null || payloadType == null) return;
 
-        var messageObject = JsonConvert.DeserializeObject(step.Value.MessagePayload, payloadType);
+        var (headers, serCtx) = serializer.CreateContextFor(payloadType);
+        var messageObject =
+            serializer.Deserialize(Encoding.UTF8.GetBytes(step.Value.MessagePayload), headers, serCtx)
+            ?? JsonConvert.DeserializeObject(step.Value.MessagePayload, payloadType);
         if (messageObject == null) return;
 
         // If no handler found, try to find candidate handlers using the new method
@@ -109,7 +118,10 @@ public class SagaCompensationCoordinator(IServiceProvider serviceProvider, ISaga
         if (parentStepType == null)
             return;
 
-        var messageObject = JsonConvert.DeserializeObject(parentStep.Value.MessagePayload, parentStepType);
+        var (headers, serCtx) = serializer.CreateContextFor(parentStepType);
+        var messageObject =
+            serializer.Deserialize(Encoding.UTF8.GetBytes(parentStep.Value.MessagePayload), headers, serCtx)
+            ?? JsonConvert.DeserializeObject(parentStep.Value.MessagePayload, parentStepType);
         if (messageObject == null)
             return;
 

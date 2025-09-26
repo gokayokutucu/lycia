@@ -36,6 +36,9 @@ bld/
 .idea/
 *.sln.iml
 
+# Junie settings
+.junie/
+
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt
 
@@ -134,4 +137,6 @@ Thumbs.db
 # Resharper
 _ReSharper*/
 *.[Rr]e[Ss]harper
-/samples_net48/Sample_Net48.Order.Choreography.Api.7z
+
+# git2txt
+lycia.txt

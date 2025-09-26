@@ -1,4 +1,8 @@
+// Copyright 2023 Lycia Contributors
+// Licensed under the Apache License, Version 2.0
+// https://www.apache.org/licenses/LICENSE-2.0
 using Lycia.Extensions;
+using Lycia.Extensions.Serialization;
 using Lycia.Infrastructure.Compensating;
 using Lycia.Infrastructure.Dispatching;
 using Lycia.Infrastructure.Eventing;
@@ -16,6 +20,7 @@ using Lycia.Tests.Messages;
 using Lycia.Tests.Sagas;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
 namespace Lycia.Tests;
@@ -27,15 +32,19 @@ public class SagaDispatcherTests
     {
         // Arrange: Only a handler for a different message type is registered.
         var services = new ServiceCollection();
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string>
+            {
+                ["ApplicationId"] = "TestApp"
+            }!)
+            .Build();
+        services.AddLyciaInMemory(configuration)
+            .AddSaga( typeof(ShipOrderForCompensationSagaHandler))
+            .Build();
+        
         var fixedSagaId = Guid.NewGuid();
         services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
-
-        // Register handler for another message type (OrderCreatedEvent).
-        services.AddScoped<ShipOrderSagaHandler>();
 
         var provider = services.BuildServiceProvider();
 
@@ -43,13 +52,14 @@ public class SagaDispatcherTests
         var dispatcherMock = new Mock<SagaDispatcher>(
             provider.GetRequiredService<ISagaStore>(),
             provider.GetRequiredService<ISagaIdGenerator>(),
-            provider
+            provider,
+            NullLogger<SagaDispatcher>.Instance
         ) { CallBase = true };
 
         var message = new InitialCommand(); // No handler registered for this type.
 
         // Act & Assert: Expect no handler to be invoked
-        await Assert.ThrowsAsync<InvalidOperationException>(async () => 
+        await Assert.ThrowsAsync<SagaDispatchException>(async () => 
             await dispatcherMock.Object.DispatchAsync(message, handlerType: typeof(ShipOrderForCompensationSagaHandler), sagaId: fixedSagaId, CancellationToken.None));
     }
 
@@ -59,15 +69,18 @@ public class SagaDispatcherTests
         // Arrange: Build a circular parent chain in the step log
         var fixedSagaId = Guid.NewGuid();
         var services = new ServiceCollection();
+        
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string>
+            {
+                ["ApplicationId"] = "TestApp"
+            }!)
+            .Build();
+        services.AddLyciaInMemory(configuration)
+            .AddSagas(typeof(ParentCompensationSagaHandler), typeof(FailingCompensationSagaHandler))
+            .Build();
+        
         services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
-
-        services.AddScoped<ISagaHandler<ParentEvent>, ParentCompensationSagaHandler>();
-        services.AddScoped<ISagaHandler<FailingEvent>, FailingCompensationSagaHandler>();
 
         var provider = services.BuildServiceProvider();
         var store = provider.GetRequiredService<ISagaStore>();
@@ -100,14 +113,19 @@ public class SagaDispatcherTests
     {
         var fixedSagaId = Guid.NewGuid();
         var services = new ServiceCollection();
-        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
-        services.AddScoped<SwallowingSagaHandler>();
+        
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string>
+            {
+                ["ApplicationId"] = "TestApp"
+            }!)
+            .Build();
+        services.AddLyciaInMemory(configuration)
+            .AddSaga(typeof(SwallowingSagaHandler))
+            .Build();
 
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
 
@@ -128,18 +146,20 @@ public class SagaDispatcherTests
         // Arrange
         var fixedSagaId = Guid.NewGuid();
         var services = new ServiceCollection();
-        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
         // Register all relevant SagaHandlers
-        services.AddScoped<CreateOrderSagaHandler>();
-        services.AddScoped<ShipOrderSagaHandler>();
-        services.AddScoped<AuditOrderSagaHandler>();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string>
+            {
+                ["ApplicationId"] = "TestApp"
+            }!)
+            .Build();
+        services.AddLyciaInMemory(configuration)
+            .AddSagas(typeof(CreateOrderSagaHandler), typeof(ShipOrderSagaHandler), typeof(AuditOrderSagaHandler))
+            .Build();
 
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
         var store = provider.GetRequiredService<ISagaStore>();
@@ -177,12 +197,6 @@ public class SagaDispatcherTests
         // Arrange
         var fixedSagaId = Guid.NewGuid();
         var services = new ServiceCollection();
-        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
         // Register all relevant SagaHandlers
         var configuration = new ConfigurationBuilder()
@@ -193,7 +207,10 @@ public class SagaDispatcherTests
             .Build();
 
         services.AddLyciaInMemory(configuration)
-            .AddSagas(typeof(CreateOrderSagaHandler), typeof(ShipOrderForCompensationSagaHandler));
+            .AddSagas(typeof(CreateOrderSagaHandler), typeof(ShipOrderForCompensationSagaHandler))
+            .Build();
+        
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
 
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
@@ -231,17 +248,19 @@ public class SagaDispatcherTests
         var services = new ServiceCollection();
 
         var fixedSagaId = Guid.Parse("00000000-0000-0000-0000-000000000001");
-        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
-
+        
         // Register all relevant SagaHandlers
-        services.AddScoped<CreateOrderSagaHandler>();
-        services.AddScoped<ShipOrderSagaHandler>();
-        services.AddScoped<DeliverOrderSagaHandler>();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string>
+            {
+                ["ApplicationId"] = "TestApp"
+            }!)
+            .Build();
+        services.AddLyciaInMemory(configuration)
+            .AddSagas(typeof(CreateOrderSagaHandler), typeof(ShipOrderSagaHandler), typeof(DeliverOrderSagaHandler))
+            .Build();
+
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
 
         var serviceProvider = services.BuildServiceProvider();
         var sagaStore = serviceProvider.GetRequiredService<ISagaStore>();
@@ -317,17 +336,20 @@ public class SagaDispatcherTests
         var fixedSagaId = Guid.NewGuid();
 
         var services = new ServiceCollection();
+        
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string>
+            {
+                ["ApplicationId"] = "TestApp"
+            }!)
+            .Build();
+        
+        services.AddLyciaInMemory(configuration)
+            .AddSagas(typeof(CreateOrderSagaHandler), typeof(ShipOrderForCompensationSagaHandler))
+            .Build();
+
         services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
-
-        // Register all relevant SagaHandlers
-        services.AddScoped<CreateOrderSagaHandler>();
-        services.AddScoped<ShipOrderForCompensationSagaHandler>();
-
+        
         var provider = services.BuildServiceProvider();
 
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
@@ -367,12 +389,19 @@ public class SagaDispatcherTests
     public async Task DispatchAsync_NoHandlerRegistered_ShouldNotThrow()
     {
         var services = new ServiceCollection();
+        
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string>
+            {
+                ["ApplicationId"] = "TestApp"
+            }!)
+            .Build();
+        
+        services.AddLyciaInMemory(configuration)
+            .Build();
+        
         services.AddScoped<ISagaIdGenerator, TestSagaIdGenerator>();
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
+        
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
 
@@ -394,18 +423,21 @@ public class SagaDispatcherTests
         // Arrange
         var fixedSagaId = Guid.NewGuid();
         var services = new ServiceCollection();
-        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
 
-        // The ShipOrderForCompensationSagaHandler will intentionally fail at this step.
-        services.AddScoped<CreateOrderSagaHandler>();
-        services.AddScoped<ShipOrderForCompensationSagaHandler>();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string>
+            {
+                ["ApplicationId"] = "TestApp"
+            }!)
+            .Build();
         
+        // The ShipOrderForCompensationSagaHandler will intentionally fail at this step.
+        services.AddLyciaInMemory(configuration)
+            .AddSagas(typeof(CreateOrderSagaHandler), typeof(ShipOrderForCompensationSagaHandler))
+            .Build();
 
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
         var store = provider.GetRequiredService<ISagaStore>();
@@ -445,16 +477,19 @@ public class SagaDispatcherTests
     {
         var services = new ServiceCollection();
         var fixedSagaId = Guid.NewGuid();
-        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
+        
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string>
+            {
+                ["ApplicationId"] = "TestApp"
+            }!)
+            .Build();
+        
+        services.AddLyciaInMemory(configuration)
+            .AddSagas(typeof(CreateOrderSagaHandler), typeof(ShipOrderSagaHandler), typeof(DeliverOrderSagaHandler))
+            .Build();
 
-        services.AddScoped<CreateOrderSagaHandler>();
-        services.AddScoped<DeliverOrderSagaHandler>();
-        services.AddScoped<ShipOrderSagaHandler>();
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
 
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
@@ -509,16 +544,20 @@ public class SagaDispatcherTests
     {
         var services = new ServiceCollection();
         var fixedSagaId = Guid.NewGuid();
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string>
+            {
+                ["ApplicationId"] = "TestApp"
+            }!)
+            .Build();
+        
+        services.AddLyciaInMemory(configuration)
+            .AddSagas(typeof(CreateOrderSagaHandler))
+            .Build();
+
         services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
-
-        services.AddScoped<CreateOrderSagaHandler>();
-        // Other steps can also be added if needed.
-
+        
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
         var store = provider.GetRequiredService<ISagaStore>();
@@ -559,14 +598,20 @@ public class SagaDispatcherTests
         // Arrange
         var fixedSagaId = Guid.NewGuid();
         var services = new ServiceCollection();
-        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
-        services.AddScoped<ISagaStore, InMemorySagaStore>();
-        services.AddScoped<ISagaDispatcher, SagaDispatcher>();
-        services.AddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-        services.AddScoped<IEventBus>(sp =>
-            new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
-        services.AddScoped<TestStartReactiveCompensateHandler>();
+        
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string>
+            {
+                ["ApplicationId"] = "TestApp"
+            }!)
+            .Build();
+        
+        services.AddLyciaInMemory(configuration)
+            .AddSaga(typeof(TestStartReactiveCompensateHandler))
+            .Build();
 
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        
         var provider = services.BuildServiceProvider();
         var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
 

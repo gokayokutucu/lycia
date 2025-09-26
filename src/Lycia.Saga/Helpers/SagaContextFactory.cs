@@ -1,3 +1,6 @@
+// Copyright 2023 Lycia Contributors
+// Licensed under the Apache License, Version 2.0
+// https://www.apache.org/licenses/LICENSE-2.0
 using System.Reflection;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Configurations;
@@ -16,7 +19,7 @@ public static class SagaContextFactory
     /// Creates the proper SagaContext instance (SagaContext&lt;T&gt; or SagaContext&lt;T, TSagaData&gt;)
     /// based on the handler's Initialize(...) parameter type. Then invokes Initialize(handler, context).
     /// </summary>
-    public static async Task InitializeForHandlerAsync(
+    public static async Task<object?> InitializeForHandlerAsync(
         object handler,
         Guid sagaId,
         object currentMessage,
@@ -42,7 +45,7 @@ public static class SagaContextFactory
         if (initializeMethod is null)
         {
             // No Initialize method found on handler — nothing to do.
-            return;
+            return null;
         }
 
         // We rely on the exact Initialize(...) parameter type: ISagaContext<T> or ISagaContext<T,TSagaData>
@@ -106,6 +109,7 @@ public static class SagaContextFactory
         var initParams = initializeMethod.GetParameters();
 
         InvokeHandlerInitialization(handler, serviceProvider, initParams, initializeMethod, contextInstance, handlerType);
+        return contextInstance;
     }
 
     private static void InvokeHandlerInitialization(
