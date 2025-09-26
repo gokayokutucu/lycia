@@ -5,6 +5,10 @@
         <LangVersion>preview</LangVersion>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <SuppressProjectReferenceDependenciesWhenPacking>true</SuppressProjectReferenceDependenciesWhenPacking>
+    </PropertyGroup>
+
+    <PropertyGroup>
         <Authors>M. Gokay Okutucu</Authors>
         <Description>Lycia is a lightweight, production-ready Saga infrastructure for .NET (netstandard2.0+).
             It provides idempotent distributed transaction orchestration with built-in support for:
@@ -27,9 +31,9 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\Lycia.Messaging\Lycia.Messaging.csproj"/>
+        <ProjectReference Include="..\Lycia.Messaging\Lycia.Messaging.csproj" PrivateAssets="all"/>
     </ItemGroup>
-
+    
     <ItemGroup>
         <PackageReference Include="Nerdbank.GitVersioning" Version="3.*" PrivateAssets="all"/>
         <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="9.0.9"/>
@@ -41,7 +45,7 @@
     </ItemGroup>
 
     <ItemGroup>
-        <None Include="..\..\README.md" Pack="true" PackagePath="" />
+        <None Include="..\..\README.md" Pack="true" PackagePath=""/>
     </ItemGroup>
 
 </Project>
