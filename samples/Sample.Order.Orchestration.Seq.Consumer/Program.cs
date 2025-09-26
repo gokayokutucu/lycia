@@ -52,6 +52,7 @@ builder.Services
     //         s.BatchSize(100);
     //     });
     // }, builder.Configuration)
+    //.UseMessageSerializer<MyCustomSerializer>()
     .UseSagaMiddleware(opt =>
     {
          opt.AddMiddleware<SerilogLoggingMiddleware>();
