@@ -107,6 +107,7 @@ namespace Lycia.Extensions
 
             // Serializer default
             services.TryAddSingleton<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
+            services.TryAddSingleton<IMessageSerializer, AvroMessageSerializer>();
 
             // Placeholder for queue map; the builder will populate it in Build()
             services.TryAddSingleton<IDictionary<string, (Type MessageType, Type HandlerType)>>(sp =>
@@ -267,6 +268,7 @@ namespace Lycia.Extensions
             // Serializer
             services.RemoveAll(typeof(IMessageSerializer));
             services.AddSingleton<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
+            services.AddSingleton<IMessageSerializer, AvroMessageSerializer>();
 
             // In-memory transports/stores
             services.RemoveAll(typeof(IEventBus));

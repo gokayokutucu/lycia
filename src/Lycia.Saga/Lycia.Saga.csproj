@@ -1,5 +1,12 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
+	<PropertyGroup Label="Globals">
+	  <SccProjectName>SAK</SccProjectName>
+	  <SccProvider>SAK</SccProvider>
+	  <SccAuxPath>SAK</SccAuxPath>
+	  <SccLocalPath>SAK</SccLocalPath>
+	</PropertyGroup>
+
 	<PropertyGroup>
 		<TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
 		<GenerateReferenceAssembly>false</GenerateReferenceAssembly>
@@ -21,11 +28,7 @@
 		<ItemGroup>
 			<_Nupkg Include="$(PackageOutputPath)\$(PackageId).$(Version).nupkg" />
 		</ItemGroup>
-		<Copy
-		  SourceFiles="@(_Nupkg)"
-		  DestinationFolder="\\if-srv-nas\R&amp;D_Files\PASSPORT\gkuvandik\nuget-packages"
-		  SkipUnchangedFiles="true"
-		  Condition="Exists('%(Identity)')" />
+		<Copy SourceFiles="@(_Nupkg)" DestinationFolder="\\if-srv-nas\R&amp;D_Files\PASSPORT\gkuvandik\nuget-packages" SkipUnchangedFiles="true" Condition="Exists('%(Identity)')" />
 	</Target>
 
 	<ItemGroup>

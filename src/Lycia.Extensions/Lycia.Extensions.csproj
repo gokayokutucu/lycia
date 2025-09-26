@@ -21,11 +21,7 @@
 		<ItemGroup>
 			<_Nupkg Include="$(PackageOutputPath)\$(PackageId).$(Version).nupkg" />
 		</ItemGroup>
-		<Copy
-		  SourceFiles="@(_Nupkg)"
-		  DestinationFolder="\\if-srv-nas\R&amp;D_Files\PASSPORT\gkuvandik\nuget-packages"
-		  SkipUnchangedFiles="true"
-		  Condition="Exists('%(Identity)')" />
+		<Copy SourceFiles="@(_Nupkg)" DestinationFolder="\\if-srv-nas\R&amp;D_Files\PASSPORT\gkuvandik\nuget-packages" SkipUnchangedFiles="true" Condition="Exists('%(Identity)')" />
 	</Target>
 
 	<ItemGroup>
@@ -83,6 +79,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<PackageReference Include="Apache.Avro" Version="1.12.0" />
 		<PackageReference Include="Autofac" Version="7.1.0" />
 		<PackageReference Include="Autofac.Extensions.DependencyInjection" Version="8.0.0" />
 		<PackageReference Include="Autofac.WebApi2" Version="6.1.1" />
