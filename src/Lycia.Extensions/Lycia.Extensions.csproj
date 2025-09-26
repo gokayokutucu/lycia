@@ -44,11 +44,33 @@
         <PackageReference Include="StackExchange.Redis" Version="2.8.37"/>
     </ItemGroup>
 
-    <ItemGroup>
-        <ProjectReference Include="..\Lycia.Infrastructure\Lycia.Infrastructure.csproj" PrivateAssets="all"/>
-        <ProjectReference Include="..\Lycia.Messaging\Lycia.Messaging.csproj" PrivateAssets="all"/>
+    <!-- Can stay for local build -->
+    <PropertyGroup>
+        <UsePackageRefForLyciaOnPack>false</UsePackageRefForLyciaOnPack>
+    </PropertyGroup>
+    
+    <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' != 'true'">
         <ProjectReference Include="..\Lycia\Lycia.csproj" />
     </ItemGroup>
+
+    <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' == 'true'">
+        <PackageReference Include="Lycia" Version="[1.17.0-beta, 1.18.0)" />
+        <ProjectReference Remove="..\Lycia\Lycia.csproj" />
+    </ItemGroup>
+    
+    <ItemGroup>
+        <!-- Only if required, but don't let it leak into the package order -->
+        <ProjectReference Include="..\Lycia.Infrastructure\Lycia.Infrastructure.csproj" PrivateAssets="All" />
+        <ProjectReference Include="..\Lycia.Messaging\Lycia.Messaging.csproj" PrivateAssets="All" />
+    </ItemGroup>
+
+  <!-- Remove Infrastructure ProjectReference when packing -->
+    <Target Name="RemoveInfraProjectRefForPack" BeforeTargets="PrepareForPack">
+        <ItemGroup>
+            <ProjectReference Remove="..\Lycia.Infrastructure\Lycia.Infrastructure.csproj" />
+            <ProjectReference Remove="..\Lycia.Messaging\Lycia.Messaging.csproj" />
+        </ItemGroup>
+    </Target>
 
     <ItemGroup>
         <Folder Include="Retry\"/>
