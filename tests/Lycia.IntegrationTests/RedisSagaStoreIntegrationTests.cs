@@ -8,8 +8,6 @@ using Testcontainers.Redis;
 using Lycia.Extensions.Stores;
 using Lycia.Messaging;
 using Lycia.Messaging.Enums;
-using Lycia;
-using Lycia.Abstractions;
 using Lycia.Configurations;
 using Lycia.Exceptions;
 using Lycia.Handlers;
