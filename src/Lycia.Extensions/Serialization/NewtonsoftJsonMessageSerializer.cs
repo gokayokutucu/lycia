@@ -3,6 +3,7 @@
 // https://www.apache.org/licenses/LICENSE-2.0
 using System.Text;
 using Lycia.Abstractions;
+using Lycia.Extensions.Converters;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 using Newtonsoft.Json.Serialization;
@@ -13,10 +14,11 @@ public sealed class NewtonsoftJsonMessageSerializer : IMessageSerializer
 {
     private static readonly JsonSerializerSettings Settings = new()
     {
-        ContractResolver = new CamelCasePropertyNamesContractResolver(),
+        //ContractResolver = new CamelCasePropertyNamesContractResolver(),
+        ContractResolver = new AvroFriendlyContractResolver(),
         NullValueHandling = NullValueHandling.Ignore,
         DateParseHandling = DateParseHandling.None,
-        Converters = { new StringEnumConverter() },
+        Converters = { new StringEnumConverter(), new AvroSchemaConverter() },
         TypeNameHandling = TypeNameHandling.None
     };
 
