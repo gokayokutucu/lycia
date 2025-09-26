@@ -29,6 +29,7 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <PackageReference Include="Nerdbank.GitVersioning" Version="3.*" PrivateAssets="all"/>
         <PackageReference Include="Microsoft.CSharp" Version="4.7.0"/>
         <PackageReference Include="Microsoft.Extensions.Configuration" Version="9.0.9"/>
         <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.9"/>
