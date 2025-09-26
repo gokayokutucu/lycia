@@ -119,6 +119,9 @@ jobs:
             9.0.x
             8.0.x
             6.0.x
+            
+      - name: Clear NuGet caches (CI)
+        run: dotnet nuget locals all --clear
 
       - name: Restore
         run: dotnet restore Lycia.sln
@@ -129,7 +132,7 @@ jobs:
       - name: Show computed version (optional)
         run: |
           dotnet tool install -g nbgv || true
-          nbgv get-version
+          nbgv get-version -v SemVer2
 
       # ---- Pack each public package explicitly ----
       - name: Pack Lycia (core)
