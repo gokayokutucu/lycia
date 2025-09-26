@@ -5,6 +5,10 @@
         <LangVersion>preview</LangVersion>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <SuppressProjectReferenceDependenciesWhenPacking>true</SuppressProjectReferenceDependenciesWhenPacking>
+    </PropertyGroup>
+
+    <PropertyGroup>
         <Authors>M. Gokay Okutucu</Authors>
         <Description>Lycia.Extensions provides pluggable modules and integrations for the Lycia Saga framework.
             It offers ready-to-use extensions for configuration, middleware, retry, scheduling, and observability:
@@ -39,7 +43,9 @@
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\Lycia.Infrastructure\Lycia.Infrastructure.csproj"/>
+        <ProjectReference Include="..\Lycia.Infrastructure\Lycia.Infrastructure.csproj" PrivateAssets="all"/>
+        <ProjectReference Include="..\Lycia.Messaging\Lycia.Messaging.csproj" PrivateAssets="all"/>
+        <ProjectReference Include="..\Lycia\Lycia.csproj" />
     </ItemGroup>
 
     <ItemGroup>

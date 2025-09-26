@@ -9,7 +9,8 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\Lycia\Lycia.csproj" />
+        <ProjectReference Include="..\Lycia.Messaging\Lycia.Messaging.csproj" PrivateAssets="all"/>
+        <ProjectReference Include="..\Lycia\Lycia.csproj" PrivateAssets="all" />
     </ItemGroup>
 
     <ItemGroup>

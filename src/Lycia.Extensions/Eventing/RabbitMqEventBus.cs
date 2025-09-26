@@ -13,8 +13,6 @@ using System.Runtime.CompilerServices;
 using Lycia.Helpers;
 using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Helpers;
-using Lycia;
-using Lycia.Extensions;
 using Constants = Lycia.Extensions.Configurations.Constants;
 
 namespace Lycia.Extensions.Eventing;
