@@ -40,6 +40,7 @@ builder.Services
     //             .WithRetryPolicy<PollyBasedRetry>();
     //     });
     // }, builder.Configuration)
+    //.UseMessageSerializer<MyCustomSerializer>()
     .UseSagaMiddleware(opt =>
     {
          opt.AddMiddleware<SerilogLoggingMiddleware>();

@@ -30,9 +30,42 @@
         <PackageTags>saga distributed-transaction workflow orchestration choreography idempotency retry timeout compensation middleware rabbitmq redis microservices event-driven</PackageTags>
     </PropertyGroup>
 
+    <PropertyGroup>
+       <!-- Attach a custom target to include "reference project" outputs under lib/<tfm>/ -->
+        <TargetsForTfmSpecificBuildOutput>
+            $(TargetsForTfmSpecificBuildOutput);_Lycia_IncludeInternalLibs
+        </TargetsForTfmSpecificBuildOutput>
+
+        <!-- (Optional) Include XML documentation files in the package -->
+        <AllowedOutputExtensionsInPackageBuildOutputFolder>
+            $(AllowedOutputExtensionsInPackageBuildOutputFolder);.xml
+        </AllowedOutputExtensionsInPackageBuildOutputFolder>
+    </PropertyGroup>
+
     <ItemGroup>
-        <ProjectReference Include="..\Lycia.Messaging\Lycia.Messaging.csproj" PrivateAssets="all"/>
+        <!-- Keep internal projects as ProjectReference for local builds,
+        but do not include them as NuGet dependencies -->
+        <ProjectReference Include="..\Lycia.Messaging\Lycia.Messaging.csproj" PrivateAssets="All" />
     </ItemGroup>
+
+    <Target Name="_Lycia_IncludeInternalLibs" DependsOnTargets="ResolveReferences">
+        <ItemGroup>
+            <!-- Select only DLLs originating from ProjectReference and matching names -->
+            <_Lycia_InternalAssemblies Include="@(ReferenceCopyLocalPaths)"
+                                       Condition="
+        '%(ReferenceCopyLocalPaths.ReferenceSourceTarget)' == 'ProjectReference' and
+        (
+          '$([System.String]::Copy(%(ReferenceCopyLocalPaths.Filename)))' == 'Lycia.Messaging'
+          or
+          '$([System.String]::Copy(%(ReferenceCopyLocalPaths.Filename)))' == 'Lycia.Infrastructure'
+        )
+        and '$([System.String]::Copy(%(ReferenceCopyLocalPaths.Extension))).ToLower()' == '.dll'
+      " />
+
+            <!-- Place under lib/<tfm>/: NuGet automatically makes these files compile/runtime assets -->
+            <BuildOutputInPackage Include="@(_Lycia_InternalAssemblies)" />
+        </ItemGroup>
+    </Target>
     
     <ItemGroup>
         <PackageReference Include="Nerdbank.GitVersioning" Version="3.*" PrivateAssets="all"/>
