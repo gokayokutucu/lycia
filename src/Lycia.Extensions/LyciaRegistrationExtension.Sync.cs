@@ -81,8 +81,12 @@ namespace Lycia.Extensions
             containerBuilder.RegisterType<SagaCompensationCoordinator>().As<ISagaCompensationCoordinator>().InstancePerLifetimeScope();
             containerBuilder.RegisterType<SagaContextAccessor>().As<ISagaContextAccessor>().InstancePerLifetimeScope();
 
-            containerBuilder.RegisterType<NewtonsoftJsonMessageSerializer>().As<IMessageSerializer>().SingleInstance();
-            containerBuilder.RegisterType<AvroMessageSerializer>().As<IMessageSerializer>().SingleInstance();
+            containerBuilder.RegisterType<NewtonsoftJsonMessageSerializer>().SingleInstance();
+            containerBuilder.RegisterType<AvroMessageSerializer>().SingleInstance();
+            containerBuilder.RegisterType<CompositeMessageSerializer>()
+                .As<IMessageSerializer>()
+                .SingleInstance();
+
 
             containerBuilder.Register(_ => new Dictionary<string, (Type MessageType, Type HandlerType)>(StringComparer.OrdinalIgnoreCase))
                 .As<IDictionary<string, (Type MessageType, Type HandlerType)>>()
@@ -225,8 +229,12 @@ namespace Lycia.Extensions
             containerBuilder.RegisterType<SagaDispatcher>().As<ISagaDispatcher>().InstancePerLifetimeScope();
             containerBuilder.RegisterType<SagaCompensationCoordinator>().As<ISagaCompensationCoordinator>().InstancePerLifetimeScope();
 
-            containerBuilder.RegisterType<NewtonsoftJsonMessageSerializer>().As<IMessageSerializer>().SingleInstance();
-            containerBuilder.RegisterType<AvroMessageSerializer>().As<IMessageSerializer>().SingleInstance();
+            containerBuilder.RegisterType<NewtonsoftJsonMessageSerializer>().SingleInstance();
+            containerBuilder.RegisterType<AvroMessageSerializer>().SingleInstance();
+            containerBuilder.RegisterType<CompositeMessageSerializer>()
+                .As<IMessageSerializer>()
+                .SingleInstance();
+
 
             containerBuilder.Register(sp => new InMemoryEventBus(new Lazy<ISagaDispatcher>(() => sp.Resolve<ISagaDispatcher>())))
                 .As<IEventBus>()
