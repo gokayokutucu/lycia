@@ -6,67 +6,57 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <SuppressProjectReferenceDependenciesWhenPacking>true</SuppressProjectReferenceDependenciesWhenPacking>
-    </PropertyGroup>
-
-    <PropertyGroup>
-        <Authors>M. Gokay Okutucu</Authors>
-        <Description>Lycia is a lightweight, production-ready Saga infrastructure for .NET (netstandard2.0+).
-            It provides idempotent distributed transaction orchestration with built-in support for:
-            - Compensation flows (orchestration and choreography)
-            - SagaDispatcher with middleware pipeline
-            - Retry, cancellation, and timeout policies
-            - Redis and in-memory saga stores
-            - RabbitMQ and in-memory event bus integrations
-            - Structured logging, observability, and DLQ support
-
-            Designed for microservices and cloud-native architectures, Lycia helps you build reliable workflows and long-running transactions without boilerplate code.
-        </Description>
-        <Copyright>Copyright (c) 2025 M. Gokay Okutucu</Copyright>
-        <PackageReadmeFile>README.md</PackageReadmeFile>
-        <PackageProjectUrl>https://github.com/gokayokutucu/lycia</PackageProjectUrl>
-        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <RepositoryUrl>https://github.com/gokayokutucu/lycia</RepositoryUrl>
         <RepositoryType>git</RepositoryType>
-        <PackageTags>saga distributed-transaction workflow orchestration choreography idempotency retry timeout compensation middleware rabbitmq redis microservices event-driven</PackageTags>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
     </PropertyGroup>
 
     <PropertyGroup>
-       <!-- Attach a custom target to include "reference project" outputs under lib/<tfm>/ -->
+        <!-- Attach a custom target to include "reference project" outputs under lib/<tfm>/ -->
         <TargetsForTfmSpecificBuildOutput>
             $(TargetsForTfmSpecificBuildOutput);_Lycia_IncludeInternalLibs
         </TargetsForTfmSpecificBuildOutput>
-
-        <!-- (Optional) Include XML documentation files in the package -->
-        <AllowedOutputExtensionsInPackageBuildOutputFolder>
-            $(AllowedOutputExtensionsInPackageBuildOutputFolder);.xml
-        </AllowedOutputExtensionsInPackageBuildOutputFolder>
     </PropertyGroup>
 
-    <ItemGroup>
-        <!-- Keep internal projects as ProjectReference for local builds,
-        but do not include them as NuGet dependencies -->
-        <ProjectReference Include="..\Lycia.Messaging\Lycia.Messaging.csproj" PrivateAssets="All" />
+    <PropertyGroup>
+        <!-- Switch: when true, use a NuGet dependency on Lycia instead of local project refs during pack/build -->
+        <UsePackageRefForLyciaOnPack>false</UsePackageRefForLyciaOnPack>
+    </PropertyGroup>
+
+    <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' != 'true'">
+        <!-- Local dev: reference projects directly (won't flow as NuGet deps due to PrivateAssets=All) -->
+        <ProjectReference Include="..\Lycia.Messaging\Lycia.Messaging.csproj" PrivateAssets="All"/>
     </ItemGroup>
 
-    <Target Name="_Lycia_IncludeInternalLibs" DependsOnTargets="ResolveReferences">
-        <ItemGroup>
-            <!-- Select only DLLs originating from ProjectReference and matching names -->
-            <_Lycia_InternalAssemblies Include="@(ReferenceCopyLocalPaths)"
-                                       Condition="
-        '%(ReferenceCopyLocalPaths.ReferenceSourceTarget)' == 'ProjectReference' and
-        (
-          '$([System.String]::Copy(%(ReferenceCopyLocalPaths.Filename)))' == 'Lycia.Messaging'
-          or
-          '$([System.String]::Copy(%(ReferenceCopyLocalPaths.Filename)))' == 'Lycia.Infrastructure'
-        )
-        and '$([System.String]::Copy(%(ReferenceCopyLocalPaths.Extension))).ToLower()' == '.dll'
-      " />
+    <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' == 'true'">
+        <ProjectReference Remove="..\Lycia.Messaging\Lycia.Messaging.csproj"/>
+    </ItemGroup>
 
-            <!-- Place under lib/<tfm>/: NuGet automatically makes these files compile/runtime assets -->
-            <BuildOutputInPackage Include="@(_Lycia_InternalAssemblies)" />
+    <Target Name="_Lycia_IncludeInternalLibs" DependsOnTargets="Build" Condition="'$(UsePackageRefForLyciaOnPack)' != 'true'">
+        <!-- Ensure we query outputs for the current TFM -->
+        <PropertyGroup>
+            <_Lycia_CurrentTFM>$(TargetFramework)</_Lycia_CurrentTFM>
+        </PropertyGroup>
+
+        <!-- Ask referenced projects for their TargetPath for this TFM -->
+        <MSBuild Projects="@(ProjectReference)"
+                 Targets="GetTargetPath"
+                 Properties="TargetFramework=$(_Lycia_CurrentTFM)"
+                 BuildInParallel="true">
+            <Output TaskParameter="TargetOutputs" ItemName="_Lycia_InternalAssemblies"/>
+        </MSBuild>
+
+        <ItemGroup>
+            <!-- Ship the referenced project outputs as-is -->
+            <BuildOutputInPackage Include="@(_Lycia_InternalAssemblies)"/>
+
+            <!-- Include matching XML docs when present -->
+            <_Lycia_InternalXmlDocs Include="@(_Lycia_InternalAssemblies->'%(RootDir)%(Directory)%(Filename).xml')"
+                                    Condition="Exists('%(RootDir)%(Directory)%(Filename).xml')"/>
+            <BuildOutputInPackage Include="@(_Lycia_InternalXmlDocs)"/>
         </ItemGroup>
     </Target>
-    
+
     <ItemGroup>
         <PackageReference Include="Nerdbank.GitVersioning" Version="3.*" PrivateAssets="all"/>
         <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="9.0.9"/>
