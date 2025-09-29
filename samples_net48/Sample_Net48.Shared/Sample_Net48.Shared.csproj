@@ -61,9 +61,9 @@
       <Project>{bd73c6ec-e726-4b73-9f7b-f10e06b2d6c3}</Project>
       <Name>Lycia.Messaging</Name>
     </ProjectReference>
-    <ProjectReference Include="..\..\src\Lycia.Saga\Lycia.Saga.csproj">
+    <ProjectReference Include="..\..\src\Lycia\Lycia.csproj">
       <Project>{a49dceda-15c8-410a-9ecd-229644de5559}</Project>
-      <Name>Lycia.Saga</Name>
+      <Name>Lycia</Name>
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>

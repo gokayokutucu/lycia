@@ -1,11 +1,34 @@
 # Lycia
 
-**Lycia** began with a vision on *May 28, 2023*.
+[![NuGet](https://img.shields.io/nuget/v/Lycia.svg)](https://www.nuget.org/packages/Lycia)
+[![NuGet Downloads](https://img.shields.io/nuget/dt/Lycia.svg)](https://www.nuget.org/packages/Lycia)
+![Target Framework](https://img.shields.io/badge/.NET-netstandard2.0%20%7C%20net8.0%20%7C%20net9.0-blue)
+[![Build](https://github.com/gokayokutucu/lycia/actions/workflows/dotnet.yml/badge.svg)](https://github.com/gokayokutucu/lycia/actions/workflows/dotnet.yml)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![GitHub release](https://img.shields.io/github/v/release/gokayokutucu/lycia)](https://github.com/gokayokutucu/lycia/releases)
+
+**Lycia** is the **main package** of the Lycia framework.  
+It provides the saga infrastructure, orchestration, and choreography support.  
+Extensions (e.g. Redis, RabbitMQ, Scheduling) are published separately under `Lycia.Extensions.*`.
+
+**Lycia** began with a vision on *May 28, 2023*.  
 Our motto: *“Turning difficult paths into joyful simplicity.”* Inspired by the ancient *Lycian Way*, we set out to build a framework that makes complex saga workflows easy to manage — supported by strong documentation and aligned with modern software practices.
 
 Lycia is a messaging framework (Message-oriented Middleware, MoM) built for .NET applications, supporting .NET Standard 2.0 and higher. It provides a robust foundation for distributed systems where reliable message flow and state coordination are essential.
 
 For architectural deep-dive, compensation coordination, and integration test strategies, see [DEVELOPERS.md](DEVELOPERS.md).
+
+---
+
+## Getting Started / Samples
+
+Explore the [samples/](samples) folder for real-world usage:  
+- **Sample.Order.Api** – API entrypoint  
+- **Sample.Order.Orchestration.Consumer** – Coordinated saga orchestration  
+- **Sample.Order.Choreography.Consumer** – Reactive saga choreography  
+- **Sample.Order.Orchestration.Seq.Consumer** – Sequential orchestration with compensation flows  
+
+---
 
 ## Our Mission
 

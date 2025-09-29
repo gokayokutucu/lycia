@@ -5,6 +5,7 @@
         <LangVersion>preview</LangVersion>
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
+        <IsPackable>false</IsPackable>
     </PropertyGroup>
 
     <ItemGroup>
@@ -12,7 +13,10 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\..\src\Lycia.Extensions\Lycia.Extensions.csproj" />
-      <ProjectReference Include="..\Sample.Shared\Sample.Shared.csproj" />
+        <ProjectReference Include="..\..\src\Lycia.Extensions\Lycia.Extensions.csproj" />
+        <ProjectReference Include="..\..\src\Lycia.Infrastructure\Lycia.Infrastructure.csproj" />
+        <ProjectReference Include="..\..\src\Lycia.Messaging\Lycia.Messaging.csproj" />
+        <ProjectReference Include="..\..\src\Lycia\Lycia.csproj" />
+        <ProjectReference Include="..\Sample.Shared\Sample.Shared.csproj" />
     </ItemGroup>
 </Project>

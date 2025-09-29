@@ -4,7 +4,7 @@
 using System.Runtime.CompilerServices;
 using Lycia.Messaging;
 
-namespace Lycia.Saga.Abstractions;
+namespace Lycia.Abstractions;
 
 #if NETSTANDARD2_0
 public interface IEventBus

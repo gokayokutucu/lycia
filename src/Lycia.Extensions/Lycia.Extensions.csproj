@@ -1,32 +1,33 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-    <PropertyGroup>
-        <TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
-        <LangVersion>preview</LangVersion>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
-        <SuppressProjectReferenceDependenciesWhenPacking>true</SuppressProjectReferenceDependenciesWhenPacking>
-    </PropertyGroup>
+	<PropertyGroup>
+		<TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
+		<LangVersion>preview</LangVersion>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<SuppressProjectReferenceDependenciesWhenPacking>true</SuppressProjectReferenceDependenciesWhenPacking>
+	</PropertyGroup>
 
-    <PropertyGroup>
-        <Authors>M. Gokay Okutucu</Authors>
-        <Description>Lycia.Extensions provides pluggable modules and integrations for the Lycia Saga framework.
-            It offers ready-to-use extensions for configuration, middleware, retry, scheduling, and observability:
-            - Fluent DI registration (AddLycia with ConfigureSaga, ConfigureEventBus, ConfigureRetry, ConfigureScheduling)
-            - Built-in retry policies with Polly integration
-            - Configurable middleware slots (logging, retry, custom middlewares)
-            - Health check integration (IHealthCheck)
-            - Scheduling extensions with Redis-based storage
+	<PropertyGroup>
+		<Authors>M. Gokay Okutucu</Authors>
+		<Description>
+			Lycia.Extensions provides pluggable modules and integrations for the Lycia Saga framework.
+			It offers ready-to-use extensions for configuration, middleware, retry, scheduling, and observability:
+			- Fluent DI registration (AddLycia with ConfigureSaga, ConfigureEventBus, ConfigureRetry, ConfigureScheduling)
+			- Built-in retry policies with Polly integration
+			- Configurable middleware slots (logging, retry, custom middlewares)
+			- Health check integration (IHealthCheck)
+			- Scheduling extensions with Redis-based storage
 
-            Keep your Saga setup modular, extensible, and production-grade. Add only the components you need.
-        </Description>
-        <Copyright>Copyright (c) 2025 M. Gokay Okutucu</Copyright>
-        <PackageProjectUrl>https://github.com/gokayokutucu/lycia</PackageProjectUrl>
-        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-        <RepositoryUrl>https://github.com/gokayokutucu/lycia</RepositoryUrl>
-        <RepositoryType>git</RepositoryType>
-        <PackageTags>saga distributed-transaction workflow orchestration choreography idempotency retry timeout compensation middleware rabbitmq redis microservices event-driven</PackageTags>
-    </PropertyGroup>
+			Keep your Saga setup modular, extensible, and production-grade. Add only the components you need.
+		</Description>
+		<Copyright>Copyright (c) 2025 M. Gokay Okutucu</Copyright>
+		<PackageProjectUrl>https://github.com/gokayokutucu/lycia</PackageProjectUrl>
+		<PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+		<RepositoryUrl>https://github.com/gokayokutucu/lycia</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageTags>saga distributed-transaction workflow orchestration choreography idempotency retry timeout compensation middleware rabbitmq redis microservices event-driven</PackageTags>
+	</PropertyGroup>
 
 	<!--<PropertyGroup>
 		<GenerateReferenceAssembly>false</GenerateReferenceAssembly>
@@ -104,36 +105,36 @@
 		<PackageReference Include="Serilog" Version="4.3.0" />
 	</ItemGroup>
 
-    <!-- Can stay for local build -->
-    <PropertyGroup>
-        <UsePackageRefForLyciaOnPack>false</UsePackageRefForLyciaOnPack>
-    </PropertyGroup>
-    
-    <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' != 'true'">
-        <ProjectReference Include="..\Lycia\Lycia.csproj" />
-    </ItemGroup>
+	<!-- Can stay for local build -->
+	<PropertyGroup>
+		<UsePackageRefForLyciaOnPack>false</UsePackageRefForLyciaOnPack>
+	</PropertyGroup>
 
-    <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' == 'true'">
-        <PackageReference Include="Lycia" Version="[1.17.0-beta, 1.18.0)" />
-        <ProjectReference Remove="..\Lycia\Lycia.csproj" />
-    </ItemGroup>
-    
-    <ItemGroup>
-        <!-- Only if required, but don't let it leak into the package order -->
-        <ProjectReference Include="..\Lycia.Infrastructure\Lycia.Infrastructure.csproj" PrivateAssets="All" />
-        <ProjectReference Include="..\Lycia.Messaging\Lycia.Messaging.csproj" PrivateAssets="All" />
-    </ItemGroup>
+	<ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' != 'true'">
+		<ProjectReference Include="..\Lycia\Lycia.csproj" />
+	</ItemGroup>
 
-  <!-- Remove Infrastructure ProjectReference when packing -->
-    <Target Name="RemoveInfraProjectRefForPack" BeforeTargets="PrepareForPack">
-        <ItemGroup>
-            <ProjectReference Remove="..\Lycia.Infrastructure\Lycia.Infrastructure.csproj" />
-            <ProjectReference Remove="..\Lycia.Messaging\Lycia.Messaging.csproj" />
-        </ItemGroup>
-    </Target>
+	<ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' == 'true'">
+		<PackageReference Include="Lycia" Version="[1.17.0-beta, 1.18.0)" />
+		<ProjectReference Remove="..\Lycia\Lycia.csproj" />
+	</ItemGroup>
 
-    <ItemGroup>
-        <Folder Include="Retry\"/>
-    </ItemGroup>
+	<ItemGroup>
+		<!-- Only if required, but don't let it leak into the package order -->
+		<ProjectReference Include="..\Lycia.Infrastructure\Lycia.Infrastructure.csproj" PrivateAssets="All" />
+		<ProjectReference Include="..\Lycia.Messaging\Lycia.Messaging.csproj" PrivateAssets="All" />
+	</ItemGroup>
+
+	<!-- Remove Infrastructure ProjectReference when packing -->
+	<Target Name="RemoveInfraProjectRefForPack" BeforeTargets="PrepareForPack">
+		<ItemGroup>
+			<ProjectReference Remove="..\Lycia.Infrastructure\Lycia.Infrastructure.csproj" />
+			<ProjectReference Remove="..\Lycia.Messaging\Lycia.Messaging.csproj" />
+		</ItemGroup>
+	</Target>
+
+	<ItemGroup>
+		<Folder Include="Retry\"/>
+	</ItemGroup>
 
 </Project>

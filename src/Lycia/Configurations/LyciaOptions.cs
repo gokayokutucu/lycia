@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace Lycia.Saga.Configurations
+namespace Lycia.Configurations
 {
     public class LyciaOptions
     {

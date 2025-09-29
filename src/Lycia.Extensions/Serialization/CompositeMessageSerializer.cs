@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using Avro.Generic;
 using Avro.Specific;
-using Lycia.Saga.Abstractions;
+using Lycia.Abstractions;
 
 namespace Lycia.Extensions.Serialization;
 public sealed class CompositeMessageSerializer : IMessageSerializer

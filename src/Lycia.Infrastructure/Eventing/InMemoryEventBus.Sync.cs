@@ -5,8 +5,8 @@
 
 #if NETSTANDARD2_0
 using Lycia.Messaging;
-using Lycia.Saga;
-using Lycia.Saga.Abstractions; // ISagaDispatcher is likely here or in Lycia.Infrastructure.Abstractions
+using Lycia;
+using Lycia.Abstractions; // ISagaDispatcher is likely here or in Lycia.Infrastructure.Abstractions
 
 namespace Lycia.Infrastructure.Eventing;
 

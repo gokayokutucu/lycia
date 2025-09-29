@@ -2,8 +2,9 @@
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 using Lycia.Extensions;
+using Lycia.Extensions;
+using Lycia.Exceptions;
 using Lycia.Extensions.Logging;
-using Lycia.Saga.Exceptions;
 using Polly;
 using Serilog;
 
@@ -39,6 +40,7 @@ builder.Services
     //             .WithRetryPolicy<PollyBasedRetry>();
     //     });
     // }, builder.Configuration)
+    //.UseMessageSerializer<MyCustomSerializer>()
     .UseSagaMiddleware(opt =>
     {
          opt.AddMiddleware<SerilogLoggingMiddleware>();

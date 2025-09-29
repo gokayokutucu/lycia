@@ -19,7 +19,9 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\..\src\Lycia.Saga\Lycia.Saga.csproj" />
+      <ProjectReference Include="..\..\src\Lycia.Extensions\Lycia.Extensions.csproj" />
+      <ProjectReference Include="..\..\src\Lycia.Messaging\Lycia.Messaging.csproj" />
+      <ProjectReference Include="..\..\src\Lycia\Lycia.csproj" />
     </ItemGroup>
 
 </Project>

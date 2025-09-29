@@ -2,7 +2,7 @@
 using Avro;
 using Avro.IO;
 using Avro.Specific;
-using Lycia.Saga.Abstractions;
+using Lycia.Abstractions;
 
 namespace Lycia.Extensions.Serialization;
 

@@ -1,9 +1,9 @@
 using Autofac;
-using Lycia.Saga.Configurations;
+using Lycia.Configurations;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Lycia.Saga.Common;
+namespace Lycia.Common;
 
 public interface ILyciaContainerBuilder
 {

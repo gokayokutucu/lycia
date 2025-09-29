@@ -1,0 +1,130 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
+        <LangVersion>preview</LangVersion>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <SuppressProjectReferenceDependenciesWhenPacking>true</SuppressProjectReferenceDependenciesWhenPacking>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <Authors>M. Gokay Okutucu</Authors>
+        <Description>Lycia is a lightweight, production-ready Saga infrastructure for .NET (netstandard2.0+).
+            It provides idempotent distributed transaction orchestration with built-in support for:
+            - Compensation flows (orchestration and choreography)
+            - SagaDispatcher with middleware pipeline
+            - Retry, cancellation, and timeout policies
+            - Redis and in-memory saga stores
+            - RabbitMQ and in-memory event bus integrations
+            - Structured logging, observability, and DLQ support
+
+            Designed for microservices and cloud-native architectures, Lycia helps you build reliable workflows and long-running transactions without boilerplate code.
+        </Description>
+        <Copyright>Copyright (c) 2025 M. Gokay Okutucu</Copyright>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <PackageProjectUrl>https://github.com/gokayokutucu/lycia</PackageProjectUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <RepositoryUrl>https://github.com/gokayokutucu/lycia</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PackageTags>saga distributed-transaction workflow orchestration choreography idempotency retry timeout compensation middleware rabbitmq redis microservices event-driven</PackageTags>
+    </PropertyGroup>
+
+	<!--<PropertyGroup>
+		<GenerateReferenceAssembly>false</GenerateReferenceAssembly>
+		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+		<PackageId>Lycia</PackageId>
+		<Version>1.0.0</Version>
+		<Authors>gokay.okutucu</Authors>
+		<Company>PeopleCert</Company>
+		<Description>Internal messaging saga library for PeopleCert projects</Description>
+		<PackageTags>messaging internal</PackageTags>
+		<RepositoryUrl>https://github.com/gokayokutucu/lycia.git</RepositoryUrl>
+	</PropertyGroup>-->
+
+	<!--<Target Name="PublishNupkgToShare" AfterTargets="Pack">
+		<ItemGroup>
+			<_Nupkg Include="$(PackageOutputPath)\$(PackageId).$(Version).nupkg" />
+		</ItemGroup>
+		<Copy SourceFiles="@(_Nupkg)" DestinationFolder="\\if-srv-nas\R&amp;D_Files\PASSPORT\gkuvandik\nuget-packages" SkipUnchangedFiles="true" Condition="Exists('%(Identity)')" />
+	</Target>-->
+
+	<PropertyGroup>
+       <!-- Attach a custom target to include "reference project" outputs under lib/<tfm>/ -->
+        <TargetsForTfmSpecificBuildOutput>
+            $(TargetsForTfmSpecificBuildOutput);_Lycia_IncludeInternalLibs
+        </TargetsForTfmSpecificBuildOutput>
+
+        <!-- (Optional) Include XML documentation files in the package -->
+        <AllowedOutputExtensionsInPackageBuildOutputFolder>
+            $(AllowedOutputExtensionsInPackageBuildOutputFolder);.xml
+        </AllowedOutputExtensionsInPackageBuildOutputFolder>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Keep internal projects as ProjectReference for local builds,
+        but do not include them as NuGet dependencies -->
+        <ProjectReference Include="..\Lycia.Messaging\Lycia.Messaging.csproj" PrivateAssets="All" />
+    </ItemGroup>
+
+    <Target Name="_Lycia_IncludeInternalLibs" DependsOnTargets="ResolveReferences">
+        <ItemGroup>
+            <!-- Select only DLLs originating from ProjectReference and matching names -->
+            <_Lycia_InternalAssemblies Include="@(ReferenceCopyLocalPaths)"
+                                       Condition="
+        '%(ReferenceCopyLocalPaths.ReferenceSourceTarget)' == 'ProjectReference' and
+        (
+          '$([System.String]::Copy(%(ReferenceCopyLocalPaths.Filename)))' == 'Lycia.Messaging'
+          or
+          '$([System.String]::Copy(%(ReferenceCopyLocalPaths.Filename)))' == 'Lycia.Infrastructure'
+        )
+        and '$([System.String]::Copy(%(ReferenceCopyLocalPaths.Extension))).ToLower()' == '.dll'
+      " />
+
+            <!-- Place under lib/<tfm>/: NuGet automatically makes these files compile/runtime assets -->
+            <BuildOutputInPackage Include="@(_Lycia_InternalAssemblies)" />
+        </ItemGroup>
+    </Target>
+
+	<!-- netstandard2.0 -->
+	<ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+		<PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="6.0.0" />
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="6.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Options" Version="6.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Primitives" Version="6.0.0" />
+		<PackageReference Include="Scrutor" Version="4.2.2" />
+		<PackageReference Include="System.Configuration.ConfigurationManager" Version="6.0.0" />
+	</ItemGroup>
+
+	<!-- net8.0 -->
+	<ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
+		<PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="8.0.0" />
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+		<PackageReference Include="Microsoft.Extensions.Options" Version="8.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Primitives" Version="8.0.0" />
+		<PackageReference Include="Scrutor" Version="6.1.0" />
+		<PackageReference Include="System.Configuration.ConfigurationManager" Version="8.0.0" />
+	</ItemGroup>
+
+	<!-- net9.0 (preview) -->
+	<ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
+		<PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="9.0.9" />
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.9" />
+		<PackageReference Include="Microsoft.Extensions.Options" Version="9.0.9" />
+		<PackageReference Include="Microsoft.Extensions.Primitives" Version="9.0.9" />
+		<PackageReference Include="Scrutor" Version="6.1.0" />
+		<PackageReference Include="System.Configuration.ConfigurationManager" Version="9.0.9" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+		<PackageReference Include="Autofac" Version="7.1.0" />
+		<PackageReference Include="Autofac.Extensions.DependencyInjection" Version="8.0.0" />
+		<PackageReference Include="Autofac.WebApi2" Version="6.1.1" />
+	</ItemGroup>
+
+    <ItemGroup>
+        <None Include="..\..\README.md" Pack="true" PackagePath=""/>
+    </ItemGroup>
+
+</Project>

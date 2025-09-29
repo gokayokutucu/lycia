@@ -1,4 +1,4 @@
-namespace Lycia.Saga;
+namespace Lycia;
 
 #if NETSTANDARD2_0
 using System;

@@ -332,9 +332,9 @@
       <Project>{bd73c6ec-e726-4b73-9f7b-f10e06b2d6c3}</Project>
       <Name>Lycia.Messaging</Name>
     </ProjectReference>
-    <ProjectReference Include="..\..\src\Lycia.Saga\Lycia.Saga.csproj">
+    <ProjectReference Include="..\..\src\Lycia\Lycia.csproj">
       <Project>{a49dceda-15c8-410a-9ecd-229644de5559}</Project>
-      <Name>Lycia.Saga</Name>
+      <Name>Lycia</Name>
     </ProjectReference>
     <ProjectReference Include="..\Sample_Net48.Shared\Sample_Net48.Shared.csproj">
       <Project>{88ba340c-179e-450b-af20-c6c5cd9fa7bf}</Project>

@@ -5,10 +5,10 @@
 using System.Collections.Concurrent;
 using Lycia.Messaging;
 using Lycia.Messaging.Enums;
-using Lycia.Saga.Abstractions;
-using Lycia.Saga.Extensions;
+using Lycia.Abstractions;
+using Lycia.Extensions;
 
-namespace Lycia.Saga;
+namespace Lycia;
 
 public class SagaContext<TInitialMessage>(
     Guid sagaId,
