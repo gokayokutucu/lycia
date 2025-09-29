@@ -47,7 +47,7 @@
         </MSBuild>
 
         <ItemGroup>
-            <!-- Ship the referenced project outputs as-is -->
+            <!-- Shipp the referenced project outputs as-is -->
             <BuildOutputInPackage Include="@(_Lycia_InternalAssemblies)"/>
 
             <!-- Include matching XML docs when present -->
