@@ -127,7 +127,7 @@ jobs:
         run: dotnet restore Lycia.sln
 
       - name: Build (Release)
-        run: dotnet build Lycia.sln -c Release --no-restore
+        run: dotnet build Lycia.sln -c Release
 
       - name: Show computed version (optional)
         run: |
@@ -136,7 +136,7 @@ jobs:
 
       # ---- Pack each public package explicitly ----
       - name: Pack Lycia (core)
-        run: dotnet pack src/Lycia/Lycia.csproj -c Release -o ./nupkgs /p:ContinuousIntegrationBuild=true
+        run: dotnet pack src/Lycia/Lycia.csproj -c Release -o ./nupkgs -p:IncludeSymbols=false /p:ContinuousIntegrationBuild=true
 
       - name: Push Lycia
         run: dotnet nuget push "nupkgs/Lycia.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ secrets.NUGET_API_KEY }}" --skip-duplicate
