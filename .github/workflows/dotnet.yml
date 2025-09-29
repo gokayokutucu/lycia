@@ -138,12 +138,21 @@ jobs:
       - name: Pack Lycia (core)
         run: dotnet pack src/Lycia/Lycia.csproj -c Release -o ./nupkgs -p:IncludeSymbols=false /p:ContinuousIntegrationBuild=true
 
-      - name: Push Lycia
+      - name: Push Lycia (nuget.org)
         run: dotnet nuget push "nupkgs/Lycia.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ secrets.NUGET_API_KEY }}" --skip-duplicate
 
-      - name: Pack Lycia.Extensions (range ile)
-        run: dotnet pack src/Lycia.Extensions/Lycia.Extensions.csproj -c Release -o ./nupkgs /p:UsePackageRefForLyciaOnPack=true /p:ContinuousIntegrationBuild=true
-
+      - name: Restore Extensions (prefer local Lycia)
+        run: dotnet restore src/Lycia.Extensions/Lycia.Extensions.csproj \
+               -s "$GITHUB_WORKSPACE/nupkgs" \
+               -s https://api.nuget.org/v3/index.json
+               
+      - name: Pack Lycia.Extensions (uses Lycia package)
+        run: dotnet pack src/Lycia.Extensions/Lycia.Extensions.csproj -c Release \
+               -o ./nupkgs \
+               -p:UsePackageRefForLyciaOnPack=true \
+               -p:ContinuousIntegrationBuild=true \
+               --no-restore
+               
       - name: Push Lycia.Extensions
         run: dotnet nuget push "nupkgs/Lycia.Extensions.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ secrets.NUGET_API_KEY }}" --skip-duplicate
 
