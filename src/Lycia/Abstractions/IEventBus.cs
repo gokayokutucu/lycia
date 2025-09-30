@@ -1,12 +1,12 @@
 // Copyright 2023 Lycia Contributors
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
+#if NET8_0_OR_GREATER
 using System.Runtime.CompilerServices;
 using Lycia.Messaging;
 
 namespace Lycia.Abstractions;
 
-#if NET8_0_OR_GREATER
 public interface IEventBus
 {
     /// <summary>

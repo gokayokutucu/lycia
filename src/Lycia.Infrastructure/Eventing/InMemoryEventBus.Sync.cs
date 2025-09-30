@@ -5,8 +5,8 @@
 
 #if NETSTANDARD2_0
 using Lycia.Messaging;
-using Lycia;
 using Lycia.Abstractions; // ISagaDispatcher is likely here or in Lycia.Infrastructure.Abstractions
+using System.Threading;
 
 namespace Lycia.Infrastructure.Eventing;
 
@@ -19,6 +19,7 @@ public class InMemoryEventBus(Lazy<ISagaDispatcher> sagaDispatcherLazy) : IEvent
     public void Send<TCommand>(TCommand command, Type? handlerType = null, Guid? sagaId = null,
         CancellationToken cancellationToken = default) where TCommand : ICommand
     {
+        Task sth;
         // The sagaId parameter passed to Send/Publish is not directly used by Dispatch,
         // as Dispatch typically resolves SagaId from the message properties or generates it.
         // The original implementation also didn't use the sagaId parameter in its call to Dispatch.

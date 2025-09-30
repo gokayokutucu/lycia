@@ -61,7 +61,7 @@ public class SagaContext<TInitialMessage>(
                 SagaStore, compensationCoordinator);
 
         return (ISagaStepFluent)ReactiveSagaStepFluent<TInitialMessage>.Create(
-            CurrentStep.GetType(),
+            typeof(TInitialMessage),
             adapterContext,
             Operation);
         Task Operation() => Publish(nextEvent, null, cancellationToken);
@@ -79,7 +79,7 @@ public class SagaContext<TInitialMessage>(
                 SagaStore, compensationCoordinator);
 
         return (ISagaStepFluent)ReactiveSagaStepFluent<TInitialMessage>.Create(
-            CurrentStep.GetType(),
+            typeof(TInitialMessage),
             adapterContext,
             Operation);
         Task Operation() => Send(nextCommand, cancellationToken);

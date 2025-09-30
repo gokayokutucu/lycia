@@ -2,15 +2,11 @@
 
 	<PropertyGroup>
 		<TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
-		<LangVersion>preview</LangVersion>
+		<GenerateReferenceAssembly>false</GenerateReferenceAssembly>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
-		<IsPackable>false</IsPackable>
-	</PropertyGroup>
-
-	<!--<PropertyGroup>
-		<GenerateReferenceAssembly>false</GenerateReferenceAssembly>
 		<LangVersion>preview</LangVersion>
+
 		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
 		<PackageId>Lycia.Infrastructure</PackageId>
 		<Version>1.0.0</Version>
@@ -19,9 +15,9 @@
 		<Description>Internal messaging infrastructure library for PeopleCert projects</Description>
 		<PackageTags>messaging internal</PackageTags>
 		<RepositoryUrl>https://github.com/gokayokutucu/lycia.git</RepositoryUrl>
-	</PropertyGroup>-->
+	</PropertyGroup>
 
-	<!--<Target Name="PublishNupkgToShare" AfterTargets="Pack">
+	<Target Name="PublishNupkgToShare" AfterTargets="Pack">
 		<ItemGroup>
 			<_Nupkg Include="$(PackageOutputPath)\$(PackageId).$(Version).nupkg" />
 		</ItemGroup>
@@ -30,11 +26,10 @@
 		  DestinationFolder="\\if-srv-nas\R&amp;D_Files\PASSPORT\gkuvandik\nuget-packages"
 		  SkipUnchangedFiles="true"
 		  Condition="Exists('%(Identity)')" />
-	</Target>-->
+	</Target>
 
 	<ItemGroup>
-		<ProjectReference Include="..\Lycia.Messaging\Lycia.Messaging.csproj" PrivateAssets="all"/>
-		<ProjectReference Include="..\Lycia\Lycia.csproj" PrivateAssets="all" />
+		<ProjectReference Include="..\Lycia\Lycia.csproj" />
 	</ItemGroup>
 
 	<!-- netstandard2.0 -->
@@ -44,7 +39,6 @@
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="6.0.0" />
 		<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="6.0.0" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="6.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Primitives" Version="6.0.0" />
 	</ItemGroup>
 
 	<!-- net8.0 -->
@@ -53,7 +47,6 @@
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
 		<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
-		<PackageReference Include="Microsoft.Extensions.Primitives" Version="8.0.0" />
 	</ItemGroup>
 
 	<!-- net9.0 (preview) -->
@@ -62,13 +55,10 @@
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.9" />
 		<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.0.9" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.9" />
-		<PackageReference Include="Microsoft.Extensions.Primitives" Version="9.0.9" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="morelinq" Version="4.4.0" />
 		<PackageReference Include="Newtonsoft.Json" Version="13.0.3"/>
 		<PackageReference Include="Polly" Version="8.6.3" />
 	</ItemGroup>
-
 </Project>

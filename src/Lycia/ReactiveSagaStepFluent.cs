@@ -7,9 +7,7 @@ using Lycia.Messaging;
 
 namespace Lycia;
 
-public class ReactiveSagaStepFluent<TInitialMessage>(
-    ISagaContext<TInitialMessage> context,
-    Func<Task> operation) : ISagaStepFluent
+public class ReactiveSagaStepFluent<TInitialMessage>(ISagaContext<TInitialMessage> context, Func<Task> operation) : ISagaStepFluent
     where TInitialMessage : IMessage
 {
     public static object Create(Type stepType, object context, Func<Task> operation)
