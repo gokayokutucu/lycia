@@ -1,12 +1,10 @@
-using Lycia.Infrastructure.Middleware;
-using Lycia.Abstractions;
 using Lycia.Middleware;
-using Lycia.Infrastructure.Retry;
+using Lycia.Retry;
+using Lycia.Saga.Abstractions;
+using Lycia.Saga.Abstractions.Contexts;
 using Serilog;
 
 namespace Lycia.Extensions.Logging;
-
-
 
 /// <summary>
 /// Middleware implementation for saga handling that provides logging capabilities using Serilog.
@@ -18,9 +16,8 @@ public sealed class SerilogLoggingMiddleware(
     : ILoggingSagaMiddleware
 {
     private readonly ILogger _logger = logger ?? Log.ForContext<SerilogLoggingMiddleware>();
-    private readonly ISagaContextAccessor? _accessor = accessor;
 
-    public Task InvokeAsync(SagaContextInvocationContext context, Func<Task> next)
+    public Task InvokeAsync(IInvocationContext context, Func<Task> next)
     {
         void OnRetry(RetryContext rc)
         {
