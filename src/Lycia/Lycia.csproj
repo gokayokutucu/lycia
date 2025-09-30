@@ -7,15 +7,15 @@
         <Nullable>enable</Nullable>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
 
-        <!-- Proje referanslarını nuspec'e dependency olarak yazma -->
+        <!-- Write project references as dependencies in nuspec -->
         <SuppressProjectReferenceDependenciesWhenPacking>true</SuppressProjectReferenceDependenciesWhenPacking>
 
-        <!-- Per-TFM pack pipeline'a iç DLL toplama hedefini bağla -->
+        <!-- Bind internal DLL collection target to per-TFM pack pipeline -->
         <TargetsForTfmSpecificBuildOutput>
             $(TargetsForTfmSpecificBuildOutput);_Lycia_IncludeInternalLibs
         </TargetsForTfmSpecificBuildOutput>
 
-        <!-- XML dokümanlarını lib/<tfm>/ altına koyabilmek için -->
+        <!-- To put XML documentation under lib/<tfm>/ -->
         <AllowedOutputExtensionsInPackageBuildOutputFolder>
             $(AllowedOutputExtensionsInPackageBuildOutputFolder);.xml
         </AllowedOutputExtensionsInPackageBuildOutputFolder>
@@ -24,14 +24,34 @@
         <RepositoryType>git</RepositoryType>
     </PropertyGroup>
 
-    <!-- İç projeler: sadece build'te kullanılacak, paket bağımlılığı olarak sızmayacak -->
+    <PropertyGroup>
+        <Authors>M. Gokay Okutucu</Authors>
+        <Description>Lycia is a lightweight, production-ready Saga infrastructure for .NET (netstandard2.0+).
+            It provides idempotent distributed transaction orchestration with built-in support for:
+            - Compensation flows (orchestration and choreography)
+            - SagaDispatcher with middleware pipeline
+            - Retry, cancellation, and timeout policies
+            - Redis and in-memory saga stores
+            - RabbitMQ and in-memory event bus integrations
+            - Structured logging, observability, and DLQ support
+
+            Designed for microservices and cloud-native architectures, Lycia helps you build reliable workflows and long-running transactions without boilerplate code.
+        </Description>
+        <Copyright>Copyright (c) 2025 M. Gokay Okutucu</Copyright>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <PackageProjectUrl>https://github.com/gokayokutucu/lycia</PackageProjectUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <PackageTags>saga distributed-transaction workflow orchestration choreography idempotency retry timeout compensation middleware rabbitmq redis microservices event-driven</PackageTags>
+    </PropertyGroup>
+
+    <!-- Internal projects: only used for build, will not leak as package dependencies -->
     <ItemGroup>
         <ProjectReference Include="..\Lycia.Saga\Lycia.Saga.csproj" PrivateAssets="All"/>
         <ProjectReference Include="..\Lycia.Saga.Abstractions\Lycia.Saga.Abstractions.csproj" PrivateAssets="All"/>
         <ProjectReference Include="..\Lycia.Common\Lycia.Common.csproj" PrivateAssets="All"/>
     </ItemGroup>
 
-    <!-- İç projelerin dll/xml'lerini lib/<tfm>/ altına koy -->
+    <!-- Put DLL/XMLs of internal projects under lib/<tfm>/ -->
     <Target Name="_Lycia_IncludeInternalLibs" DependsOnTargets="ResolveReferences">
         <ItemGroup>
             <_Lycia_Internal Include="@(ReferenceCopyLocalPaths)"
@@ -51,7 +71,7 @@
     </Target>
 
     <ItemGroup>
-        <!-- Lycia'nın kendi bağımlılıkları -->
+        <!-- Lycia's own dependencies -->
         <PackageReference Include="Nerdbank.GitVersioning" Version="3.*" PrivateAssets="all"/>
         <PackageReference Include="System.Configuration.ConfigurationManager" Version="9.0.9"/>
         <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="9.0.9"/>
@@ -62,8 +82,8 @@
         <PackageReference Include="Scrutor" Version="6.0.1"/>
         <PackageReference Include="Polly" Version="8.6.3"/>
 
-        <!-- İç projelerin (Saga/Abstractions/Common) dış paketleri de Lycia'ya eklenmeli
-             ki nuspec'e dependency olarak yazılsın (özellikle netstandard2.0 için şart) -->
+        <!-- External packages of internal projects (Saga/Abstractions/Common) should also be added to Lycia
+             so they are written as dependencies in nuspec (especially required for netstandard2.0) -->
         <PackageReference Include="System.Memory" Version="4.5.5"/>
         <PackageReference Include="System.Threading.Tasks.Extensions" Version="4.5.4"/>
         <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="9.0.9"/>

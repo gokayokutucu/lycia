@@ -9,31 +9,49 @@
         <RepositoryUrl>https://github.com/gokayokutucu/lycia</RepositoryUrl>
         <RepositoryType>git</RepositoryType>
 
-        <!-- Proje referanslarının nuspec'e dependency olarak yazılmasını engelle -->
+        <!-- Prevent writing project references as dependencies in nuspec -->
         <SuppressProjectReferenceDependenciesWhenPacking>true</SuppressProjectReferenceDependenciesWhenPacking>
 
-        <!-- Pack sırasında Lycia için paket referansı kullanacağız -->
+        <!-- During pack, we will use package reference for Lycia -->
         <UsePackageRefForLyciaOnPack>false</UsePackageRefForLyciaOnPack>
 
-        <!-- XML'ler için (opsiyonel) -->
+        <!-- For XMLs (optional) -->
         <AllowedOutputExtensionsInPackageBuildOutputFolder>
             $(AllowedOutputExtensionsInPackageBuildOutputFolder);.xml
         </AllowedOutputExtensionsInPackageBuildOutputFolder>
     </PropertyGroup>
 
     <PropertyGroup>
+        <Authors>M. Gokay Okutucu</Authors>
+        <Description>Lycia.Extensions provides pluggable modules and integrations for the Lycia Saga framework.
+            It offers ready-to-use extensions for configuration, middleware, retry, scheduling, and observability:
+            - Fluent DI registration (AddLycia with ConfigureSaga, ConfigureEventBus, ConfigureRetry, ConfigureScheduling)
+            - Built-in retry policies with Polly integration
+            - Configurable middleware slots (logging, retry, custom middlewares)
+            - Health check integration (IHealthCheck)
+            - Scheduling extensions with Redis-based storage
+
+            Keep your Saga setup modular, extensible, and production-grade. Add only the components you need.
+        </Description>
+        <Copyright>Copyright (c) 2025 M. Gokay Okutucu</Copyright>
+        <PackageProjectUrl>https://github.com/gokayokutucu/lycia</PackageProjectUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <PackageTags>saga distributed-transaction workflow orchestration choreography idempotency retry timeout compensation middleware rabbitmq redis microservices event-driven</PackageTags>
+    </PropertyGroup>
+
+    <PropertyGroup>
         <LyciaMinVersion>1.17.0-beta</LyciaMinVersion> <!-- default -->
     </PropertyGroup>
 
-    <!-- Yerel geliştirme: projeden projeye -->
+    <!-- Local development: project-to-project -->
     <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' != 'true'">
         <ProjectReference Include="..\Lycia\Lycia.csproj" PrivateAssets="All"/>
         <ProjectReference Include="..\Lycia.Saga\Lycia.Saga.csproj" PrivateAssets="All"/>
     </ItemGroup>
 
-    <!-- Pack/CI: sadece Lycia paketine bağımlı ol -->
+    <!-- Pack/CI: depend only on Lycia package -->
     <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' == 'true'">
-        <!-- Range önerisi: yayın sırası dalgalansa da restore edebil -->
+        <!-- Range suggestion: even if release order fluctuates, allow restore -->
         <PackageReference Include="Lycia" Version="[$(LyciaMinVersion),)"/>
         <ProjectReference Remove="..\Lycia\Lycia.csproj"/>
         <ProjectReference Remove="..\Lycia.Saga\Lycia.Saga.csproj"/>
