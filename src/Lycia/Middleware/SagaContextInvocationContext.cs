@@ -1,12 +1,13 @@
-using Lycia.Abstractions;
-using Lycia.Messaging;
+using Lycia.Saga.Abstractions;
+using Lycia.Saga.Abstractions.Contexts;
+using Lycia.Saga.Abstractions.Messaging;
 
 namespace Lycia.Middleware;
 
 /// <summary>
 /// Context passed to ISagaMiddleware during saga handler invocation.
 /// </summary>
-public sealed class SagaContextInvocationContext
+public sealed class SagaContextInvocationContext : IInvocationContext
 {
     public IMessage Message { get; set; } = null!;
     public ISagaContext? SagaContext { get; set; }

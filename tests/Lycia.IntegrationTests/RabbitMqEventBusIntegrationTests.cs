@@ -6,9 +6,10 @@ using FluentAssertions;
 using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Eventing;
 using Lycia.Extensions.Serialization;
-using Lycia.Messaging;
-using Lycia.Handlers;
+
 using Lycia.Helpers;
+using Lycia.Saga.Messaging;
+using Lycia.Saga.Messaging.Handlers;
 using Microsoft.Extensions.Logging.Abstractions;
 using RabbitMQ.Client;
 using Testcontainers.RabbitMq;

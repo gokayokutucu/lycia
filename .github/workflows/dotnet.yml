@@ -86,7 +86,6 @@ jobs:
       - name: Build (Release)
         run: dotnet build Lycia.sln -c Release --no-restore
 
-      # Ortam değişkenleri testlerin appsettings/Options'larında kullanılıyorsa:
       - name: Run integration tests
         env:
           LYCIA__EVENTBUS__CONNECTIONSTRING: amqp://guest:guest@127.0.0.1:5672/
@@ -119,43 +118,98 @@ jobs:
             9.0.x
             8.0.x
             6.0.x
-            
-      - name: Clear NuGet caches (CI)
+
+      - name: Clear NuGet caches
         run: dotnet nuget locals all --clear
 
-      - name: Restore
+      # (Optional) it creates a nuget.config for local feed and mapping
+      - name: Create nuget.config with source mapping
+        run: |
+          cat > nuget.config <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+              <add key="local" value="./artifacts/nupkgs" />
+            </packageSources>
+            <packageSourceMapping>
+              <!-- Lycia isimli paket local'den çözülsün -->
+              <packageSource key="local">
+                <package pattern="Lycia" />
+              </packageSource>
+              <!-- Diğer her şey nuget.org -->
+              <packageSource key="nuget.org">
+                <package pattern="*" />
+              </packageSource>
+            </packageSourceMapping>
+          </configuration>
+          XML
+
+      - name: Restore (solution)
         run: dotnet restore Lycia.sln
 
       - name: Build (Release)
-        run: dotnet build Lycia.sln -c Release
+        run: dotnet build Lycia.sln -c Release --no-restore /p:ContinuousIntegrationBuild=true
 
-      - name: Show computed version (optional)
+      - name: Show computed version (SemVer2)
         run: |
           dotnet tool install -g nbgv || true
           nbgv get-version -v SemVer2
 
-      # ---- Pack each public package explicitly ----
-      - name: Pack Lycia (core)
-        run: dotnet pack src/Lycia/Lycia.csproj -c Release -o ./nupkgs -p:IncludeSymbols=false /p:ContinuousIntegrationBuild=true
+      # ---- Pack + Push Lycia (Core) ----
+      - name: Pack Lycia
+        run: dotnet pack src/Lycia/Lycia.csproj -c Release -o artifacts/nupkgs /p:ContinuousIntegrationBuild=true --no-restore
+
+      - name: Validate Lycia package contents
+        run: |
+          ls -la artifacts/nupkgs
+          PKG=$(ls artifacts/nupkgs/Lycia.*.nupkg | sort -V | tail -n1)
+          echo "Lycia nupkg: $PKG"
+          unzip -l "$PKG" | sed -n '1,200p'
 
       - name: Push Lycia (nuget.org)
-        run: dotnet nuget push "nupkgs/Lycia.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ secrets.NUGET_API_KEY }}" --skip-duplicate
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: dotnet nuget push "artifacts/nupkgs/Lycia.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
 
-      - name: Restore Extensions (prefer local Lycia)
-        run: dotnet restore src/Lycia.Extensions/Lycia.Extensions.csproj \
-               -s "$GITHUB_WORKSPACE/nupkgs" \
-               -s https://api.nuget.org/v3/index.json
-               
-      - name: Pack Lycia.Extensions (uses Lycia package)
-        run: dotnet pack src/Lycia.Extensions/Lycia.Extensions.csproj -c Release \
-               -o ./nupkgs \
-               -p:UsePackageRefForLyciaOnPack=true \
-               -p:ContinuousIntegrationBuild=true
-               
-      - name: Push Lycia.Extensions
-        run: dotnet nuget push "nupkgs/Lycia.Extensions.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "${{ secrets.NUGET_API_KEY }}" --skip-duplicate
+      # ---- Compute Lycia floor (strip commit hash) ----
+      - name: Compute Lycia min floor (strip commit hash)
+        id: floor
+        run: |
+          LATEST=$(ls artifacts/nupkgs/Lycia.*.nupkg | sort -V | tail -n1)
+          VER=${LATEST##*/Lycia.}
+          VER=${VER%.nupkg}
+          # '1.17.0-beta-0023-gxxxx' -> '1.17.0-beta-0023'
+          FLOOR=$(echo "$VER" | sed -E 's/-g[0-9a-f]+$//')
+          echo "Lycia floor: $FLOOR"
+          echo "floor=$FLOOR" >> $GITHUB_OUTPUT
 
-      # - name: Pack Lycia.Scheduling
-      #   run: dotnet pack src/Lycia.Scheduling/Lycia.Scheduling.csproj -c Release -o ./nupkgs
-      # - name: Pack Lycia.Extensions.Scheduling.Redis
-      #   run: dotnet pack src/Lycia.Extensions.Scheduling.Redis/Lycia.Extensions.Scheduling.Redis.csproj -c Release -o ./nupkgs
+      # ---- Restore + Pack + Push Lycia.Extensions ----
+      - name: Restore Extensions with floor (pack mode)
+        run: |
+          dotnet restore src/Lycia.Extensions/Lycia.Extensions.csproj \
+            -p:UsePackageRefForLyciaOnPack=true \
+            -p:LyciaMinVersion='${{ steps.floor.outputs.floor }}' \
+            --source "./artifacts/nupkgs" --source "https://api.nuget.org/v3/index.json"
+
+      - name: Pack Extensions (no restore)
+        run: |
+          dotnet pack src/Lycia.Extensions/Lycia.Extensions.csproj -c Release \
+            -o artifacts/nupkgs \
+            -p:ContinuousIntegrationBuild=true \
+            -p:UsePackageRefForLyciaOnPack=true \
+            -p:LyciaMinVersion='${{ steps.floor.outputs.floor }}' \
+            --no-restore
+
+      - name: Validate Lycia.Extensions package contents
+        run: |
+          PKG=$(ls artifacts/nupkgs/Lycia.Extensions.*.nupkg | sort -V | tail -n1)
+          echo "Lycia.Extensions nupkg: $PKG"
+          unzip -l "$PKG" | sed -n '1,200p'
+          echo "NUSPEC dependencies (should only contain Lycia):"
+          unzip -p "$PKG" *.nuspec | sed -n '1,200p'
+
+      - name: Push Lycia.Extensions (nuget.org)
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: dotnet nuget push "artifacts/nupkgs/Lycia.Extensions.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate

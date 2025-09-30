@@ -1,11 +1,11 @@
-using Lycia.Infrastructure.Middleware;
-using Lycia.Infrastructure.Retry;
-using Lycia.Exceptions;
 using Lycia.Middleware;
+using Lycia.Retry;
+using Lycia.Saga.Abstractions.Middlewares;
+using Lycia.Saga.Exceptions;
 using Polly;
 using Microsoft.Extensions.DependencyInjection;
 using Polly.Retry;
-using IRetryPolicy = Lycia.Infrastructure.Retry.IRetryPolicy;
+using IRetryPolicy = Lycia.Retry.IRetryPolicy;
 
 
 namespace Lycia.Tests.Retry

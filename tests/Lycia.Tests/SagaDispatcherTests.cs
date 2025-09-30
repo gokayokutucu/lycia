@@ -2,19 +2,14 @@
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 using Lycia.Extensions;
-using Lycia.Extensions.Serialization;
-using Lycia.Infrastructure.Compensating;
-using Lycia.Infrastructure.Dispatching;
-using Lycia.Infrastructure.Eventing;
-using Lycia.Infrastructure.Stores;
-using Lycia.Messaging;
-using Lycia.Messaging.Enums;
-using Lycia;
-using Lycia.Abstractions;
-using Lycia.Exceptions;
-using Lycia.Extensions;
-using Lycia.Handlers;
-using Lycia.Handlers.Abstractions;
+
+using Lycia.Common.Enums;
+using Lycia.Common.SagaSteps;
+using Lycia.Dispatching;
+using Lycia.Saga.Abstractions;
+using Lycia.Saga.Exceptions;
+using Lycia.Saga.Messaging;
+using Lycia.Saga.Messaging.Handlers;
 using Lycia.Tests.Helpers;
 using Lycia.Tests.Messages;
 using Lycia.Tests.Sagas;

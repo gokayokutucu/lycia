@@ -2,11 +2,12 @@
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 using System.Text;
-using Lycia.Abstractions;
 using Lycia.Extensions.Converters;
+using Lycia.Saga.Abstractions.Contexts;
+using Lycia.Saga.Abstractions.Serializers;
+using Lycia.Saga.Contexts;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
-using Newtonsoft.Json.Serialization;
 
 namespace Lycia.Extensions.Serialization;
 
@@ -31,7 +32,7 @@ public sealed class NewtonsoftJsonMessageSerializer : IMessageSerializer
 
     public (byte[] Body, IReadOnlyDictionary<string, object?> Headers) Serialize(
         object message,
-        MessageSerializationContext ctx)
+        IMessageSerializationContext ctx)
     {
         var typeName = ctx.ExplicitTypeName ?? message.GetType().AssemblyQualifiedName!;
         var json = JsonConvert.SerializeObject(message, Settings);
@@ -79,10 +80,12 @@ public sealed class NewtonsoftJsonMessageSerializer : IMessageSerializer
         throw new InvalidOperationException(errorMessage);
     }
 
+
+
     public object Deserialize(
         ReadOnlyMemory<byte> body,
         IReadOnlyDictionary<string, object?> headers,
-        MessageSerializationContext ctx)
+        IMessageSerializationContext ctx)
     {
         var typeName = GetRequiredHeaderString(headers, H_Type, "Missing lycia-type header.");
         var targetType = Type.GetType(typeName, throwOnError: true)!;
@@ -162,7 +165,7 @@ public sealed class NewtonsoftJsonMessageSerializer : IMessageSerializer
         return normalized;
     }
     
-    public (IReadOnlyDictionary<string, object?> Headers, MessageSerializationContext Ctx)
+    public (IReadOnlyDictionary<string, object?> Headers, IMessageSerializationContext Ctx)
         CreateContextFor(Type payloadType, string? schemaId = null, string? schemaVersion = null)
     {
         var headers = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)

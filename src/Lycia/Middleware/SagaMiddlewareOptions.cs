@@ -1,3 +1,5 @@
+using Lycia.Saga.Abstractions.Middlewares;
+
 namespace Lycia.Middleware;
 
 public sealed class SagaMiddlewareOptions
