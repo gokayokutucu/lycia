@@ -5,66 +5,68 @@
         <LangVersion>preview</LangVersion>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
-        <SuppressProjectReferenceDependenciesWhenPacking>true</SuppressProjectReferenceDependenciesWhenPacking>
-        <RepositoryUrl>https://github.com/gokayokutucu/lycia</RepositoryUrl>
-        <RepositoryType>git</RepositoryType>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    </PropertyGroup>
 
-    <PropertyGroup>
-        <!-- Attach a custom target to include "reference project" outputs under lib/<tfm>/ -->
+        <!-- Proje referanslarını nuspec'e dependency olarak yazma -->
+        <SuppressProjectReferenceDependenciesWhenPacking>true</SuppressProjectReferenceDependenciesWhenPacking>
+
+        <!-- Per-TFM pack pipeline'a iç DLL toplama hedefini bağla -->
         <TargetsForTfmSpecificBuildOutput>
             $(TargetsForTfmSpecificBuildOutput);_Lycia_IncludeInternalLibs
         </TargetsForTfmSpecificBuildOutput>
+
+        <!-- XML dokümanlarını lib/<tfm>/ altına koyabilmek için -->
+        <AllowedOutputExtensionsInPackageBuildOutputFolder>
+            $(AllowedOutputExtensionsInPackageBuildOutputFolder);.xml
+        </AllowedOutputExtensionsInPackageBuildOutputFolder>
+
+        <RepositoryUrl>https://github.com/gokayokutucu/lycia</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
     </PropertyGroup>
 
-    <PropertyGroup>
-        <!-- Switch: when true, use a NuGet dependency on Lycia instead of local project refs during pack/build -->
-        <UsePackageRefForLyciaOnPack>false</UsePackageRefForLyciaOnPack>
-    </PropertyGroup>
-
-    <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' != 'true'">
-        <!-- Local dev: reference projects directly (won't flow as NuGet deps due to PrivateAssets=All) -->
-        <ProjectReference Include="..\Lycia.Messaging\Lycia.Messaging.csproj" PrivateAssets="All"/>
+    <!-- İç projeler: sadece build'te kullanılacak, paket bağımlılığı olarak sızmayacak -->
+    <ItemGroup>
+        <ProjectReference Include="..\Lycia.Saga\Lycia.Saga.csproj" PrivateAssets="All"/>
+        <ProjectReference Include="..\Lycia.Saga.Abstractions\Lycia.Saga.Abstractions.csproj" PrivateAssets="All"/>
+        <ProjectReference Include="..\Lycia.Common\Lycia.Common.csproj" PrivateAssets="All"/>
     </ItemGroup>
 
-    <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' == 'true'">
-        <ProjectReference Remove="..\Lycia.Messaging\Lycia.Messaging.csproj"/>
-    </ItemGroup>
-
-    <Target Name="_Lycia_IncludeInternalLibs" DependsOnTargets="Build" Condition="'$(UsePackageRefForLyciaOnPack)' != 'true'">
-        <!-- Ensure we query outputs for the current TFM -->
-        <PropertyGroup>
-            <_Lycia_CurrentTFM>$(TargetFramework)</_Lycia_CurrentTFM>
-        </PropertyGroup>
-
-        <!-- Ask referenced projects for their TargetPath for this TFM -->
-        <MSBuild Projects="@(ProjectReference)"
-                 Targets="GetTargetPath"
-                 Properties="TargetFramework=$(_Lycia_CurrentTFM)"
-                 BuildInParallel="true">
-            <Output TaskParameter="TargetOutputs" ItemName="_Lycia_InternalAssemblies"/>
-        </MSBuild>
-
+    <!-- İç projelerin dll/xml'lerini lib/<tfm>/ altına koy -->
+    <Target Name="_Lycia_IncludeInternalLibs" DependsOnTargets="ResolveReferences">
         <ItemGroup>
-            <!-- Shipp the referenced project outputs as-is -->
-            <BuildOutputInPackage Include="@(_Lycia_InternalAssemblies)"/>
-
-            <!-- Include matching XML docs when present -->
-            <_Lycia_InternalXmlDocs Include="@(_Lycia_InternalAssemblies->'%(RootDir)%(Directory)%(Filename).xml')"
-                                    Condition="Exists('%(RootDir)%(Directory)%(Filename).xml')"/>
-            <BuildOutputInPackage Include="@(_Lycia_InternalXmlDocs)"/>
+            <_Lycia_Internal Include="@(ReferenceCopyLocalPaths)"
+                             Condition="
+          '%(ReferenceCopyLocalPaths.ReferenceSourceTarget)' == 'ProjectReference' and
+          '%(ReferenceCopyLocalPaths.Extension)' == '.dll' and
+          ( '%(ReferenceCopyLocalPaths.Filename)' == 'Lycia.Saga' or
+            '%(ReferenceCopyLocalPaths.Filename)' == 'Lycia.Saga.Abstractions' or
+            '%(ReferenceCopyLocalPaths.Filename)' == 'Lycia.Common' )
+        "/>
+            <BuildOutputInPackage Include="@(_Lycia_Internal)"/>
+            <BuildOutputInPackage
+                    Include="@(_Lycia_Internal->'%(RootDir)%(Directory)%(Filename).xml')"
+                    Condition="Exists('%(RootDir)%(Directory)%(Filename).xml')"/>
         </ItemGroup>
+        <Message Importance="High" Text="Lycia pack: @(_Lycia_Internal)"/>
     </Target>
 
     <ItemGroup>
+        <!-- Lycia'nın kendi bağımlılıkları -->
         <PackageReference Include="Nerdbank.GitVersioning" Version="3.*" PrivateAssets="all"/>
+        <PackageReference Include="System.Configuration.ConfigurationManager" Version="9.0.9"/>
         <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="9.0.9"/>
         <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.9"/>
         <PackageReference Include="Microsoft.Extensions.Options" Version="9.0.9"/>
+        <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.0.9"/>
         <PackageReference Include="Newtonsoft.Json" Version="13.0.3"/>
         <PackageReference Include="Scrutor" Version="6.0.1"/>
-        <PackageReference Include="System.Configuration.ConfigurationManager" Version="9.0.9"/>
+        <PackageReference Include="Polly" Version="8.6.3"/>
+
+        <!-- İç projelerin (Saga/Abstractions/Common) dış paketleri de Lycia'ya eklenmeli
+             ki nuspec'e dependency olarak yazılsın (özellikle netstandard2.0 için şart) -->
+        <PackageReference Include="System.Memory" Version="4.5.5"/>
+        <PackageReference Include="System.Threading.Tasks.Extensions" Version="4.5.4"/>
+        <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="9.0.9"/>
     </ItemGroup>
 
     <ItemGroup>

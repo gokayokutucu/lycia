@@ -2,26 +2,26 @@
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 using System.Reflection;
-using Lycia.Messaging;
-using Lycia.Handlers;
-using Lycia.Handlers.Abstractions;
-using Lycia.Helpers;
 using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Eventing;
 using Lycia.Extensions.Listener;
 using Lycia.Extensions.Serialization;
 using Lycia.Extensions.Stores;
-using Lycia.Infrastructure.Compensating;
-using Lycia.Infrastructure.Dispatching;
-using Lycia.Infrastructure.Eventing;
-using Lycia.Infrastructure.Middleware;
-using Lycia.Infrastructure.Retry;
-using Lycia.Infrastructure.Stores;
-using Lycia.Abstractions;
 using Lycia.Common;
-using Lycia.Configurations;
-using Lycia.Extensions;
+using Lycia.Common.Configurations;
+using Lycia.Compensating;
+using Lycia.Dispatching;
+using Lycia.Eventing;
+using Lycia.Helpers;
 using Lycia.Middleware;
+using Lycia.Retry;
+using Lycia.Saga.Abstractions;
+using Lycia.Saga.Abstractions.Handlers;
+using Lycia.Saga.Abstractions.Messaging;
+using Lycia.Saga.Abstractions.Middlewares;
+using Lycia.Saga.Abstractions.Serializers;
+using Lycia.Saga.Messaging.Handlers;
+using Lycia.Stores;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -29,7 +29,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Polly.Retry;
 using StackExchange.Redis;
-using IRetryPolicy = Lycia.Infrastructure.Retry.IRetryPolicy;
+using IRetryPolicy = Lycia.Retry.IRetryPolicy;
 
 namespace Lycia.Extensions
 {
