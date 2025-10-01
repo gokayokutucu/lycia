@@ -11,6 +11,11 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Lycia.Saga\Lycia.Saga.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Serilog" Version="4.3.0" />
+    <PackageReference Include="Serilog.Extensions.Logging" Version="9.0.2" />
+  </ItemGroup>
     
   
 </Project>

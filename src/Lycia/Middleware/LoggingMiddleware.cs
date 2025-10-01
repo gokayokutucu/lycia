@@ -6,9 +6,22 @@ using Microsoft.Extensions.Logging;
 
 namespace Lycia.Middleware;
 
-public interface ILoggingSagaMiddleware : ISagaMiddleware;
-public sealed class LoggingMiddleware(ILogger<LoggingMiddleware> logger, ISagaContextAccessor? accessor, IRetryPolicy? retryPolicy = null) : ILoggingSagaMiddleware
+/// <summary>
+/// Represents middleware for logging operations in the saga middleware pipeline.
+/// This middleware handles the logging of messages and sagas as they pass through the pipeline,
+/// including their message and handler details as well as exception capture if errors occur.
+/// </summary>
+public sealed class LoggingMiddleware(
+    ILogger<LoggingMiddleware> logger,
+    ISagaContextAccessor? accessor,
+    IRetryPolicy? retryPolicy = null) : ILoggingSagaMiddleware
 {
+    /// <summary>
+    /// Invokes the middleware logic for the current invocation context.
+    /// </summary>
+    /// <param name="context">The invocation context containing information about the saga and its message.</param>
+    /// <param name="next">The function delegates to invoke the next middleware in the pipeline.</param>
+    /// <returns>A task representing the asynchronous operation of the middleware.</returns>
     public Task InvokeAsync(IInvocationContext context, Func<Task> next)
     {
         // Subscribe to retry events for this scope
