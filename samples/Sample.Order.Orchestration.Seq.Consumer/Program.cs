@@ -42,6 +42,18 @@ builder.Services
                 .SetPollInterval(TimeSpan.FromSeconds(2))
                 .SetBatchSize(200);
         });
+        o.ConfigureLogging(l =>
+        {
+            l.MinimumLevel = LogLevel.Debug;
+            l.IncludeMessageHeaders = true;
+            l.IncludeMessagePayload = true;
+            l.PayloadMaxLength = 4096;
+            l.RedactedHeaderKeys = ["Authorization", "X-Api-Key"];
+            l.StartTemplate   = "Handling {MessageType}";
+            l.SuccessTemplate = "Handled {MessageType} successfully";
+            l.ErrorTemplate   = "Failed to handle {MessageType}";
+        });
+        o.UseLoggingMiddleware<SerilogLoggingMiddleware>();
     }, builder.Configuration)
     // .AddLycia(o=>
     // {
@@ -57,21 +69,6 @@ builder.Services
     //         s.BatchSize(100);
     //     });
     // }, builder.Configuration)
-    .AddLycia(o=>
-    {
-        o.ConfigureLogging(l =>
-        {
-            l.MinimumLevel = LogLevel.Debug;
-            l.IncludeMessageHeaders = true;
-            l.IncludeMessagePayload = true;
-            l.PayloadMaxLength = 4096;
-            l.RedactedHeaderKeys = ["Authorization", "X-Api-Key"];
-            l.StartTemplate   = "Handling {MessageType}";
-            l.SuccessTemplate = "Handled {MessageType} successfully";
-            l.ErrorTemplate   = "Failed to handle {MessageType}";
-        });
-        o.UseLoggingMiddleware<SerilogLoggingMiddleware>();
-    }, builder.Configuration)
     //.UseMessageSerializer<MyCustomSerializer>()
     // .UseSagaMiddleware(opt =>
     // {
