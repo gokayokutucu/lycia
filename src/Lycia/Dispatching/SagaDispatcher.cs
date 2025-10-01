@@ -3,6 +3,7 @@
 // https://www.apache.org/licenses/LICENSE-2.0
 
 using Lycia.Common.Messaging;
+using Lycia.Common.Enums;
 using Lycia.Extensions;
 using Lycia.Helpers;
 using Lycia.Middleware;
@@ -228,13 +229,22 @@ public class SagaDispatcher(
     private async Task ValidateSagaStepCompletionAsync(IMessage message, Type handlerType, Guid sagaId)
     {
         var stepTypeToCheck = message.GetType();
-        var alreadyMarked =
-            await sagaStore.IsStepCompletedAsync(sagaId, message.MessageId, stepTypeToCheck, handlerType);
-        if (!alreadyMarked)
+
+        // Use status to validate all terminal outcomes, not just "Completed"
+        var status = await sagaStore.GetStepStatusAsync(
+            sagaId,
+            message.MessageId,
+            stepTypeToCheck,
+            handlerType);
+
+        var isTerminal = status is StepStatus.Completed or StepStatus.Failed or StepStatus.Compensated;
+
+        if (!isTerminal)
         {
-            logger?.LogWarning("Step for {Step} was not marked as completed, failed, or compensated.", stepTypeToCheck.Name);
-            // If you want to throw an exception, uncomment the line below:
-            // throw new InvalidOperationException($"Step {stepTypeToCheck.Name} was not marked as completed/failed/compensated.");
+            logger.LogWarning(
+                "Step for {Step} has status {Status} - expected Completed/Failed/Compensated",
+                stepTypeToCheck.Name,
+                status);
         }
     }
     
