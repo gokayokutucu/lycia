@@ -1,11 +1,9 @@
 // Copyright 2023 Lycia Contributors
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
+
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using Lycia.Messaging;
-using Lycia.Handlers;
-using Lycia.Handlers.Abstractions;
 using Lycia.Helpers;
 using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Eventing;
@@ -37,6 +35,7 @@ using StackExchange.Redis;
 using IRetryPolicy = Lycia.Retry.IRetryPolicy;
 
 [assembly: InternalsVisibleTo("Lycia.Extensions.Scheduling.Redis")]
+
 namespace Lycia.Extensions;
 
 /// <summary>

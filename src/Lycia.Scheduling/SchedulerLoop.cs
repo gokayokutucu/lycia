@@ -1,6 +1,7 @@
 // TargetFramework: netstandard2.0
 
 using Lycia.Saga.Abstractions;
+using Lycia.Saga.Abstractions.Serializers;
 using Lycia.Scheduling.Abstractions;
 
 namespace Lycia.Scheduling

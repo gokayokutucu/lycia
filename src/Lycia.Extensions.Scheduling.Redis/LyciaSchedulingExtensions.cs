@@ -2,6 +2,7 @@
 
 using Lycia.Extensions.Configurations;
 using Lycia.Saga.Abstractions;
+using Lycia.Saga.Abstractions.Serializers;
 using Lycia.Scheduling;
 using Lycia.Scheduling.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
