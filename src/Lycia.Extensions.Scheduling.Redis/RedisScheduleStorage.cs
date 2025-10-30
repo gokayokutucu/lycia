@@ -23,7 +23,7 @@ public sealed class RedisScheduleStorage(IConnectionMultiplexer mux, string appl
             Payload = r.Payload,
             MessageType = r.MessageType,
             Headers = new Dictionary<string, object>(r.Headers),
-            CorrelationId = r.CorrelationId,
+            CorrelationId = r.CorrelationId, 
             MessageId = r.MessageId
         };
         // For debugging: serializing SerializableEntry for Redis storage
@@ -51,7 +51,7 @@ public sealed class RedisScheduleStorage(IConnectionMultiplexer mux, string appl
                 await _db.SortedSetRemoveAsync(_appKey, id).ConfigureAwait(false);
                 continue;
             }
-            var ser = JsonConvert.DeserializeObject<SerializableEntry>(json);
+            var ser = JsonConvert.DeserializeObject<SerializableEntry>(json!);
             result.Add(ser?.ToEntry());
             await _db.SortedSetRemoveAsync(_appKey, id).ConfigureAwait(false);
         }
@@ -77,7 +77,7 @@ public sealed class RedisScheduleStorage(IConnectionMultiplexer mux, string appl
         [JsonProperty] private Guid Id { get; set; }
         [JsonProperty] private long DueTimeMs { get; set; }
         [JsonProperty] private byte[] Payload { get; set; }
-        [JsonProperty] private string MessageTypeAssemblyQualifiedName { get; set; }
+        [JsonProperty] private string? MessageTypeAssemblyQualifiedName { get; set; }
         [JsonProperty] private Dictionary<string, object> Headers { get; set; }
         [JsonProperty] private Guid CorrelationId { get; set; }
         [JsonProperty] private Guid MessageId { get; set; }
@@ -88,8 +88,8 @@ public sealed class RedisScheduleStorage(IConnectionMultiplexer mux, string appl
         {
             Id = e.Id;
             DueTimeMs = e.DueTime.ToUnixTimeMilliseconds();
-            Payload = e.Payload;
-            MessageTypeAssemblyQualifiedName = e.MessageType.AssemblyQualifiedName;
+            Payload = e.Payload ?? [];
+            MessageTypeAssemblyQualifiedName = e.MessageType?.AssemblyQualifiedName;
             Headers = new Dictionary<string, object>(e.Headers);
             CorrelationId = e.CorrelationId;
             MessageId = e.MessageId;
@@ -102,7 +102,7 @@ public sealed class RedisScheduleStorage(IConnectionMultiplexer mux, string appl
                 Id = Id,
                 DueTime = DateTimeOffset.FromUnixTimeMilliseconds(DueTimeMs),
                 Payload = Payload,
-                MessageType = Type.GetType(MessageTypeAssemblyQualifiedName, throwOnError: true),
+                MessageType = Type.GetType(MessageTypeAssemblyQualifiedName!, throwOnError: true),
                 Headers = Headers,
                 CorrelationId = CorrelationId,
                 MessageId = MessageId

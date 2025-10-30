@@ -11,6 +11,9 @@ using Newtonsoft.Json.Converters;
 
 namespace Lycia.Extensions.Serialization;
 
+/// <summary>
+/// A serializer implementation that uses Newtonsoft.Json to serialize and deserialize message payloads.
+/// </summary>
 public sealed class NewtonsoftJsonMessageSerializer : IMessageSerializer
 {
     private static readonly JsonSerializerSettings Settings = new()
@@ -23,13 +26,24 @@ public sealed class NewtonsoftJsonMessageSerializer : IMessageSerializer
         TypeNameHandling = TypeNameHandling.None
     };
 
-    private const string H_SchemaId = "lycia-schema-id";
-    private const string H_Type = "lycia-type"; // "Namespace.Type, Assembly"
-    private const string H_Content = "content-type"; // "application/json"
-    private const string H_Version = "lycia-schema-ver";
+    private const string HeaderSchemaId = "lycia-schema-id";
+    private const string HeaderType = "lycia-type"; // "Namespace.Type, Assembly"
+    private const string HeaderContent = "content-type"; // "application/json"
+    private const string HeaderVersion = "lycia-schema-ver";
 
-    public string ContentTypeHeaderKey  => H_Content;
+    /// <summary>
+    /// Gets the header key used to identify the content type in message serialization.
+    /// This value typically indicates the content type, such as "application/json",
+    /// and is utilized during message serialization and deserialization processes.
+    /// </summary>
+    public string ContentTypeHeaderKey  => HeaderContent;
 
+    /// <summary>
+    /// Serializes a given message into a JSON payload along with its associated headers.
+    /// </summary>
+    /// <param name="message">The object to be serialized.</param>
+    /// <param name="ctx">The serialization context containing metadata such as explicit type name.</param>
+    /// <returns>A tuple containing the serialized JSON payload as a byte array and a read-only dictionary of headers.</returns>
     public (byte[] Body, IReadOnlyDictionary<string, object?> Headers) Serialize(
         object message,
         IMessageSerializationContext ctx)
@@ -40,10 +54,10 @@ public sealed class NewtonsoftJsonMessageSerializer : IMessageSerializer
 
         var headers = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
-            [H_Content] = "application/json",
-            [H_Type] = typeName,
-            [H_SchemaId] = null, // It is for avro/protobuf, not used here
-            [H_Version] = null
+            [HeaderContent] = "application/json",
+            [HeaderType] = typeName,
+            [HeaderSchemaId] = null, // It is for avro/protobuf, not used here
+            [HeaderVersion] = null
         };
 
         return (bytes, headers);
@@ -81,13 +95,20 @@ public sealed class NewtonsoftJsonMessageSerializer : IMessageSerializer
     }
 
 
-
+    /// <summary>
+    /// Deserializes a given JSON-encoded message body into an object of the specified type.
+    /// </summary>
+    /// <param name="body">The serialized message as a read-only byte array.</param>
+    /// <param name="headers">A read-only dictionary of transport headers associated with the message.</param>
+    /// <param name="ctx">The deserialization context providing additional metadata.</param>
+    /// <returns>The deserialized object of the type specified in the message headers.</returns>
+    /// <exception cref="JsonSerializationException">Thrown if deserialization fails or returns null.</exception>
     public object Deserialize(
         ReadOnlyMemory<byte> body,
         IReadOnlyDictionary<string, object?> headers,
         IMessageSerializationContext ctx)
     {
-        var typeName = GetRequiredHeaderString(headers, H_Type, "Missing lycia-type header.");
+        var typeName = GetRequiredHeaderString(headers, HeaderType, "Missing lycia-type header.");
         var targetType = Type.GetType(typeName, throwOnError: true)!;
 
         var json = Encoding.UTF8.GetString(body.ToArray());
@@ -109,10 +130,10 @@ public sealed class NewtonsoftJsonMessageSerializer : IMessageSerializer
     {
         return new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
-            [H_Content]  = "application/json",
-            [H_Type]     = payloadClrType.AssemblyQualifiedName!,
-            [H_SchemaId] = schemaId,
-            [H_Version]  = schemaVersion
+            [HeaderContent]  = "application/json",
+            [HeaderType]     = payloadClrType.AssemblyQualifiedName!,
+            [HeaderSchemaId] = schemaId,
+            [HeaderVersion]  = schemaVersion
         };
     }
 
@@ -132,48 +153,55 @@ public sealed class NewtonsoftJsonMessageSerializer : IMessageSerializer
         }
 
         // If H_Content is missing but a key like "content-type" (any casing) exists, ensure it's present
-        if (!normalized.ContainsKey(H_Content))
+        if (!normalized.ContainsKey(HeaderContent))
         {
             foreach (var key in incomingHeaders.Keys)
             {
-                if (string.Equals(key, H_Content, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(key, HeaderContent, StringComparison.OrdinalIgnoreCase))
                 {
-                    normalized[H_Content] = incomingHeaders[key];
+                    normalized[HeaderContent] = incomingHeaders[key];
                     break;
                 }
             }
         }
 
         // If H_Type is missing but a key like "lycia-type" (any casing) exists, ensure it's present
-        if (!normalized.ContainsKey(H_Type))
+        if (!normalized.ContainsKey(HeaderType))
         {
             foreach (var key in incomingHeaders.Keys)
             {
-                if (string.Equals(key, H_Type, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(key, HeaderType, StringComparison.OrdinalIgnoreCase))
                 {
-                    normalized[H_Type] = incomingHeaders[key];
+                    normalized[HeaderType] = incomingHeaders[key];
                     break;
                 }
             }
         }
 
-        if (normalized.TryGetValue(H_Content, out var c))
-            normalized[H_Content] = AsString(c);
-        if (normalized.TryGetValue(H_Type, out var t))
-            normalized[H_Type] = AsString(t);
+        if (normalized.TryGetValue(HeaderContent, out var c))
+            normalized[HeaderContent] = AsString(c);
+        if (normalized.TryGetValue(HeaderType, out var t))
+            normalized[HeaderType] = AsString(t);
 
         return normalized;
     }
-    
+
+    /// <summary>
+    /// Creates a serialization context and headers for the specified payload type, schema ID, and schema version.
+    /// </summary>
+    /// <param name="payloadType">The type of the message payload to be serialized.</param>
+    /// <param name="schemaId">An optional schema ID associated with the payload.</param>
+    /// <param name="schemaVersion">An optional schema version associated with the payload.</param>
+    /// <returns>A tuple containing a read-only dictionary of headers and the serialization context.</returns>
     public (IReadOnlyDictionary<string, object?> Headers, IMessageSerializationContext Ctx)
         CreateContextFor(Type payloadType, string? schemaId = null, string? schemaVersion = null)
     {
         var headers = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
-            [H_Content]  = "application/json",
-            [H_Type]     = payloadType.AssemblyQualifiedName!,
-            [H_SchemaId] = schemaId,
-            [H_Version]  = schemaVersion
+            [HeaderContent]  = "application/json",
+            [HeaderType]     = payloadType.AssemblyQualifiedName!,
+            [HeaderSchemaId] = schemaId,
+            [HeaderVersion]  = schemaVersion
         };
 
         var ctx = new MessageSerializationContext
