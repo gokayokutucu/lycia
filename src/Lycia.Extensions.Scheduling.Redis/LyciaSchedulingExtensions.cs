@@ -22,19 +22,19 @@ namespace Lycia.Extensions.Scheduling.Redis
             configuration(opts);
 
             // Method-owned defaults
-            var provider       = string.IsNullOrWhiteSpace(opts.Provider)            ? "Redis"               : opts.Provider.Trim();
-            var storageSection = string.IsNullOrWhiteSpace(opts.StorageConfigSection) ? "Lycia:Scheduling"    : opts.StorageConfigSection.Trim();
-            var pollInterval   = opts.PollInterval ?? TimeSpan.FromSeconds(1);
-            var batchSize      = opts.BatchSize    ?? 100;
+            var provider      = string.IsNullOrWhiteSpace(opts.Provider)             ? "Redis"               : opts.Provider?.Trim();
+            var storageSection = string.IsNullOrWhiteSpace(opts.StorageConfigSection) ? "Lycia:Scheduling"    : opts.StorageConfigSection?.Trim();
+            var pollInterval= opts.PollInterval ?? TimeSpan.FromSeconds(1);
+            var batchSize        = opts.BatchSize    ?? 100;
 
             var services = builder.Services;
-            var config   = builder.ConfigurationRoot;
+            var config      = builder.ConfigurationRoot;
 
             // reflect resolved defaults back to options (so custom registrar can see them)
-            opts.Provider = provider;
+            opts.Provider             = provider;
             opts.StorageConfigSection = storageSection;
-            opts.PollInterval = pollInterval;
-            opts.BatchSize = batchSize;
+            opts.PollInterval         = pollInterval;
+            opts.BatchSize            = batchSize;
 
             if (opts.ConfigureBackend != null)
             {
@@ -42,17 +42,18 @@ namespace Lycia.Extensions.Scheduling.Redis
             }
             else
             {
-                switch (provider.ToLowerInvariant())
+                switch (provider?.ToLowerInvariant())
                 {
                     case "redis":
                     {
-                        var section = config.GetSection(storageSection);
+                        var section       = config.GetSection(storageSection!);
                         var conn    = section["ConnectionString"];
                         var appId   = config["ApplicationId"] ?? "App";
+                        
                         if (string.IsNullOrWhiteSpace(conn))
                             throw new InvalidOperationException(storageSection + ":ConnectionString is required.");
 
-                        services.TryAddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(conn));
+                        services.TryAddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(conn!));
                         services.TryAddSingleton<IScheduleStorage>(sp => new RedisScheduleStorage(sp.GetRequiredService<IConnectionMultiplexer>(), appId));
                         services.TryAddSingleton<IScheduler, DefaultScheduler>();
                         break;
