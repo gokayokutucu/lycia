@@ -123,6 +123,7 @@ namespace Lycia.Extensions
             services.TryAddSingleton<IEventBus>(sp =>
             {
                 var logger = sp.GetRequiredService<ILogger<RabbitMqEventBus>>();
+                var registrationLogger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("LyciaRegistration");
                 var ebOptions = sp.GetRequiredService<IOptions<EventBusOptions>>().Value;
                 var serializer = sp.GetRequiredService<IMessageSerializer>();
                 var map = sp.GetRequiredService<IDictionary<string, (Type MessageType, Type HandlerType)>>();
@@ -136,12 +137,23 @@ namespace Lycia.Extensions
                 if (string.IsNullOrWhiteSpace(ebOptions.ConnectionString))
                     throw new InvalidOperationException("Lycia:EventBus:ConnectionString is required.");
 
-                return RabbitMqEventBus.CreateAsync(
-                    logger: logger,
-                    queueTypeMap: map,
-                    options: ebOptions,
-                    serializer: serializer
-                ).GetAwaiter().GetResult();
+                try
+                {
+                    return RabbitMqEventBus.CreateAsync(
+                        logger: logger,
+                        queueTypeMap: map,
+                        options: ebOptions,
+                        serializer: serializer
+                    ).GetAwaiter().GetResult();
+                }
+                catch (Exception ex)
+                {
+                    registrationLogger.LogError(ex,
+                        "Lycia failed to connect to RabbitMQ while initializing the event bus. Check Lycia:EventBus settings.");
+                    throw new InvalidOperationException(
+                        "Lycia was unable to initialize the RabbitMQ event bus. See inner exception for details.",
+                        ex);
+                }
             });
 
             // Default SagaStore (Redis). Consumers may override with UseSagaStore<T>().
@@ -223,8 +235,22 @@ namespace Lycia.Extensions
                 if (string.IsNullOrWhiteSpace(redisConn))
                     throw new InvalidOperationException("Lycia:EventStore:ConnectionString is required for Redis provider.");
 
-                services.TryAddSingleton<IConnectionMultiplexer>(
-                    _ => ConnectionMultiplexer.Connect(redisConn!));
+                services.TryAddSingleton<IConnectionMultiplexer>(sp =>
+                {
+                    var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("LyciaRegistration");
+                    try
+                    {
+                        return ConnectionMultiplexer.Connect(redisConn!);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex,
+                            "Lycia failed to connect to Redis while initializing the saga store. Check Lycia:EventStore settings.");
+                        throw new InvalidOperationException(
+                            "Lycia was unable to initialize the Redis connection for the saga store. See inner exception for details.",
+                            ex);
+                    }
+                });
 
                 services.TryAddScoped<IDatabase>(sp =>
                     sp.GetRequiredService<IConnectionMultiplexer>().GetDatabase());
