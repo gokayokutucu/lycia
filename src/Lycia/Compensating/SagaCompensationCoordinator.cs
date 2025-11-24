@@ -18,8 +18,13 @@ using Newtonsoft.Json;
 
 namespace Lycia.Compensating;
 
+/// <summary>
+/// Coordinates the compensation of saga steps in the event of a failure during
+/// a saga's execution. This class is responsible for invoking compensation
+/// logic for failed saga steps and their hierarchical relationships.
+/// </summary>
 public class SagaCompensationCoordinator(
-    IServiceProvider serviceProvider, 
+    IServiceProvider serviceProvider,
     ISagaIdGenerator sagaIdGenerator,
     IMessageSerializer serializer)
     : ISagaCompensationCoordinator
