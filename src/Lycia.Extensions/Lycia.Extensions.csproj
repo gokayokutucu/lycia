@@ -1,37 +1,77 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-	<PropertyGroup>
-		<TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
-		<LangVersion>preview</LangVersion>
-		<ImplicitUsings>enable</ImplicitUsings>
-		<Nullable>enable</Nullable>
-		<GenerateReferenceAssembly>false</GenerateReferenceAssembly>
+    <PropertyGroup>
+        <TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
+        <LangVersion>preview</LangVersion>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <RepositoryUrl>https://github.com/gokayokutucu/lycia</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
 
-		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-		<PackageId>Lycia.Extensions</PackageId>
-		<Version>1.0.0</Version>
-		<Authors>gokay.okutucu</Authors>
-		<Company>PeopleCert</Company>
-		<Description>Internal messaging extensions library for PeopleCert projects</Description>
-		<PackageTags>messaging internal</PackageTags>
-		<RepositoryUrl>https://github.com/gokayokutucu/lycia.git</RepositoryUrl>
-	</PropertyGroup>
+        <!-- Prevent writing project references as dependencies in nuspec -->
+        <SuppressProjectReferenceDependenciesWhenPacking>true</SuppressProjectReferenceDependenciesWhenPacking>
 
-	<Target Name="PublishNupkgToShare" AfterTargets="Pack">
-		<ItemGroup>
-			<_Nupkg Include="$(PackageOutputPath)\$(PackageId).$(Version).nupkg" />
-		</ItemGroup>
-		<Copy SourceFiles="@(_Nupkg)" DestinationFolder="\\if-srv-nas\R&amp;D_Files\PASSPORT\gkuvandik\nuget-packages" SkipUnchangedFiles="true" Condition="Exists('%(Identity)')" />
-	</Target>
+        <!-- During pack, we will use package reference for Lycia -->
+        <UsePackageRefForLyciaOnPack>false</UsePackageRefForLyciaOnPack>
 
-	<ItemGroup>
-		<Folder Include="Retry\" />
-	</ItemGroup>
-	<ItemGroup>
-		<ProjectReference Include="..\Lycia.Infrastructure\Lycia.Infrastructure.csproj" />
-		<ProjectReference Include="..\Lycia\Lycia.csproj" />
-	</ItemGroup>
+        <!-- For XMLs (optional) -->
+        <AllowedOutputExtensionsInPackageBuildOutputFolder>
+            $(AllowedOutputExtensionsInPackageBuildOutputFolder);.xml
+        </AllowedOutputExtensionsInPackageBuildOutputFolder>
+    </PropertyGroup>
 
+    <PropertyGroup>
+        <Authors>M. Gokay Okutucu</Authors>
+        <Description>Lycia.Extensions provides pluggable modules and integrations for the Lycia Saga framework.
+            It offers ready-to-use extensions for configuration, middleware, retry, scheduling, and observability:
+            - Fluent DI registration (AddLycia with ConfigureSaga, ConfigureEventBus, ConfigureRetry, ConfigureScheduling)
+            - Built-in retry policies with Polly integration
+            - Configurable middleware slots (logging, retry, custom middlewares)
+            - Health check integration (IHealthCheck)
+            - Scheduling extensions with Redis-based storage
+
+            Keep your Saga setup modular, extensible, and production-grade. Add only the components you need.
+        </Description>
+        <Copyright>Copyright (c) 2025 M. Gokay Okutucu</Copyright>
+        <PackageProjectUrl>https://github.com/gokayokutucu/lycia</PackageProjectUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <PackageTags>saga distributed-transaction workflow orchestration choreography idempotency retry timeout compensation middleware rabbitmq redis microservices event-driven</PackageTags>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <LyciaMinVersion>1.17.0-beta</LyciaMinVersion> <!-- default -->
+    </PropertyGroup>
+
+    <!-- Local development: project-to-project -->
+    <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' != 'true'">
+        <ProjectReference Include="..\Lycia\Lycia.csproj" PrivateAssets="All"/>
+        <ProjectReference Include="..\Lycia.Saga\Lycia.Saga.csproj" PrivateAssets="All"/>
+    </ItemGroup>
+
+    <!-- Pack/CI: depend only on Lycia package -->
+    <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' == 'true'">
+        <!-- Range suggestion: even if release order fluctuates, allow restore -->
+        <PackageReference Include="Lycia" Version="[$(LyciaMinVersion),)"/>
+        <ProjectReference Remove="..\Lycia\Lycia.csproj"/>
+        <ProjectReference Remove="..\Lycia.Saga\Lycia.Saga.csproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Apache.Avro" Version="1.12.0"/>
+        <PackageReference Include="Nerdbank.GitVersioning" Version="3.*" PrivateAssets="all"/>
+        <PackageReference Include="Microsoft.CSharp" Version="4.7.0"/>
+        <PackageReference Include="Microsoft.Extensions.Configuration" Version="9.0.9"/>
+        <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.9"/>
+        <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="9.0.9"/>
+        <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.9"/>
+        <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="9.0.9"/>
+        <PackageReference Include="Newtonsoft.Json" Version="13.0.3"/>
+        <PackageReference Include="Polly" Version="8.6.3"/>
+        <PackageReference Include="RabbitMQ.Client" Version="7.1.2"/>
+        <PackageReference Include="Serilog" Version="4.3.0"/>
+        <PackageReference Include="StackExchange.Redis" Version="2.8.37"/>
+    </ItemGroup>
 
 	<!-- netstandard2.0 -->
 	<ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
@@ -89,4 +129,5 @@
 		<PackageReference Include="Polly" Version="8.6.3" />
 		<PackageReference Include="Serilog" Version="4.3.0" />
 	</ItemGroup>
+
 </Project>

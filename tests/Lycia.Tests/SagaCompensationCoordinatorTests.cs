@@ -2,18 +2,19 @@
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 using Lycia.Extensions.Serialization;
-using Lycia.Infrastructure.Compensating;
-using Lycia.Infrastructure.Stores;
-using Lycia.Abstractions;
-using Lycia.Messaging.Enums;
-using Lycia;
-using Lycia.Exceptions;
-using Lycia.Extensions;
-using Lycia.Handlers.Abstractions;
+using Lycia.Common.Enums;
+using Lycia.Common.SagaSteps;
+using Lycia.Compensating;
+using Lycia.Saga.Abstractions;
+using Lycia.Saga.Abstractions.Handlers;
+using Lycia.Saga.Abstractions.Serializers;
+using Lycia.Saga.Exceptions;
+using Lycia.Stores;
 using Lycia.Tests.Helpers;
 using Lycia.Tests.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
+using ISagaIdGenerator = Lycia.Saga.Abstractions.ISagaIdGenerator;
 
 namespace Lycia.Tests;
 

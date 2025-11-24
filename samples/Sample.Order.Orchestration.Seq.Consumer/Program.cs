@@ -1,22 +1,24 @@
 // Copyright 2023 Lycia Contributors
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
+
 using Lycia.Extensions;
-using Lycia.Extensions;
-using Lycia.Exceptions;
 using Lycia.Extensions.Logging;
-using Polly;
 using Serilog;
 
 var builder = Host.CreateApplicationBuilder(args);
 
 Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Debug() 
     .Enrich.FromLogContext()
     .WriteTo.Console()
     .CreateLogger();
 
+builder.Logging.ClearProviders();
+builder.Logging.AddSerilog();
+
 builder.Services
-    .AddLycia(builder.Configuration)
+    //.AddLycia(builder.Configuration)
     // .AddLycia(o=>
     // {
     //     o.ConfigureRetry(r =>
@@ -31,21 +33,33 @@ builder.Services
     //             .Handle<TransientSagaException>()
     //             .Handle<TimeoutException>();
     //     });
-    // }, builder.Configuration)
-    // .AddLycia(o=>
-    // {
     //     o.ConfigureEventBus(b =>
     //     {
     //         b.WithOutbox<EfCoreOutboxStore>()
     //             .WithRetryPolicy<PollyBasedRetry>();
     //     });
     // }, builder.Configuration)
-    //.UseMessageSerializer<MyCustomSerializer>()
-    .UseSagaMiddleware(opt =>
+    .AddLycia(o=>
     {
-         opt.AddMiddleware<SerilogLoggingMiddleware>();
-        //opt.AddMiddleware<RetryMiddleware>();
-    })
+        o.ConfigureLogging(l =>
+        {
+            l.MinimumLevel = LogLevel.Debug;
+            l.IncludeMessageHeaders = true;
+            l.IncludeMessagePayload = true;
+            l.PayloadMaxLength = 4096;
+            l.RedactedHeaderKeys = ["Authorization", "X-Api-Key"];
+            l.StartTemplate   = "Handling {MessageType}";
+            l.SuccessTemplate = "Handled {MessageType} successfully";
+            l.ErrorTemplate   = "Failed to handle {MessageType}";
+        });
+        o.UseLoggingMiddleware<SerilogLoggingMiddleware>();
+    }, builder.Configuration)
+    //.UseMessageSerializer<MyCustomSerializer>()
+    // .UseSagaMiddleware(opt =>
+    // {
+    //      opt.AddMiddleware<SerilogLoggingMiddleware>();
+    //     //opt.AddMiddleware<RetryMiddleware>();
+    // })
     .AddSagasFromCurrentAssembly()
     .Build();
 
