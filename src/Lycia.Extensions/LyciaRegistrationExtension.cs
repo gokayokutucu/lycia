@@ -14,6 +14,7 @@ using Lycia.Dispatching;
 using Lycia.Eventing;
 using Lycia.Helpers;
 using Lycia.Middleware;
+using Lycia.Observability;
 using Lycia.Retry;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Handlers;
@@ -111,6 +112,9 @@ namespace Lycia.Extensions
             services.TryAddScoped<ISagaDispatcher, SagaDispatcher>();
             services.TryAddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
             services.TryAddScoped<ISagaContextAccessor, SagaContextAccessor>();
+
+            // ActivitySource for Lycia.Activity
+            services.TryAddSingleton<LyciaActivitySourceHolder>();
 
             // Serializer default
             services.TryAddSingleton<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
