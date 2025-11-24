@@ -4,6 +4,7 @@
 
 using Lycia.Common.Messaging;
 using Lycia.Common.Enums;
+using Lycia.Contexts;
 using Lycia.Extensions;
 using Lycia.Helpers;
 using Lycia.Middleware;
@@ -150,6 +151,7 @@ public class SagaDispatcher(
             SagaContext = createdContext as ISagaContext,
             HandlerType = handlerType,
             SagaId = sagaId,
+            ApplicationId = message.ApplicationId,
             CancellationToken = cancellationToken
         };
         
