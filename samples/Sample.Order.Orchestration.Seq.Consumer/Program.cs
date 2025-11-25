@@ -4,6 +4,8 @@
 
 using Lycia.Extensions;
 using Lycia.Extensions.Logging;
+using Lycia.Extensions.OpenTelemetry;
+using OpenTelemetry.Trace;
 using Serilog;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -16,6 +18,14 @@ Log.Logger = new LoggerConfiguration()
 
 builder.Logging.ClearProviders();
 builder.Logging.AddSerilog();
+
+builder.Services.AddOpenTelemetry()
+    .AddLyciaTracing()
+    .WithTracing(tp =>
+    {
+        tp.AddAspNetCoreInstrumentation();
+        tp.AddOtlpExporter(options => options.Endpoint = new Uri("http://localhost:4317"));
+    });
 
 builder.Services
     //.AddLycia(builder.Configuration)
