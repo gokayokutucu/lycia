@@ -133,6 +133,9 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         var headers =
             RabbitMqEventBusHelper.BuildMessageHeaders(@event, sagaId, typeof(TEvent), Constants.EventTypeHeader);
 
+        // Inject current Activity context into headers for downstream consumers
+        Observability.LyciaTracePropagation.Inject(headers);
+        
         // Ask serializer to produce a body and its own headers (content-type, lycia-type, schema metadata, etc.)
         var (_, serCtx) = _serializer.CreateContextFor(typeof(TEvent));
         var (body, serializerHeaders) = _serializer.Serialize(@event, serCtx);
@@ -192,6 +195,9 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         // Build base headers (Lycia metadata)
         var headers =
             RabbitMqEventBusHelper.BuildMessageHeaders(command, sagaId, typeof(TCommand), Constants.CommandTypeHeader);
+        
+        // Inject current Activity context into headers for downstream consumers
+        Observability.LyciaTracePropagation.Inject(headers);
 
         // Ask serializer to produce a body and its own headers
         var (_, serCtx) = _serializer.CreateContextFor(typeof(TCommand));
