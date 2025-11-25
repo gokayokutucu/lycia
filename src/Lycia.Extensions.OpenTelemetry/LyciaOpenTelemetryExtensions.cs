@@ -24,7 +24,7 @@ public static class LyciaOpenTelemetryExtensions
     /// <returns>
     /// The modified <see cref="OpenTelemetryBuilder"/> instance with Lycia instrumentation configured.
     /// </returns>
-    public static OpenTelemetryBuilder AddLyciaInstrumentation(
+    public static OpenTelemetryBuilder AddLyciaTracing(
         this OpenTelemetryBuilder builder)
     {
         // Traces

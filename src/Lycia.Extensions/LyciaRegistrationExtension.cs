@@ -113,7 +113,7 @@ namespace Lycia.Extensions
             services.TryAddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
             services.TryAddScoped<ISagaContextAccessor, SagaContextAccessor>();
 
-            // ActivitySource for Lycia.Activity
+            // Observability primitives (vendor-agnostic)
             services.TryAddSingleton<LyciaActivitySourceHolder>();
 
             // Serializer default
@@ -218,6 +218,7 @@ namespace Lycia.Extensions
 
             // 1) Ensure default middlewares are available as ISagaMiddleware (idempotent, allow multiple implementations)
             services.TryAddEnumerable(ServiceDescriptor.Scoped(typeof(ISagaMiddleware), typeof(LoggingMiddleware)));
+            services.TryAddEnumerable(ServiceDescriptor.Scoped(typeof(ISagaMiddleware), typeof(ActivityTracingMiddleware)));
             services.TryAddEnumerable(ServiceDescriptor.Scoped(typeof(ISagaMiddleware), typeof(RetryMiddleware)));
 
             // 2) Default ordered pipeline: Logging first, then Retry
@@ -226,6 +227,7 @@ namespace Lycia.Extensions
             services.TryAddScoped<IReadOnlyList<Type>>(_ => new List<Type>
             {
                 typeof(LoggingMiddleware),
+                typeof(ActivityTracingMiddleware),
                 typeof(RetryMiddleware)
             });
         }
@@ -300,6 +302,9 @@ namespace Lycia.Extensions
             services.TryAddScoped<ISagaContextAccessor, SagaContextAccessor>();
             services.TryAddScoped<ISagaDispatcher, SagaDispatcher>();
             services.TryAddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
+            
+            // For observability primitives (vendor-agnostic)
+            services.TryAddSingleton<LyciaActivitySourceHolder>();
 
             // Serializer
             services.RemoveAll(typeof(IMessageSerializer));
@@ -420,6 +425,7 @@ namespace Lycia.Extensions
             _services.AddScoped<IReadOnlyList<Type>>(_ => new List<Type>
             {
                 typeof(TLogging),
+                typeof(ActivityTracingMiddleware),
                 typeof(RetryMiddleware)
             });
 
@@ -444,6 +450,7 @@ namespace Lycia.Extensions
             var slotMap = new Dictionary<Type, Type>
             {
                 { typeof(ILoggingSagaMiddleware), typeof(LoggingMiddleware) },
+                { typeof(ITracingSagaMiddleware), typeof(ActivityTracingMiddleware) },
                 { typeof(IRetrySagaMiddleware),   typeof(RetryMiddleware)   }
             };
 
@@ -459,6 +466,12 @@ namespace Lycia.Extensions
                     // Replace logging slot
                     slotMap[typeof(ILoggingSagaMiddleware)] = t;
                     RemoveMiddlewareImplementation(typeof(LoggingMiddleware));
+                }
+                else if (typeof(ITracingSagaMiddleware).IsAssignableFrom(t))
+                {
+                    // Replace tracing slot
+                    slotMap[typeof(ITracingSagaMiddleware)] = t;
+                    RemoveMiddlewareImplementation(typeof(ActivityTracingMiddleware));
                 }
                 else if (typeof(IRetrySagaMiddleware).IsAssignableFrom(t))
                 {
@@ -481,6 +494,7 @@ namespace Lycia.Extensions
             var ordered = new List<Type>
             {
                 slotMap[typeof(ILoggingSagaMiddleware)],
+                slotMap[typeof(ITracingSagaMiddleware)],
                 slotMap[typeof(IRetrySagaMiddleware)]
             };
 
