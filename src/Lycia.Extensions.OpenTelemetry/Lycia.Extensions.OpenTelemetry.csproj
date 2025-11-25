@@ -37,6 +37,7 @@
     <!-- Local development: project-to-project -->
     <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' != 'true'">
         <ProjectReference Include="..\Lycia\Lycia.csproj" PrivateAssets="All"/>
+        <ProjectReference Include="..\Lycia.Extensions\Lycia.Extensions.csproj" PrivateAssets="All" />
     </ItemGroup>
 
     <!-- Pack/CI: depend only on Lycia package -->
@@ -46,6 +47,7 @@
         <ProjectReference Remove="..\Lycia\Lycia.csproj"/>
 
         <ProjectReference Include="Lycia.Extensions"  Version="[$(LyciaMinVersion),)"/>
+        <ProjectReference Remove="..\Lycia.Extensions\Lycia.Extensions.csproj" />
     </ItemGroup>
 
     <ItemGroup>
