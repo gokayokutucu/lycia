@@ -103,6 +103,58 @@ public class InventorySagaHandler :
 
 ---
 
+## OpenTelemetry Tracing (Optional)
+
+Lycia provides native hooks for distributed tracing via **ActivitySource** and OpenTelemetry.
+Tracing is intentionally kept optional and resides in the `Lycia.Extensions.OpenTelemetry` package.
+
+### Enabling Tracing
+
+Install the following NuGet packages in your host application:
+
+```
+dotnet add package OpenTelemetry
+dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
+dotnet add package Lycia.Extensions.OpenTelemetry
+```
+
+Then configure tracing:
+
+```csharp
+builder.Services.AddOpenTelemetry()
+    .AddLyciaTracing() // adds Lycia ActivitySource + propagation
+    .WithTracing(t =>
+    {
+        t.AddAspNetCoreInstrumentation();
+        t.AddOtlpExporter(o =>
+        {
+            o.Endpoint = new Uri("http://otel-collector:4317");
+        });
+    });
+```
+
+### What Lycia Emits
+
+- A span per saga step (`Saga.<HandlerName>`)
+- Attributes:
+  - `lycia.saga.id`
+  - `lycia.message.id`
+  - `lycia.correlation.id`
+  - `lycia.application.id`
+  - `lycia.saga.step.status`
+- Automatic W3C trace propagation through messages (RabbitMQ / EventBus)
+
+### How It Works
+
+Tracing is added without requiring any saga code changes:
+- The middleware creates spans around each handler invocation.
+- `LyciaTracePropagation` injects `traceparent`/`tracestate` into message headers.
+- The listener extracts headers and restores parent-child relationships.
+
+This produces a full cross-service trace chain in Grafana Tempo or Jaeger.
+
+---
+
 ## Timeline
 
 - **May 28, 2023** – The idea was born.  
@@ -113,11 +165,20 @@ public class InventorySagaHandler :
 
 ## What's Next
 
-- Kafka support  
-- Schema registry (Avro/Protobuf) integration  
-- Advanced observability (metrics, tracing, logging)  
-- Native support for Outbox/Inbox pattern  
-- Advanced retry customization, scheduling module
+- **Distributed Delayed Message Scheduling**
+  - Compensation timers
+  - Cron-like orchestration intervals
+  - Durable timing guarantees
+
+- **Native Inbox / Outbox Guarantees**
+  - State-consistency
+  - Cross-service delivery reliability
+  - Message replay safety
+
+- **Schema Intelligence**
+  - Avro/Protobuf registry integration
+  - Backward/forward compatibility detection
+  - Contract-driven saga evolution
 
 ## License
 
