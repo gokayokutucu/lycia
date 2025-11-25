@@ -213,3 +213,33 @@ jobs:
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: dotnet nuget push "artifacts/nupkgs/Lycia.Extensions.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
+
+      # ---- Restore + Pack + Push Lycia.Extensions.OpenTelemetry ----
+      - name: Restore OpenTelemetry Extensions with floor (pack mode)
+        run: |
+          dotnet restore src/Lycia.Extensions.OpenTelemetry/Lycia.Extensions.OpenTelemetry.csproj \
+            -p:UsePackageRefForLyciaOnPack=true \
+            -p:LyciaMinVersion='${{ steps.floor.outputs.floor }}' \
+            --source "./artifacts/nupkgs" --source "https://api.nuget.org/v3/index.json"
+
+      - name: Pack Lycia.Extensions.OpenTelemetry (no restore)
+        run: |
+          dotnet pack src/Lycia.Extensions.OpenTelemetry/Lycia.Extensions.OpenTelemetry.csproj -c Release \
+            -o artifacts/nupkgs \
+            -p:ContinuousIntegrationBuild=true \
+            -p:UsePackageRefForLyciaOnPack=true \
+            -p:LyciaMinVersion='${{ steps.floor.outputs.floor }}' \
+            --no-restore
+
+      - name: Validate Lycia.Extensions.OpenTelemetry package contents
+        run: |
+          PKG=$(ls artifacts/nupkgs/Lycia.Extensions.OpenTelemetry.*.nupkg | sort -V | tail -n1)
+          echo "Lycia.Extensions.OpenTelemetry nupkg: $PKG"
+          unzip -l "$PKG" | sed -n '1,200p'
+          echo "NUSPEC dependencies (should only contain Lycia / Lycia.Extensions if applicable):"
+          unzip -p "$PKG" *.nuspec | sed -n '1,200p'
+
+      - name: Push Lycia.Extensions.OpenTelemetry (nuget.org)
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: dotnet nuget push "artifacts/nupkgs/Lycia.Extensions.OpenTelemetry.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
