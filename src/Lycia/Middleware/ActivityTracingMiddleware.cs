@@ -43,38 +43,43 @@ public sealed class ActivityTracingMiddleware(
         var handlerName = context.HandlerType?.Name ?? "UnknownHandler";
         var activitySource = sourceHolder.Source;
 
-        using var activity = activitySource.StartActivity(
-            $"Saga.{handlerName}",
-            ActivityKind.Internal);
+        // Reuse Activity created by the listener if available; otherwise create a new one as fallback
+        Activity? createdActivity = null;
+        var current = Activity.Current;
+        if (current is null)
+        {
+            createdActivity = activitySource.StartActivity($"Saga.{handlerName}", ActivityKind.Internal);
+            current = createdActivity;
+        }
 
-        // If Activity is null, tracing is disabled; just continue.
-        if (activity is not null)
+        // If no Activity at all, tracing is disabled; just continue.
+        if (current is not null)
         {
             // Basic saga/message tags
-            activity.SetTag("lycia.saga.id", context.SagaId.ToString());
-            activity.SetTag("lycia.message.id", context.Message.MessageId.ToString());
-            activity.SetTag("lycia.handler", context.HandlerType?.FullName);
-            activity.SetTag("lycia.correlation.id", context.Message.CorrelationId.ToString());
+            current.SetTag("lycia.saga.id", context.SagaId.ToString());
+            current.SetTag("lycia.message.id", context.Message.MessageId.ToString());
+            current.SetTag("lycia.handler", context.HandlerType?.FullName);
+            current.SetTag("lycia.correlation.id", context.Message.CorrelationId.ToString());
             
             // If the message exposes ApplicationId, propagate it as well
             if (!string.IsNullOrWhiteSpace(context.Message.ApplicationId))
             {
-                activity.SetTag("lycia.application.id", context.Message.ApplicationId);
+                current.SetTag("lycia.application.id", context.Message.ApplicationId);
             }
         }
 
         try
         {
             await next().ConfigureAwait(false);
-            activity?.SetTag("lycia.saga.step.status", "Completed");
+            current?.SetTag("lycia.saga.step.status", "Completed");
         }
         catch (Exception ex)
         {
             // Record exception on the span
-            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            activity?.SetTag("exception.type", ex.GetType().FullName);
-            activity?.SetTag("exception.message", ex.Message);
-            activity?.SetTag("exception.stacktrace", ex.StackTrace);
+            current?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            current?.SetTag("exception.type", ex.GetType().FullName);
+            current?.SetTag("exception.message", ex.Message);
+            current?.SetTag("exception.stacktrace", ex.StackTrace);
 
             logger.LogError(ex,
                 "Unhandled exception in saga handler {Handler} [SagaId={SagaId}, MessageId={MessageId}]",
@@ -83,6 +88,11 @@ public sealed class ActivityTracingMiddleware(
                 context.Message.MessageId);
 
             throw;
+        }
+        finally
+        {
+            // Dispose only if we created the activity here
+            createdActivity?.Dispose();
         }
     }
 }
