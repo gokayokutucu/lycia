@@ -12,6 +12,17 @@ using System.Diagnostics;
 public sealed class LyciaActivitySourceHolder : IDisposable
 {
     /// <summary>
+    /// Provides a singleton holder for the <see cref="ActivitySource"/> instance used in the Lycia observability context.
+    /// </summary>
+    /// <remarks>
+    /// This class facilitates the creation and management of diagnostic activities
+    /// scoped to the Lycia ActivitySource name.
+    /// </remarks>
+    public LyciaActivitySourceHolder(ActivitySource source)
+    {
+        Source = source;
+    }
+    /// <summary>
     /// Represents the name of the ActivitySource instance used for diagnostic activities
     /// within the Lycia observability context.
     /// </summary>
