@@ -2,7 +2,9 @@
 using Avro;
 using Avro.IO;
 using Avro.Specific;
-using Lycia.Abstractions;
+using Lycia.Saga.Abstractions.Contexts;
+using Lycia.Saga.Abstractions.Serializers;
+using Lycia.Saga.Contexts;
 
 namespace Lycia.Extensions.Serialization;
 
@@ -268,4 +270,18 @@ public sealed class AvroMessageSerializer : IMessageSerializer
         return true;
     }
 
+    public (byte[] Body, IReadOnlyDictionary<string, object?> Headers) Serialize(object message, IMessageSerializationContext ctx)
+    {
+        throw new NotImplementedException();//GOP
+    }
+
+    public object Deserialize(ReadOnlyMemory<byte> body, IReadOnlyDictionary<string, object?> headers, IMessageSerializationContext ctx)
+    {
+        throw new NotImplementedException();//GOP
+    }
+
+    (IReadOnlyDictionary<string, object?> Headers, IMessageSerializationContext Ctx) IMessageSerializer.CreateContextFor(Type payloadType, string? schemaId, string? schemaVersion)
+    {
+        return CreateContextFor(payloadType, schemaId, schemaVersion);
+    }
 }

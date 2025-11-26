@@ -2,18 +2,19 @@
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 using Newtonsoft.Json;
-using Lycia.Messaging;
-using Lycia.Messaging.Enums;
-using Lycia;
-using Lycia.Abstractions;
-using Lycia.Extensions;
-using Lycia.Helpers;
+using Lycia.Common.Enums;
+using Lycia.Common.Helpers;
+using Lycia.Common.SagaSteps;
 using StackExchange.Redis;
 using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Helpers;
-using Lycia.Infrastructure.Helpers;
-using Lycia.Enums;
-using Lycia.Exceptions;
+using Lycia.Helpers;
+using Lycia.Saga.Abstractions;
+using Lycia.Saga.Abstractions.Contexts;
+using Lycia.Saga.Abstractions.Messaging;
+using Lycia.Saga.Contexts;
+using Lycia.Saga.Exceptions;
+using Lycia.Saga.Helpers;
 
 namespace Lycia.Extensions.Stores;
 
@@ -26,7 +27,7 @@ public class RedisSagaStore(
     ISagaIdGenerator sagaIdGenerator,
     ISagaCompensationCoordinator sagaCompensationCoordinator,
     SagaStoreOptions? options)
-    : ISagaStore, Lycia.Abstractions.ISagaStoreHealthCheck
+    : ISagaStore, ISagaStoreHealthCheck
 {
     private readonly SagaStoreOptions _options = options ?? new SagaStoreOptions();
 

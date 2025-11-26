@@ -328,9 +328,9 @@
       <Project>{c57c60d9-a8cc-4055-a8f3-d4dbb13156b4}</Project>
       <Name>Lycia.Infrastructure</Name>
     </ProjectReference>
-    <ProjectReference Include="..\..\src\Lycia.Messaging\Lycia.Messaging.csproj">
+    <ProjectReference Include="..\..\src\Lycia.Saga\Lycia.Saga.csproj">
       <Project>{bd73c6ec-e726-4b73-9f7b-f10e06b2d6c3}</Project>
-      <Name>Lycia.Messaging</Name>
+      <Name>Lycia.Saga</Name>
     </ProjectReference>
     <ProjectReference Include="..\..\src\Lycia\Lycia.csproj">
       <Project>{a49dceda-15c8-410a-9ecd-229644de5559}</Project>

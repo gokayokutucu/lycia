@@ -3,26 +3,26 @@
 // https://www.apache.org/licenses/LICENSE-2.0
 #if NET8_0_OR_GREATER
 using System.Reflection;
-using Lycia.Messaging;
-using Lycia.Handlers;
-using Lycia.Handlers.Abstractions;
-using Lycia.Helpers;
 using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Eventing;
 using Lycia.Extensions.Listener;
 using Lycia.Extensions.Serialization;
 using Lycia.Extensions.Stores;
-using Lycia.Infrastructure.Compensating;
-using Lycia.Infrastructure.Dispatching;
-using Lycia.Infrastructure.Eventing;
-using Lycia.Infrastructure.Middleware;
-using Lycia.Infrastructure.Retry;
-using Lycia.Infrastructure.Stores;
-using Lycia.Abstractions;
 using Lycia.Common;
-using Lycia.Configurations;
-using Lycia.Extensions;
+using Lycia.Common.Configurations;
+using Lycia.Compensating;
+using Lycia.Dispatching;
+using Lycia.Eventing;
+using Lycia.Helpers;
 using Lycia.Middleware;
+using Lycia.Retry;
+using Lycia.Saga.Abstractions;
+using Lycia.Saga.Abstractions.Handlers;
+using Lycia.Saga.Abstractions.Messaging;
+using Lycia.Saga.Abstractions.Middlewares;
+using Lycia.Saga.Abstractions.Serializers;
+using Lycia.Saga.Messaging.Handlers;
+using Lycia.Stores;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -30,7 +30,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Polly.Retry;
 using StackExchange.Redis;
-using IRetryPolicy = Lycia.Infrastructure.Retry.IRetryPolicy;
+using IRetryPolicy = Lycia.Retry.IRetryPolicy;
 
 namespace Lycia.Extensions
 {
@@ -97,7 +97,15 @@ namespace Lycia.Extensions
             services
                 .AddOptions<SagaOptions>()
                 .Bind(configuration.GetSection("Lycia:Saga"))
-                .PostConfigure(o => { o.DefaultIdempotency = true; });
+                .PostConfigure(o => { o.DefaultIdempotency ??= true; });
+            
+            services
+                .AddOptions<LoggingOptions>()
+                .Bind(configuration.GetSection("Lycia:Logging"))
+                .PostConfigure(o =>
+                {
+                    if (o.PayloadMaxLength <= 0) o.PayloadMaxLength = 2048;
+                });
 
             // 2) Common/core services (can be overridden later via builder)
             services.TryAddScoped<ISagaIdGenerator, DefaultSagaIdGenerator>();
@@ -350,10 +358,46 @@ namespace Lycia.Extensions
             return this;
         }
 
+        /// <summary>
+        /// Configures the saga store by registering a custom implementation of the specified type
+        /// and ensures it is used throughout the saga lifecycle for persistence and step tracking.
+        /// </summary>
+        /// <typeparam name="TSagaStore">The type of the saga store implementation to be used.</typeparam>
+        /// <returns>A fluent builder that allows further customization of saga configuration.</returns>
         public LyciaBuilder UseSagaStore<TSagaStore>() where TSagaStore : class, ISagaStore
         {
             _services.RemoveAll(typeof(ISagaStore));
             _services.AddSingleton<ISagaStore, TSagaStore>();
+            return this;
+        }
+        
+        /// <summary>
+        /// Replaces the logging middleware slot with a custom implementation.
+        /// </summary>
+        public LyciaBuilder UseLoggingMiddleware<TLogging>()
+            where TLogging : class, ISagaMiddleware, ILoggingSagaMiddleware
+        {
+            // Remove default LoggingMiddleware registration (if present)
+            for (var i = _services.Count - 1; i >= 0; i--)
+            {
+                var sd = _services[i];
+                if (sd.ServiceType == typeof(ISagaMiddleware) && sd.ImplementationType == typeof(LoggingMiddleware))
+                    _services.RemoveAt(i);
+            }
+
+            // Ensure custom logging middleware is registered once
+            var exists = _services.Any(sd => sd.ServiceType == typeof(ISagaMiddleware) &&
+                                             sd.ImplementationType == typeof(TLogging));
+            if (!exists) _services.AddScoped(typeof(ISagaMiddleware), typeof(TLogging));
+
+            // Default ordered pipeline: Logging first, then Retry
+            _services.RemoveAll(typeof(IReadOnlyList<Type>));
+            _services.AddScoped<IReadOnlyList<Type>>(_ => new List<Type>
+            {
+                typeof(TLogging),
+                typeof(RetryMiddleware)
+            });
+
             return this;
         }
 
@@ -594,6 +638,12 @@ namespace Lycia.Extensions
             return this;
         }
 
+        /// <summary>
+        /// Configures retry strategy options by allowing customization of the provided <see cref="RetryStrategyOptions"/> via a callback.
+        /// Applies additional options on top of existing app settings.
+        /// </summary>
+        /// <param name="configure">A callback action to configure the <see cref="RetryStrategyOptions"/>.</param>
+        /// <returns>Returns the current <see cref="LyciaBuilder"/> instance for chaining further configuration.</returns>
         public LyciaBuilder ConfigureRetry(Action<RetryStrategyOptions>? configure)
         {
             EnsureInlineConfigure(nameof(ConfigureSaga));
@@ -602,11 +652,27 @@ namespace Lycia.Extensions
         }
 
         // appsettings: "Lycia:Retry"
+        /// <summary>
+        /// Configures retry strategy options by binding them to the provided configuration section ("Lycia:Retry").
+        /// Allows additional customization of retry behavior through defined options.
+        /// </summary>
+        /// <returns>Returns the current <see cref="LyciaBuilder"/> instance for chaining further configuration.</returns>
         public LyciaBuilder ConfigureRetry()
         {
             EnsureInlineConfigure(nameof(ConfigureSaga));
             _services.AddOptions<RetryStrategyOptions>()
                 .Bind(_configuration.GetSection("Lycia:Retry"));
+            return this;
+        }
+        
+        /// <summary>
+        /// Configures logging behavior used by the built-in LoggingMiddleware.
+        /// Does not change the middleware type; only adjusts its options.
+        /// </summary>
+        public LyciaBuilder ConfigureLogging(Action<LoggingOptions>? configure)
+        {
+            EnsureInlineConfigure(nameof(ConfigureLogging));
+            if (configure != null) _services.PostConfigure(configure);
             return this;
         }
 

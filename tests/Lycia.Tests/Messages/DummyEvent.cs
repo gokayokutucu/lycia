@@ -1,9 +1,8 @@
 // Copyright 2023 Lycia Contributors
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
-using Lycia.Messaging;
-using Lycia.Messaging.Enums;
-using Lycia.Messaging.Utility;
+using Lycia.Saga.Abstractions.Messaging;
+using Lycia.Saga.Utility;
 
 namespace Lycia.Tests.Messages;
 public class DummyGrandparentEvent: DummyEvent{}

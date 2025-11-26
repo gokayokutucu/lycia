@@ -1,7 +1,5 @@
 using Autofac;
 using Lycia.Configurations;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Lycia.Common;
 

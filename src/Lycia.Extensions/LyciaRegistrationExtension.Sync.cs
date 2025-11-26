@@ -1,97 +1,119 @@
-﻿#if NETSTANDARD2_0
+﻿// Copyright 2023 Lycia Contributors
+// Licensed under the Apache License, Version 2.0
+// https://www.apache.org/licenses/LICENSE-2.0
+#if NETSTANDARD2_0
 using Autofac;
-using Autofac.Extensions.DependencyInjection;
+using Lycia.Common;
+using Lycia.Common.Configurations;
+using Lycia.Compensating;
+using Lycia.Dispatching;
+using Lycia.Eventing;
 using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Eventing;
 using Lycia.Extensions.Listener;
 using Lycia.Extensions.Serialization;
 using Lycia.Extensions.Stores;
-using Lycia.Infrastructure.Compensating;
-using Lycia.Infrastructure.Dispatching;
-using Lycia.Infrastructure.Eventing;
-using Lycia.Infrastructure.Middleware;
-using Lycia.Infrastructure.Retry;
-using Lycia.Infrastructure.Stores;
-using Lycia.Messaging;
-using Lycia.Abstractions;
-using Lycia.Common;
-using Lycia.Configurations;
-using Lycia.Extensions;
-using Lycia.Handlers;
-using Lycia.Handlers.Abstractions;
 using Lycia.Helpers;
 using Lycia.Middleware;
+using Lycia.Retry;
+using Lycia.Saga.Abstractions;
+using Lycia.Saga.Abstractions.Handlers;
+using Lycia.Saga.Abstractions.Messaging;
+using Lycia.Saga.Abstractions.Middlewares;
+using Lycia.Saga.Abstractions.Serializers;
+using Lycia.Saga.Messaging.Handlers;
+using Lycia.Stores;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Polly.Retry;
 using StackExchange.Redis;
 using System.Reflection;
+using IRetryPolicy = Lycia.Retry.IRetryPolicy;
 
 namespace Lycia.Extensions
 {
+    /// <summary>
+    /// Registration entrypoints + fluent builder for Lycia.
+    /// Consumers call containerBuilder.AddLycia(configuration)
+    ///   .UseMessageSerializer<...>()
+    ///   .UseEventBus<...>()
+    ///   .UseSagaStore<...>()
+    ///   .AddSagasFromAssemblies(typeof(SomeHandler).Assembly)
+    ///   .Build();
+    /// </summary>
     public static class LyciaRegistrationExtensions
     {
+        /// <summary>
+        /// Binds options from configuration, registers sensible defaults, and returns a fluent builder
+        /// so callers can customize transports, store, and serializer, and register handlers.
+        /// </summary>
         public static LyciaBuilder AddLycia(this ContainerBuilder containerBuilder, IConfiguration configuration)
         {
             var rootAppId = configuration["ApplicationId"];
             var commonTtlSeconds = configuration.GetValue<int?>("Lycia:CommonTTL");
+
+            // --- Redis connection (only if EventStore provider is Redis) ---
             var storeSection = configuration.GetSection(SagaStoreOptions.SectionName);
 
+            // 1) Bind options with defaults
             var eb = new EventBusOptions();
             configuration.GetSection(EventBusOptions.SectionName).Bind(eb);
-            eb.Provider = string.IsNullOrWhiteSpace(eb.Provider) ? Constants.ProviderRabbitMq : eb.Provider;
-            eb.ApplicationId = eb.ApplicationId ?? rootAppId;
+            eb.Provider ??= Constants.ProviderRabbitMq;
+            eb.ApplicationId ??= rootAppId;
             if (commonTtlSeconds is > 0)
             {
                 var tt = TimeSpan.FromSeconds(commonTtlSeconds.Value);
-                eb.MessageTTL = eb.MessageTTL ?? tt;
-                eb.DeadLetterQueueMessageTTL = eb.DeadLetterQueueMessageTTL ?? tt;
+                eb.MessageTTL ??= tt;
+                eb.DeadLetterQueueMessageTTL ??= tt;
             }
             containerBuilder.RegisterInstance(Options.Create(eb)).As<IOptions<EventBusOptions>>().SingleInstance();
 
             ConfigureRedisEventStore(containerBuilder, storeSection);
+
             var ss = new SagaStoreOptions();
             configuration.GetSection(SagaStoreOptions.SectionName).Bind(ss);
-            ss.Provider = string.IsNullOrWhiteSpace(ss.Provider) ? Constants.ProviderRedis : ss.Provider;
+            ss.Provider ??= Constants.ProviderRedis;
             if (ss.LogMaxRetryCount <= 0) ss.LogMaxRetryCount = Constants.LogMaxRetryCount;
-            ss.ApplicationId = ss.ApplicationId ?? rootAppId;
+            ss.ApplicationId ??= rootAppId;
             if (commonTtlSeconds is > 0)
             {
                 var tt = TimeSpan.FromSeconds(commonTtlSeconds.Value);
-                ss.StepLogTtl = ss.StepLogTtl ?? tt;
+                ss.StepLogTtl ??= tt;
             }
             containerBuilder.RegisterInstance(Options.Create(ss)).As<IOptions<SagaStoreOptions>>().SingleInstance();
 
             var so = new SagaOptions();
             configuration.GetSection("Lycia:Saga").Bind(so);
-            so.DefaultIdempotency = true;
+            so.DefaultIdempotency ??= true;
             containerBuilder.RegisterInstance(Options.Create(so)).As<IOptions<SagaOptions>>().SingleInstance();
 
-            // Retry options (IOptions<RetryStrategyOptions>) kaydı
-            var retrySection = configuration.GetSection("Lycia:Retry");
-            var retryOpts = new RetryStrategyOptions();
-            retrySection.Bind(retryOpts);
-            containerBuilder.RegisterInstance(Options.Create(retryOpts)).As<IOptions<RetryStrategyOptions>>().SingleInstance();
+            var lo = new LoggingOptions();
+            configuration.GetSection("Lycia:Logging").Bind(lo);
+            if (lo.PayloadMaxLength <= 0) lo.PayloadMaxLength = 2048;
+            containerBuilder.RegisterInstance(Options.Create(lo)).As<IOptions<LoggingOptions>>().SingleInstance();
 
-
+            // 2) Common/core services (can be overridden later via builder)
             containerBuilder.RegisterType<DefaultSagaIdGenerator>().As<ISagaIdGenerator>().InstancePerLifetimeScope();
             containerBuilder.RegisterType<SagaDispatcher>().As<ISagaDispatcher>().InstancePerLifetimeScope();
             containerBuilder.RegisterType<SagaCompensationCoordinator>().As<ISagaCompensationCoordinator>().InstancePerLifetimeScope();
             containerBuilder.RegisterType<SagaContextAccessor>().As<ISagaContextAccessor>().InstancePerLifetimeScope();
 
+            // Serializer default
             containerBuilder.RegisterType<NewtonsoftJsonMessageSerializer>().SingleInstance();
             containerBuilder.RegisterType<AvroMessageSerializer>().SingleInstance();
             containerBuilder.RegisterType<CompositeMessageSerializer>()
                 .As<IMessageSerializer>()
                 .SingleInstance();
 
-
+            // Placeholder for queue map; the builder will populate it in Build()
             containerBuilder.Register(_ => new Dictionary<string, (Type MessageType, Type HandlerType)>(StringComparer.OrdinalIgnoreCase))
                 .As<IDictionary<string, (Type MessageType, Type HandlerType)>>()
                 .SingleInstance();
 
+            // Default EventBus (RabbitMQ). Consumers may override with UseEventBus<T>().
             containerBuilder.Register(sp =>
             {
                 var logger = sp.Resolve<ILogger<RabbitMqEventBus>>();
@@ -116,6 +138,7 @@ namespace Lycia.Extensions
                 );
             }).As<IEventBus>().SingleInstance();
 
+            // Default SagaStore (Redis). Consumers may override with UseSagaStore<T>().
             containerBuilder.Register(sp =>
             {
                 var storeOpts = sp.Resolve<IOptions<SagaStoreOptions>>().Value;
@@ -145,13 +168,19 @@ namespace Lycia.Extensions
                 .As<IServiceScopeFactory>()
                 .SingleInstance();
 
-
             containerBuilder.RegisterType<RabbitMqListener>().AsSelf().SingleInstance().AutoActivate();
 
             return new LyciaBuilder(containerBuilder, configuration);
         }
 
-        public static LyciaBuilder AddLycia(this ContainerBuilder containerBuilder, Action<LyciaBuilder> configure, IConfiguration configuration)
+        /// <summary>
+        /// Adds Lycia and allows inline configuration of LyciaBuilder. 
+        /// All Configure* methods are only valid inside this action.
+        /// </summary>
+        public static LyciaBuilder AddLycia(
+            this ContainerBuilder containerBuilder,
+            Action<LyciaBuilder> configure,
+            IConfiguration configuration)
         {
             var builder = AddLycia(containerBuilder, configuration);
             builder.SetInlineConfigure(true);
@@ -168,11 +197,16 @@ namespace Lycia.Extensions
 
         private static void RegisterMiddlewareAndPolicies(ContainerBuilder containerBuilder)
         {
-            containerBuilder.RegisterType<PollyRetryPolicy>().As<Lycia.Infrastructure.Retry.IRetryPolicy>().SingleInstance();
+            // Default retry policy (Polly-based). Can be overridden by registering IRetryPolicy before Build().
+            containerBuilder.RegisterType<PollyRetryPolicy>().As<IRetryPolicy>().SingleInstance();
 
+            // 1) Ensure default middlewares are available as ISagaMiddleware (idempotent, allow multiple implementations)
             containerBuilder.RegisterType<LoggingMiddleware>().As<ISagaMiddleware>().InstancePerLifetimeScope();
             containerBuilder.RegisterType<RetryMiddleware>().As<ISagaMiddleware>().InstancePerLifetimeScope();
 
+            // 2) Default ordered pipeline: Logging first, then Retry
+            //    This will only be used if the host app does NOT call UseSagaMiddleware(Action<>)
+            //    because that overload registers its own IReadOnlyList<Type>.
             containerBuilder.RegisterInstance<IReadOnlyList<Type>>(new List<Type>
             {
                 typeof(LoggingMiddleware),
@@ -199,10 +233,15 @@ namespace Lycia.Extensions
             }
         }
 
+        /// <summary>
+        /// Lightweight in-memory setup for tests or samples. Registers in-memory EventBus and SagaStore,
+        /// keeps the same fluent builder so you can still add handlers and override pieces.
+        /// </summary>
         public static LyciaBuilder AddLyciaInMemory(this ContainerBuilder containerBuilder, IConfiguration? configuration = null)
         {
             configuration ??= new ConfigurationBuilder().AddInMemoryCollection().Build();
 
+            // Bind minimal options with sensible defaults
             var eb = new EventBusOptions
             {
                 Provider = "InMemory",
@@ -224,33 +263,40 @@ namespace Lycia.Extensions
             };
             containerBuilder.RegisterInstance(Options.Create(so)).As<IOptions<SagaOptions>>().SingleInstance();
 
+            // Core services
             containerBuilder.RegisterType<DefaultSagaIdGenerator>().As<ISagaIdGenerator>().InstancePerLifetimeScope();
             containerBuilder.RegisterType<SagaContextAccessor>().As<ISagaContextAccessor>().InstancePerLifetimeScope();
             containerBuilder.RegisterType<SagaDispatcher>().As<ISagaDispatcher>().InstancePerLifetimeScope();
             containerBuilder.RegisterType<SagaCompensationCoordinator>().As<ISagaCompensationCoordinator>().InstancePerLifetimeScope();
 
+            // Serializer
             containerBuilder.RegisterType<NewtonsoftJsonMessageSerializer>().SingleInstance();
             containerBuilder.RegisterType<AvroMessageSerializer>().SingleInstance();
             containerBuilder.RegisterType<CompositeMessageSerializer>()
                 .As<IMessageSerializer>()
                 .SingleInstance();
 
-
+            // In-memory transports/stores
             containerBuilder.Register(sp => new InMemoryEventBus(new Lazy<ISagaDispatcher>(() => sp.Resolve<ISagaDispatcher>())))
                 .As<IEventBus>()
                 .InstancePerLifetimeScope();
 
             containerBuilder.RegisterType<InMemorySagaStore>().As<ISagaStore>().InstancePerLifetimeScope();
 
+            // Placeholder queue map – builder will populate in Build()
             containerBuilder.Register(_ => new Dictionary<string, (Type MessageType, Type HandlerType)>(StringComparer.OrdinalIgnoreCase))
                 .As<IDictionary<string, (Type MessageType, Type HandlerType)>>()
                 .SingleInstance();
 
             RegisterMiddlewareAndPolicies(containerBuilder);
+
             return new LyciaBuilder(containerBuilder, configuration);
         }
     }
 
+    /// <summary>
+    /// Fluent builder that lets the app override serializer/bus/store and register saga handlers.
+    /// </summary>
     public sealed class LyciaBuilder
     {
         private bool _inlineConfigureGate;
@@ -277,36 +323,85 @@ namespace Lycia.Extensions
                     $"{method} can only be called inside AddLycia(o => {{ ... }}, configuration) block.");
         }
 
+        // ---------------------------
+        // Overrides
+        // ---------------------------
+        /// <summary>
+        /// Configures the message serializer for the system by removing any existing implementation
+        /// and registering a new one of the specified type.
+        /// </summary>
+        /// <typeparam name="TSerializer">The type of the message serializer to register. Must implement <see cref="IMessageSerializer"/>.</typeparam>
+        /// <returns>The current instance of <see cref="LyciaBuilder"/> for further configuration.</returns>
         public LyciaBuilder UseMessageSerializer<TSerializer>() where TSerializer : class, IMessageSerializer
         {
             _containerBuilder.RegisterType<TSerializer>().As<IMessageSerializer>().SingleInstance();
             return this;
         }
 
+        /// <summary>
+        /// Configures the application to use a specific implementation of the IEventBus interface.
+        /// This method removes any previously registered event bus and registers the provided type
+        /// as the singleton implementation of the event bus.
+        /// </summary>
+        /// <typeparam name="TEventBus">The type of the event bus to use, which must implement the IEventBus interface.</typeparam>
+        /// <returns>A LyciaBuilder instance to allow further configuration chaining.</returns>
         public LyciaBuilder UseEventBus<TEventBus>() where TEventBus : class, IEventBus
         {
             _containerBuilder.RegisterType<TEventBus>().As<IEventBus>().SingleInstance();
             return this;
         }
 
+        /// <summary>
+        /// Configures the saga store by registering a custom implementation of the specified type
+        /// and ensures it is used throughout the saga lifecycle for persistence and step tracking.
+        /// </summary>
+        /// <typeparam name="TSagaStore">The type of the saga store implementation to be used.</typeparam>
+        /// <returns>A fluent builder that allows further customization of saga configuration.</returns>
         public LyciaBuilder UseSagaStore<TSagaStore>() where TSagaStore : class, ISagaStore
         {
             _containerBuilder.RegisterType<TSagaStore>().As<ISagaStore>().SingleInstance();
             return this;
         }
 
+        /// <summary>
+        /// Replaces the logging middleware slot with a custom implementation.
+        /// </summary>
+        public LyciaBuilder UseLoggingMiddleware<TLogging>()
+            where TLogging : class, ISagaMiddleware, ILoggingSagaMiddleware
+        {
+            _containerBuilder.RegisterType<TLogging>().As<ISagaMiddleware>().InstancePerLifetimeScope();
+
+            _containerBuilder.RegisterInstance<IReadOnlyList<Type>>(new List<Type>
+            {
+                typeof(TLogging),
+                typeof(RetryMiddleware)
+            }).As<IReadOnlyList<Type>>().SingleInstance();
+
+            return this;
+        }
+
+        /// <summary>
+        /// Configures and registers saga middleware in a pipeline for handling saga behaviors such as logging and retry policies.
+        /// </summary>
+        /// <param name="configure">An optional configuration action to customize the saga middleware pipeline, such as adding specific middleware components.</param>
+        /// <returns>An updated instance of <see cref="LyciaBuilder"/>, allowing further configuration.</returns>
+        /// <exception cref="InvalidOperationException">Thrown if an invalid middleware type is specified in the configuration.</exception>
         public LyciaBuilder UseSagaMiddleware(Action<SagaMiddlewareOptions>? configure)
         {
             if (configure == null) return this;
             var options = new SagaMiddlewareOptions();
             configure(options);
 
+            // Slot-based plan: fixed positions for Lycia-known categories, replacements by interface
+            //  - ILoggingSagaMiddleware slot (default: LoggingMiddleware)
+            //  - IRetrySagaMiddleware   slot (default: RetryMiddleware)
             var slotMap = new Dictionary<Type, Type>
             {
                 { typeof(ILoggingSagaMiddleware), typeof(LoggingMiddleware) },
                 { typeof(IRetrySagaMiddleware),   typeof(RetryMiddleware)   }
             };
 
+            // Extra middlewares which only implement ISagaMiddleware (no known slot)
             var extras = new List<Type>();
 
             foreach (var t in options.Middlewares)
@@ -315,16 +410,19 @@ namespace Lycia.Extensions
 
                 if (typeof(ILoggingSagaMiddleware).IsAssignableFrom(t))
                 {
+                    // Replace logging slot
                     slotMap[typeof(ILoggingSagaMiddleware)] = t;
                     RemoveMiddlewareImplementation(typeof(LoggingMiddleware));
                 }
                 else if (typeof(IRetrySagaMiddleware).IsAssignableFrom(t))
                 {
+                    // Replace retry slot
                     slotMap[typeof(IRetrySagaMiddleware)] = t;
                     RemoveMiddlewareImplementation(typeof(RetryMiddleware));
                 }
                 else if (typeof(ISagaMiddleware).IsAssignableFrom(t))
                 {
+                    // No known slot → append later in the given order
                     if (!extras.Contains(t)) extras.Add(t);
                 }
                 else
@@ -333,12 +431,14 @@ namespace Lycia.Extensions
                 }
             }
 
+            // Build the final ordered list: Logging → Retry → extras (in user order)
             var ordered = new List<Type>
             {
                 slotMap[typeof(ILoggingSagaMiddleware)],
                 slotMap[typeof(IRetrySagaMiddleware)]
             };
 
+            // avoid duplicates when extras accidentally include defaults
             foreach (var t in extras.Where(t => !ordered.Contains(t)))
             {
                 ordered.Add(t);
@@ -352,12 +452,22 @@ namespace Lycia.Extensions
             _containerBuilder.RegisterInstance<IReadOnlyList<Type>>(ordered).As<IReadOnlyList<Type>>().SingleInstance();
             return this;
 
+            // Helper to remove a specific ISagaMiddleware implementation mapping
             void RemoveMiddlewareImplementation(Type impl)
             {
                 // no-op for ContainerBuilder (duplicates are allowed; caller should avoid)
             }
         }
 
+        // ---------------------------
+        // Handler discovery (fluent)
+        // ---------------------------
+        /// <summary>
+        /// Registers handlers from the specified assemblies and adds them to the builder.
+        /// Ensures that handlers in the assemblies are discovered and included in the configuration.
+        /// </summary>
+        /// <param name="assemblies">The assemblies to scan for handler types.</param>
+        /// <returns>A configured instance of the <see cref="LyciaBuilder"/> to allow for fluent chaining of additional configuration methods.</returns>
         public LyciaBuilder AddHandlersFrom(params Assembly[]? assemblies)
         {
             if (assemblies == null) return this;
@@ -368,6 +478,13 @@ namespace Lycia.Extensions
             return this;
         }
 
+        /// <summary>
+        /// Registers a specific saga handler type for dependency injection, enabling it to handle associated messages.
+        /// Also updates routing and message-type discovery for the provided saga handler.
+        /// </summary>
+        /// <param name="handlerType">The type of the saga handler to register. Must implement message handling interfaces.</param>
+        /// <returns>An instance of <see cref="LyciaBuilder"/> to allow further configuration.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="handlerType"/> is null.</exception>
         public LyciaBuilder AddSaga(Type handlerType)
         {
             if (handlerType == null) throw new ArgumentNullException(nameof(handlerType));
@@ -384,6 +501,11 @@ namespace Lycia.Extensions
             return this;
         }
 
+        /// <summary>
+        /// Adds multiple saga handler types to the builder for registration.
+        /// </summary>
+        /// <param name="handlerTypes">An array of types representing saga handlers to be registered.</param>
+        /// <returns>The current instance of <see cref="LyciaBuilder"/> to allow for method chaining.</returns>
         public LyciaBuilder AddSagas(params Type?[]? handlerTypes)
         {
             if (handlerTypes == null) return this;
@@ -395,18 +517,36 @@ namespace Lycia.Extensions
             return this;
         }
 
+        /// <summary>
+        /// Automatically scans and registers all sagas from the assembly of the calling code.
+        /// This method simplifies the process of locating and registering saga handlers
+        /// by using the assembly where the method is invoked as the reference.
+        /// </summary>
+        /// <returns>
+        /// A fluent <see cref="LyciaBuilder"/> instance to allow further configuration.
+        /// </returns>
         public LyciaBuilder AddSagasFromCurrentAssembly()
         {
             var calling = Assembly.GetCallingAssembly();
             return AddSagasFromAssemblies(calling);
         }
 
+        /// <summary>
+        /// Registers saga handlers by discovering them from the assemblies containing the specified marker types.
+        /// </summary>
+        /// <param name="markerTypes">The types used to locate the assemblies to be scanned for saga handlers.</param>
+        /// <returns>A fluent builder allowing further customization of the Lycia configuration.</returns>
         public LyciaBuilder AddSagasFromAssembliesOf(params Type[] markerTypes)
         {
             var asms = markerTypes?.Where(t => t != null).Select(t => t.Assembly).Distinct().ToArray() ?? Array.Empty<Assembly>();
             return AddSagasFromAssemblies(asms);
         }
 
+        /// <summary>
+        /// Discovers and registers saga handlers from the specified assemblies to the service collection.
+        /// </summary>
+        /// <param name="assemblies">The assemblies to scan for saga handlers.</param>
+        /// <returns>A fluent builder for additional configuration.</returns>
         public LyciaBuilder AddSagasFromAssemblies(params Assembly[] assemblies)
         {
             AddHandlersFrom(assemblies);
@@ -427,6 +567,15 @@ namespace Lycia.Extensions
             return this;
         }
 
+        // ---------------------------
+        // Configure options via code (stacked on top of appsettings)
+        // ---------------------------
+        /// <summary>
+        /// Configures saga options by allowing customization of the provided <see cref="SagaOptions"/> via a callback.
+        /// Applies additional options on top of existing app settings.
+        /// </summary>
+        /// <param name="configure">A callback action to configure the <see cref="SagaOptions"/>.</param>
+        /// <returns>Returns the current <see cref="LyciaBuilder"/> instance for chaining further configuration.</returns>
         public LyciaBuilder ConfigureSaga(Action<SagaOptions>? configure)
         {
             EnsureInlineConfigure(nameof(ConfigureSaga));
@@ -440,6 +589,11 @@ namespace Lycia.Extensions
             return this;
         }
 
+        /// <summary>
+        /// Configures the Event Bus by applying the specified configuration settings.
+        /// </summary>
+        /// <param name="configure">An action to configure the <see cref="EventBusOptions"/>, allowing customization of properties such as provider, connection string, and message settings.</param>
+        /// <returns>A <see cref="LyciaBuilder"/> instance to continue configuring the application with a fluent interface.</returns>
         public LyciaBuilder ConfigureEventBus(Action<EventBusOptions>? configure)
         {
             EnsureInlineConfigure(nameof(ConfigureSaga));
@@ -453,6 +607,12 @@ namespace Lycia.Extensions
             return this;
         }
 
+        /// <summary>
+        /// Configures the saga store by applying the specified options, which allows customization
+        /// of store-specific settings such as connection strings, retry policies, and other configurations.
+        /// </summary>
+        /// <param name="configure">A delegate to configure <see cref="SagaStoreOptions"/> with specific values.</param>
+        /// <returns>The <see cref="LyciaBuilder"/> instance to enable further configuration chaining.</returns>
         public LyciaBuilder ConfigureSagaStore(Action<SagaStoreOptions>? configure)
         {
             EnsureInlineConfigure(nameof(ConfigureSaga));
@@ -466,6 +626,12 @@ namespace Lycia.Extensions
             return this;
         }
 
+        /// <summary>
+        /// Configures retry strategy options by allowing customization of the provided <see cref="RetryStrategyOptions"/> via a callback.
+        /// Applies additional options on top of existing app settings.
+        /// </summary>
+        /// <param name="configure">A callback action to configure the <see cref="RetryStrategyOptions"/>.</param>
+        /// <returns>Returns the current <see cref="LyciaBuilder"/> instance for chaining further configuration.</returns>
         public LyciaBuilder ConfigureRetry(Action<RetryStrategyOptions>? configure)
         {
             EnsureInlineConfigure(nameof(ConfigureSaga));
@@ -478,6 +644,12 @@ namespace Lycia.Extensions
             return this;
         }
 
+        // appsettings: "Lycia:Retry"
+        /// <summary>
+        /// Configures retry strategy options by binding them to the provided configuration section ("Lycia:Retry").
+        /// Allows additional customization of retry behavior through defined options.
+        /// </summary>
+        /// <returns>Returns the current <see cref="LyciaBuilder"/> instance for chaining further configuration.</returns>
         public LyciaBuilder ConfigureRetry()
         {
             EnsureInlineConfigure(nameof(ConfigureSaga));
@@ -487,6 +659,32 @@ namespace Lycia.Extensions
             return this;
         }
 
+        /// <summary>
+        /// Configures logging behavior used by the built-in LoggingMiddleware.
+        /// Does not change the middleware type; only adjusts its options.
+        /// </summary>
+        public LyciaBuilder ConfigureLogging(Action<LoggingOptions>? configure)
+        {
+            EnsureInlineConfigure(nameof(ConfigureLogging));
+            if (configure != null)
+            {
+                var o = new LoggingOptions();
+                _configuration.GetSection("Lycia:Logging").Bind(o);
+                configure(o);
+                _containerBuilder.RegisterInstance(Options.Create(o)).As<IOptions<LoggingOptions>>().SingleInstance();
+            }
+            return this;
+        }
+
+        // ---------------------------
+        // Finalize
+        // ---------------------------
+        /// <summary>
+        /// Finalizes the builder by discovering and registering message handlers, sagas,
+        /// and queue type mappings into the service collection.
+        /// Ensures all explicitly added handlers are registered and merges with discovered handlers.
+        /// </summary>
+        /// <returns>The current instance of <see cref="LyciaBuilder"/> for continued modifications or finalization.</returns>
         public LyciaBuilder Build()
         {
             if (_assemblies.Count == 0)
@@ -511,6 +709,7 @@ namespace Lycia.Extensions
         }
     }
 
+    // Internal helper copied from previous SagaHandlerRegistrationExtensions
     internal static class _LyciaHandlerDiscovery
     {
         internal static IEnumerable<Type> SafeGetTypes(Assembly asm)
@@ -566,6 +765,7 @@ namespace Lycia.Extensions
         {
             var messageTypes = GetMessageTypes(handlerType);
 
+            // From known generic base classes
             Type? current = handlerType;
             while (current != null && current != typeof(object))
             {
@@ -636,6 +836,7 @@ namespace Lycia.Extensions
                         }));
 
             var map = new Dictionary<string, (Type MessageType, Type HandlerType)>(StringComparer.OrdinalIgnoreCase);
+            // Preserve current semantics: last one wins on duplicate keys
             foreach (var p in pairs)
                 map[p.Key] = p.Value;
 
@@ -669,6 +870,5 @@ namespace Lycia.Extensions
         public _LfServiceScopeFactory(Autofac.ILifetimeScope root) { _root = root; }
         public IServiceScope CreateScope() => new _LfServiceScope(_root.BeginLifetimeScope());
     }
-
 }
 #endif

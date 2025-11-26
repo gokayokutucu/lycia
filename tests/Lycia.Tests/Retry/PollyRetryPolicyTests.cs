@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Options;
 using Polly.Retry;
-using Lycia.Infrastructure.Retry;
-using Lycia.Exceptions;
+using Lycia.Retry;
+using Lycia.Saga.Exceptions;
 using Polly;
 
 namespace Lycia.Tests.Retry

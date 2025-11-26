@@ -3,7 +3,10 @@ using System.Collections.Generic;
 using System.Text;
 using Avro.Generic;
 using Avro.Specific;
-using Lycia.Abstractions;
+using Lycia.Saga.Abstractions;
+using Lycia.Saga.Abstractions.Contexts;
+using Lycia.Saga.Abstractions.Serializers;
+using Lycia.Saga.Contexts;
 
 namespace Lycia.Extensions.Serialization;
 public sealed class CompositeMessageSerializer : IMessageSerializer
@@ -138,10 +141,25 @@ public sealed class CompositeMessageSerializer : IMessageSerializer
         return _json.NormalizeTransportHeaders(incomingHeaders ?? new Dictionary<string, object?>());
     }
 
-    public (IReadOnlyDictionary<string, object?> Headers, MessageSerializationContext Ctx)
+    public (IReadOnlyDictionary<string, object?> Headers, IMessageSerializationContext Ctx)
         CreateContextFor(Type payloadType, string? schemaId = null, string? schemaVersion = null)
     {
         var usesAvro = payloadType != null && IsAvroType(payloadType);
         return (usesAvro ? _avro : _json).CreateContextFor(payloadType, schemaId, schemaVersion);
+    }
+
+    public (byte[] Body, IReadOnlyDictionary<string, object?> Headers) Serialize(object message, IMessageSerializationContext ctx)
+    {
+        throw new NotImplementedException();//GOP
+    }
+
+    public object Deserialize(ReadOnlyMemory<byte> body, IReadOnlyDictionary<string, object?> headers, IMessageSerializationContext ctx)
+    {
+        throw new NotImplementedException();//GOP
+    }
+
+    (IReadOnlyDictionary<string, object?> Headers, IMessageSerializationContext Ctx) IMessageSerializer.CreateContextFor(Type payloadType, string? schemaId, string? schemaVersion)
+    {
+        throw new NotImplementedException();//GOP
     }
 }
