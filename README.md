@@ -9,7 +9,7 @@
 
 **Lycia** is the **main package** of the Lycia framework.  
 It provides the saga infrastructure, orchestration, and choreography support.  
-Extensions (e.g. Redis, RabbitMQ, Scheduling) are published separately under `Lycia.Extensions.*`.
+Extensions (e.g. Redis, RabbitMQ, Scheduling, Observability) are published separately under `Lycia.Extensions.*`.
 
 **Lycia** began with a vision on *May 28, 2023*.  
 Our motto: *“Turning difficult paths into joyful simplicity.”* Inspired by the ancient *Lycian Way*, we set out to build a framework that makes complex saga workflows easy to manage — supported by strong documentation and aligned with modern software practices.
@@ -24,9 +24,9 @@ For architectural deep-dive, compensation coordination, and integration test str
 
 Explore the [samples/](samples) folder for real-world usage:  
 - **Sample.Order.Api** – API entrypoint  
-- **Sample.Order.Orchestration.Consumer** – Coordinated saga orchestration  
-- **Sample.Order.Choreography.Consumer** – Reactive saga choreography  
-- **Sample.Order.Orchestration.Seq.Consumer** – Sequential orchestration with compensation flows  
+- **Sample.Order.Orchestration.Consumer** – Coordinated Responsive Saga (asynchronous request–response orchestration using `CoordinatedResponsiveSagaHandler`)  
+- **Sample.Order.Choreography.Consumer** – Reactive Saga (stateless event-driven choreography using `ReactiveSagaHandler`)  
+- **Sample.Order.Orchestration.Seq.Consumer** – Coordinated Saga (stateful sequential orchestration using `CoordinatedSagaHandler`, with compensation flows)  
 
 ---
 
@@ -63,20 +63,28 @@ services.AddLycia(Configuration)
 
 ## Quick Start
 
+**Coordinated Saga**: Uses a central orchestrator to manage the full lifecycle of a saga. This handler starts a saga, executes the business logic step-by-step, and coordinates the flow by publishing commands/events. Ideal when you need deterministic, centralized control.
+
+**Stateful Model**: Coordinated sagas always use `TSagaData` to maintain saga state across all steps.
+
 **Coordinated Saga (Orchestration)**
 
 ```csharp
-public class CreateOrderSagaHandler :
-    StartCoordinatedResponsiveSagaHandler<CreateOrderCommand, OrderCreatedResponse, CreateOrderSagaData>
+public class CreateInvoiceSagaHandler :
+    StartCoordinatedSagaHandler<CreateInvoiceCommand, CreateInvoiceSagaData>
 {
-    public override async Task HandleAsync(CreateOrderCommand cmd, CancellationToken ct = default)
+    public override async Task HandleAsync(CreateInvoiceCommand cmd, CancellationToken ct = default)
     {
-        // Business logic
-        await Context.Publish(new OrderCreatedResponse { OrderId = cmd.OrderId }, ct);
-        await Context.MarkAsComplete<CreateOrderCommand>(ct);
+        // business logic
+        await Context.Publish(new InvoiceStartedEvent { InvoiceId = cmd.InvoiceId }, ct);
+        await Context.MarkAsComplete<CreateInvoiceCommand>(ct);
     }
 }
 ```
+
+**Reactive Saga**: Implements event-driven choreography. Each handler reacts only to the event it subscribes to. There is no central orchestrator; instead, services collaborate by emitting events. Ideal for loosely coupled systems and autonomous microservices.
+
+**Stateless Model**: Reactive sagas do not use saga state (`TSagaData`); each event is handled independently without maintaining cross-step state.
 
 **Reactive Saga (Choreography)**
 
@@ -97,6 +105,38 @@ public class InventorySagaHandler :
         // Release reserved stock
         InventoryService.ReleaseStock(failed.OrderId);
         return Task.CompletedTask;
+    }
+}
+```
+
+### Additional Saga Handler Examples
+
+**Coordinated Responsive Saga**: Similar to a coordinated saga, but also handles direct responses (e.g., request/response patterns). Useful when the saga step must wait for a specific success or failure message before moving forward.
+
+Like all coordinated sagas, this pattern is **stateful** and requires a `TSagaData` object to track progress across asynchronous request–response steps.
+
+**CoordinatedResponsiveSagaHandler**
+
+```csharp
+public class CreateOrderSagaHandler :
+    StartCoordinatedResponsiveSagaHandler<CreateOrderCommand, OrderCreatedResponse, CreateOrderSagaData>
+{
+    public override async Task HandleAsync(CreateOrderCommand cmd, CancellationToken ct = default)
+    {
+        // Business logic
+        await Context.Publish(new OrderCreatedResponse { OrderId = cmd.OrderId }, ct);
+        await Context.MarkAsComplete<CreateOrderCommand>(ct);
+    }
+    
+    public override async Task HandleSuccessResponseAsync(OrderCreatedResponse response, CancellationToken cancellationToken = default)
+    {
+        // Order created, reserve inventory
+        await Context.Send(new ReserveInventoryCommand
+        {
+            OrderId = response.OrderId,
+            ParentMessageId = response.MessageId
+        }, cancellationToken);
+        await Context.MarkAsComplete<OrderCreatedResponse>();
     }
 }
 ```
@@ -165,18 +205,18 @@ This produces a full cross-service trace chain in Grafana Tempo or Jaeger.
 
 ## What's Next
 
+- **Native Inbox / Outbox Guarantees**
+  - State-consistency
+  - Cross-service delivery reliability
+  - Message replay safety
+  
 - **Distributed Delayed Message Scheduling**
   - Compensation timers
   - Cron-like orchestration intervals
   - Durable timing guarantees
 
-- **Native Inbox / Outbox Guarantees**
-  - State-consistency
-  - Cross-service delivery reliability
-  - Message replay safety
-
 - **Schema Intelligence**
-  - Avro/Protobuf registry integration
+  - Avro/Protobuf registry integration (including the built‑in `AvroSchemaConverter`)
   - Backward/forward compatibility detection
   - Contract-driven saga evolution
 
@@ -192,11 +232,11 @@ In addition to minimal setup and clear semantics, Lycia offers:
 - **SagaDispatcher** and **CompensationCoordinator** core components  
 - **Built-in Idempotency** and cancellation flow (`MarkAsCancelled<T>()`)  
 - **Custom Retry Hooks** finalized via `IRetryPolicy` (with Polly-based default implementation, configurable via `ConfigureRetry`), supporting exponential backoff, jitter, and per-exception retry strategies  
-- **Choreography & Orchestration** support via `ReactiveSagaHandler<T>` and `StartCoordinatedSagaHandler<T>`  
+- **Choreography & Orchestration** support via `ReactiveSagaHandler<T>` and `CoordinatedSagaHandler<T>`  
 - **RedisSagaStore** built-in extension support with TTL, CAS, parent-child message tracing  
 - **RabbitMQ EventBus** built-in extension support with Dead Letter Queue (DLQ) and header normalization  
 - **ISagaContextAccessor** for contextual saga state access  
-- **Fluent Middleware Pipeline**: Default logging and retry middleware, replaceable via middleware slots (`ILoggingSagaMiddleware`, `IRetrySagaMiddleware`)  
+- **Fluent Middleware Pipeline**: Default logging, retry, and tracing middleware (via `ActivityTracingMiddleware`), all replaceable via middleware slots (`ILoggingSagaMiddleware`, `IRetrySagaMiddleware`, `ITracingSagaMiddleware`)  
 - **Fluent Configuration API**: Easily plug your custom serializers, stores and buses  
 - **Detailed Integration Tests** for Redis, RabbitMQ (including Ack/Nack/DLQ behavior), Compensation logic  
 - **Appsettings.json Support**: Environment-based saga configuration
