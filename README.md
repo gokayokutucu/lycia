@@ -56,7 +56,7 @@ services.AddLycia(Configuration)
   - *Reactive Saga* → event-driven choreography approach  
 
 - Built-in support for **idempotency**, **timeouts**, and **in-process retries with Polly, Ack/Nack + DLQ support on RabbitMQ**  
-- **Default Middleware Pipeline (Logging + Retry, replaceable via UseSagaMiddleware)**  
+- **Default Middleware Pipeline (Logging + Tracing + Retry, replaceable via UseSagaMiddleware)**  
 - **Extensibility**: Easily plug in custom implementations of `IMessageSerializer`, `IEventBus`, or `ISagaStore`.
 
 ---
