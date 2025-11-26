@@ -85,11 +85,12 @@
         <PackageReference Include="Newtonsoft.Json" Version="13.0.3"/>
         <!--<PackageReference Include="Scrutor" Version="6.0.1"/>-->
         <PackageReference Include="Polly" Version="8.6.3"/>
+        <PackageReference Include="OpenTelemetry.Api" Version="1.14.0"/>
 
         <!-- External packages of internal projects (Saga/Abstractions/Common) should also be added to Lycia
              so they are written as dependencies in nuspec (especially required for netstandard2.0) -->
-        <PackageReference Include="System.Memory" Version="4.5.5"/>
-        <PackageReference Include="System.Threading.Tasks.Extensions" Version="4.5.4"/>
+        <PackageReference Include="System.Memory" Version="4.6.3"/>
+        <PackageReference Include="System.Threading.Tasks.Extensions" Version="4.6.3"/>
 		<!--<PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="9.0.9"/>-->
     </ItemGroup>
 	

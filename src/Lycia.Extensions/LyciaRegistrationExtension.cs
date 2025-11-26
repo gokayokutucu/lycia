@@ -15,6 +15,7 @@ using Lycia.Dispatching;
 using Lycia.Eventing;
 using Lycia.Helpers;
 using Lycia.Middleware;
+using Lycia.Observability;
 using Lycia.Retry;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Handlers;
@@ -113,6 +114,9 @@ namespace Lycia.Extensions
             services.TryAddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
             services.TryAddScoped<ISagaContextAccessor, SagaContextAccessor>();
 
+            // Observability primitives (vendor-agnostic)
+            services.TryAddSingleton<LyciaActivitySourceHolder>();
+
             // Serializer default
             services.TryAddSingleton<NewtonsoftJsonMessageSerializer>();
             services.TryAddSingleton<AvroMessageSerializer>();
@@ -126,6 +130,7 @@ namespace Lycia.Extensions
             services.TryAddSingleton<IEventBus>(sp =>
             {
                 var logger = sp.GetRequiredService<ILogger<RabbitMqEventBus>>();
+                var registrationLogger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("LyciaRegistration");
                 var ebOptions = sp.GetRequiredService<IOptions<EventBusOptions>>().Value;
                 var serializer = sp.GetRequiredService<IMessageSerializer>();
                 var map = sp.GetRequiredService<IDictionary<string, (Type MessageType, Type HandlerType)>>();
@@ -139,12 +144,23 @@ namespace Lycia.Extensions
                 if (string.IsNullOrWhiteSpace(ebOptions.ConnectionString))
                     throw new InvalidOperationException("Lycia:EventBus:ConnectionString is required.");
 
-                return RabbitMqEventBus.CreateAsync(
-                    logger: logger,
-                    queueTypeMap: map,
-                    options: ebOptions,
-                    serializer: serializer
-                ).GetAwaiter().GetResult();
+                try
+                {
+                    return RabbitMqEventBus.CreateAsync(
+                        logger: logger,
+                        queueTypeMap: map,
+                        options: ebOptions,
+                        serializer: serializer
+                    ).GetAwaiter().GetResult();
+                }
+                catch (Exception ex)
+                {
+                    registrationLogger.LogError(ex,
+                        "Lycia failed to connect to RabbitMQ while initializing the event bus. Check Lycia:EventBus settings.");
+                    throw new InvalidOperationException(
+                        "Lycia was unable to initialize the RabbitMQ event bus. See inner exception for details.",
+                        ex);
+                }
             });
 
             // Default SagaStore (Redis). Consumers may override with UseSagaStore<T>().
@@ -205,6 +221,7 @@ namespace Lycia.Extensions
 
             // 1) Ensure default middlewares are available as ISagaMiddleware (idempotent, allow multiple implementations)
             services.TryAddEnumerable(ServiceDescriptor.Scoped(typeof(ISagaMiddleware), typeof(LoggingMiddleware)));
+            services.TryAddEnumerable(ServiceDescriptor.Scoped(typeof(ISagaMiddleware), typeof(ActivityTracingMiddleware)));
             services.TryAddEnumerable(ServiceDescriptor.Scoped(typeof(ISagaMiddleware), typeof(RetryMiddleware)));
 
             // 2) Default ordered pipeline: Logging first, then Retry
@@ -213,6 +230,7 @@ namespace Lycia.Extensions
             services.TryAddScoped<IReadOnlyList<Type>>(_ => new List<Type>
             {
                 typeof(LoggingMiddleware),
+                typeof(ActivityTracingMiddleware),
                 typeof(RetryMiddleware)
             });
         }
@@ -226,8 +244,22 @@ namespace Lycia.Extensions
                 if (string.IsNullOrWhiteSpace(redisConn))
                     throw new InvalidOperationException("Lycia:EventStore:ConnectionString is required for Redis provider.");
 
-                services.TryAddSingleton<IConnectionMultiplexer>(
-                    _ => ConnectionMultiplexer.Connect(redisConn!));
+                services.TryAddSingleton<IConnectionMultiplexer>(sp =>
+                {
+                    var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("LyciaRegistration");
+                    try
+                    {
+                        return ConnectionMultiplexer.Connect(redisConn!);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex,
+                            "Lycia failed to connect to Redis while initializing the saga store. Check Lycia:EventStore settings.");
+                        throw new InvalidOperationException(
+                            "Lycia was unable to initialize the Redis connection for the saga store. See inner exception for details.",
+                            ex);
+                    }
+                });
 
                 services.TryAddScoped<IDatabase>(sp =>
                     sp.GetRequiredService<IConnectionMultiplexer>().GetDatabase());
@@ -273,6 +305,9 @@ namespace Lycia.Extensions
             services.TryAddScoped<ISagaContextAccessor, SagaContextAccessor>();
             services.TryAddScoped<ISagaDispatcher, SagaDispatcher>();
             services.TryAddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
+            
+            // For observability primitives (vendor-agnostic)
+            services.TryAddSingleton<LyciaActivitySourceHolder>();
 
             // Serializer
             services.RemoveAll(typeof(IMessageSerializer));
@@ -395,6 +430,7 @@ namespace Lycia.Extensions
             _services.AddScoped<IReadOnlyList<Type>>(_ => new List<Type>
             {
                 typeof(TLogging),
+                typeof(ActivityTracingMiddleware),
                 typeof(RetryMiddleware)
             });
 
@@ -419,6 +455,7 @@ namespace Lycia.Extensions
             var slotMap = new Dictionary<Type, Type>
             {
                 { typeof(ILoggingSagaMiddleware), typeof(LoggingMiddleware) },
+                { typeof(ITracingSagaMiddleware), typeof(ActivityTracingMiddleware) },
                 { typeof(IRetrySagaMiddleware),   typeof(RetryMiddleware)   }
             };
 
@@ -434,6 +471,12 @@ namespace Lycia.Extensions
                     // Replace logging slot
                     slotMap[typeof(ILoggingSagaMiddleware)] = t;
                     RemoveMiddlewareImplementation(typeof(LoggingMiddleware));
+                }
+                else if (typeof(ITracingSagaMiddleware).IsAssignableFrom(t))
+                {
+                    // Replace tracing slot
+                    slotMap[typeof(ITracingSagaMiddleware)] = t;
+                    RemoveMiddlewareImplementation(typeof(ActivityTracingMiddleware));
                 }
                 else if (typeof(IRetrySagaMiddleware).IsAssignableFrom(t))
                 {
@@ -456,6 +499,7 @@ namespace Lycia.Extensions
             var ordered = new List<Type>
             {
                 slotMap[typeof(ILoggingSagaMiddleware)],
+                slotMap[typeof(ITracingSagaMiddleware)],
                 slotMap[typeof(IRetrySagaMiddleware)]
             };
 

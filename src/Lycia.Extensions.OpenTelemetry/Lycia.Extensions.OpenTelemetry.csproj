@@ -1,0 +1,60 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
+        <LangVersion>preview</LangVersion>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <RepositoryUrl>https://github.com/gokayokutucu/lycia</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+
+        <!-- Prevent writing project references as dependencies in nuspec -->
+        <SuppressProjectReferenceDependenciesWhenPacking>true</SuppressProjectReferenceDependenciesWhenPacking>
+
+        <!-- During pack, we will use package reference for Lycia -->
+        <UsePackageRefForLyciaOnPack>false</UsePackageRefForLyciaOnPack>
+
+        <!-- For XMLs (optional) -->
+        <AllowedOutputExtensionsInPackageBuildOutputFolder>
+            $(AllowedOutputExtensionsInPackageBuildOutputFolder);.xml
+        </AllowedOutputExtensionsInPackageBuildOutputFolder>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <Authors>M. Gokay Okutucu</Authors>
+        <Description>Lycia.Extensions.OpenTelemetry provides first-class OpenTelemetry integration for the Lycia saga orchestration library, exposing ActivitySource-based instrumentation and helper extensions to wire Lycia sagas into your distributed tracing and observability pipeline.</Description>
+        <Copyright>Copyright (c) 2025 M. Gokay Okutucu</Copyright>
+        <PackageProjectUrl>https://github.com/gokayokutucu/lycia</PackageProjectUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <PackageTags>saga distributed-transaction workflow orchestration choreography idempotency retry timeout compensation middleware rabbitmq redis microservices event-driven opentelemetry tracing metrics observability diagnostics logging</PackageTags>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <LyciaMinVersion>1.17.0-beta</LyciaMinVersion> <!-- default -->
+    </PropertyGroup>
+
+    <!-- Local development: project-to-project -->
+    <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' != 'true'">
+        <ProjectReference Include="..\Lycia\Lycia.csproj" PrivateAssets="All"/>
+        <ProjectReference Include="..\Lycia.Extensions\Lycia.Extensions.csproj" PrivateAssets="All" />
+    </ItemGroup>
+
+    <!-- Pack/CI: depend only on Lycia package -->
+    <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' == 'true'">
+        <!-- Range suggestion: even if release order fluctuates, allow restore -->
+        <PackageReference Include="Lycia" Version="[$(LyciaMinVersion),)"/>
+        <ProjectReference Remove="..\Lycia\Lycia.csproj"/>
+
+        <ProjectReference Include="Lycia.Extensions"  Version="[$(LyciaMinVersion),)"/>
+        <ProjectReference Remove="..\Lycia.Extensions\Lycia.Extensions.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <PackageReference Include="OpenTelemetry" Version="1.14.0" />
+      <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.14.0" />
+      <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.14.0" />
+      <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.14.0" />
+    </ItemGroup>
+
+</Project>

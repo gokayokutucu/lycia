@@ -3,6 +3,8 @@
 // https://www.apache.org/licenses/LICENSE-2.0
 
 #if NET8_0_OR_GREATER
+using System.Diagnostics;
+using Lycia.Observability;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Serializers;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,7 +17,8 @@ public class RabbitMqListener(
     IServiceProvider serviceProvider,
     IEventBus eventBus,
     ILogger<RabbitMqListener> logger,
-    IMessageSerializer serializer)
+    IMessageSerializer serializer,
+    LyciaActivitySourceHolder activitySourceHolder)
     : BackgroundService
 {
     private readonly IMessageSerializer _serializer = serializer;
@@ -40,6 +43,31 @@ public class RabbitMqListener(
                 var deserialized = _serializer.Deserialize(body, normalizedHeaders, serCtx);
 
                 logger.LogInformation("Dispatching {MessageType} to SagaDispatcher", messageType.Name);
+
+                // Build handler name for Activity span
+                var handlerName = handlerType?.FullName ?? $"Saga.{messageType.Name}Handler";
+
+                // Extract parent context from headers and start consumer Activity
+                var rawHeaders = headers as IDictionary<string, object?>
+                                 ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                var parentContext = LyciaTracePropagation.Extract(rawHeaders);
+
+                using var activity = parentContext != default
+                    ? activitySourceHolder.Source.StartActivity(
+                        handlerName,
+                        ActivityKind.Consumer,
+                        parentContext)
+                    : activitySourceHolder.Source.StartActivity(
+                        handlerName,
+                        ActivityKind.Consumer);
+
+                if (activity != null)
+                {
+                    // Basic messaging tags
+                    activity.SetTag("messaging.system", "rabbitmq");
+                    activity.SetTag("messaging.destination", handlerType?.Name ?? "unknown");
+                    activity.SetTag("messaging.operation", "process");
+                }
                 // Find the generic DispatchAsync<TMessage>(TMessage message, Type? handlerType, Guid? sagaId, CancellationToken cancellationToken) method
                 var dispatchMethod = typeof(ISagaDispatcher)
                     .GetMethods()

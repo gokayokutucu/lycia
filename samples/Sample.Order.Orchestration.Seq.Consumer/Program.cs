@@ -4,6 +4,9 @@
 
 using Lycia.Extensions;
 using Lycia.Extensions.Logging;
+using Lycia.Extensions.OpenTelemetry;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using Serilog;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -16,6 +19,21 @@ Log.Logger = new LoggerConfiguration()
 
 builder.Logging.ClearProviders();
 builder.Logging.AddSerilog();
+
+builder.Services
+    .AddOpenTelemetry()
+    .ConfigureResource(resource => resource
+        .AddService(
+            serviceName: "order-orchestration-consumer",
+            serviceVersion: "1.0.0"
+        ))
+    .AddLyciaTracing()
+        .WithTracing(tp =>
+    {
+            tp.AddSource("Lycia");
+            tp.AddAspNetCoreInstrumentation();
+            tp.AddOtlpExporter(options => options.Endpoint = new Uri("http://localhost:4317"));
+        });
 
 builder.Services
     //.AddLycia(builder.Configuration)

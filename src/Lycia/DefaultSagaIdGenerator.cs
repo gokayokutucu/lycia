@@ -7,6 +7,10 @@ using Lycia.Saga.Utility;
 
 namespace Lycia;
 
+/// <summary>
+/// Represents the default implementation of the <see cref="ISagaIdGenerator"/> interface,
+/// responsible for generating unique identifiers for sagas using a version 7 GUID.
+/// </summary>
 public class DefaultSagaIdGenerator : ISagaIdGenerator
 {
     public Guid Generate() =>

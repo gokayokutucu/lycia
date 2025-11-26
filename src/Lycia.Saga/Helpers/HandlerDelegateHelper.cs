@@ -34,7 +34,7 @@ public static class HandlerDelegateHelper
         // Build a defensive type check with a helpful error message
         var expectedTypeConst = Expression.Constant(messageType, typeof(Type));
         var actualTypeExpr = Expression.Call(messageParam, typeof(object).GetMethod(nameof(object.GetType))!);
-        var invalidCastCtor = typeof(InvalidCastException).GetConstructor(new[] { typeof(string) })!;
+        var invalidCastCtor = typeof(InvalidCastException).GetConstructor([typeof(string)])!;
         var errorMsg = Expression.Call(
             typeof(string).GetMethod(nameof(string.Format), [typeof(string), typeof(object), typeof(object)])!,
             Expression.Constant("HandlerDelegateHelper: cannot cast message. Expected={0}, Actual={1}"),

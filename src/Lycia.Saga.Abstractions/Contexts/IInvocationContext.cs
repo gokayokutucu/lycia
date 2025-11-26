@@ -8,6 +8,7 @@ public interface IInvocationContext
     ISagaContext? SagaContext { get; set; }
     Type HandlerType { get; set; } 
     Guid? SagaId { get; set; }
+    string ApplicationId { get; set; }
     CancellationToken CancellationToken { get; set; }
     Exception? LastException { get; set; }
 }
