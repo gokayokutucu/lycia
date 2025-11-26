@@ -12,6 +12,11 @@ using System.Diagnostics;
 public sealed class LyciaActivitySourceHolder : IDisposable
 {
     /// <summary>
+    /// Default constructor.
+    /// </summary>
+    public LyciaActivitySourceHolder(){}
+    
+    /// <summary>
     /// Provides a singleton holder for the <see cref="ActivitySource"/> instance used in the Lycia observability context.
     /// </summary>
     /// <remarks>
