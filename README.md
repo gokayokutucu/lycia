@@ -143,36 +143,6 @@ public class CreateOrderSagaHandler :
 
 ---
 
-## OpenTelemetry Tracing (Optional)
-
-Lycia provides native hooks for distributed tracing via **ActivitySource** and OpenTelemetry.
-Tracing is intentionally kept optional and resides in the `Lycia.Extensions.OpenTelemetry` package.
-
-### Enabling Tracing
-
-Install the following NuGet packages in your host application:
-
-```
-dotnet add package OpenTelemetry
-dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
-dotnet add package Lycia.Extensions.OpenTelemetry
-```
-
-Then configure tracing:
-
-```csharp
-builder.Services.AddOpenTelemetry()
-    .AddLyciaTracing() // adds Lycia ActivitySource + propagation
-    .WithTracing(t =>
-    {
-        t.AddAspNetCoreInstrumentation();
-        t.AddOtlpExporter(o =>
-        {
-            o.Endpoint = new Uri("http://otel-collector:4317");
-        });
-    });
-```
-
 ### What Lycia Emits
 
 - A span per saga step (`Saga.<HandlerName>`)
