@@ -63,30 +63,35 @@ This document provides an in-depth look into the architecture, components, confi
 
 ---
 
-## ⚙️ Fluent Configuration
+## OpenTelemetry Tracing (Optional)
 
-```csharp
-services.AddLycia(configuration)
-        .UseMessageSerializer<CustomSerializer>()
-        .UseEventBus<KafkaEventBus>()
-        .UseSagaStore<MongoSagaStore>()
-        .AddSagasFromAssemblies(typeof(SomeHandler).Assembly)
-        .Build();
+Lycia provides native hooks for distributed tracing via **ActivitySource** and OpenTelemetry.
+Tracing is optional and resides in the `Lycia.Extensions.OpenTelemetry` package.
+
+### Enabling Tracing
+
+Install the following packages:
+
+```
+dotnet add package OpenTelemetry
+dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
+dotnet add package Lycia.Extensions.OpenTelemetry
 ```
 
-- Builder APIs:
-  - `UseMessageSerializer<T>()`, `UseEventBus<T>()`, `UseSagaStore<T>()`
-  - `AddSagasFromCurrentAssembly()`, `AddSagasFromAssemblies(...)`
-  - `ConfigureSaga(...)`, etc.
+Then configure:
 
-### Queue Type Map
-
-- `_LyciaHandlerDiscovery` resolves types:
-  - `SafeGetTypes`, `IsSagaHandlerBase`, `ImplementsAnySagaInterface`
-  - `GetMessageTypesFromHandler()` analyzes interface and base classes
-
----
-
+```csharp
+builder.Services.AddOpenTelemetry()
+    .AddLyciaTracing() // adds Lycia ActivitySource + propagation
+    .WithTracing(t =>
+    {
+        t.AddAspNetCoreInstrumentation();
+        t.AddOtlpExporter(o =>
+        {
+            o.Endpoint = new Uri("http://otel-collector:4317");
+        });
+    });
+```
 
 ---
 
@@ -134,10 +139,10 @@ A lightweight, non-persistent store ideal for unit tests or in-memory dev scenar
 
 ## 🔮 Roadmap
 
-- Add support for Avro / Protobuf with Schema Registry
+- Add Outbox/Inbox pattern with persistence layer
+- Add support for Avro / Protobuf with Schema Registry (including the built‑in `AvroSchemaConverter`)
 - Finalize `IRetryPolicy` (done) and extend `Lycia.Scheduling` module for delayed retries
 - Improve distributed tracing and observability
-- Add Outbox/Inbox pattern with persistence layer
 
 ---
 
@@ -147,15 +152,20 @@ For questions or contributions, feel free to open an issue or start a discussion
 
 ## ✍️ Naming Conventions
 
-Lycia enforces a consistent naming convention across store and bus implementations to enhance clarity and maintainability:
+Lycia enforces a consistent naming convention across store and bus implementations to enhance clarity and maintainability. Use a unique `ApplicationId` per service/consumer and always bind queues with concrete handler types to avoid cross-service collisions.
 
-- **RedisSagaStore**
-  - Keys use the format: `lycia:saga:{ApplicationId}:{SagaId}:{HandlerType}`
-  - Compensation chains are traceable via `ParentMessageId` embedded in context headers
-  - All keys are prefixed with `lycia:` to ensure namespace isolation
+- **MessagingNamingHelper (RabbitMQ bindings)**
+  - Consumer queue/routing key format: `{event|command|response}.{MessageType}.{HandlerType}.{ApplicationId}` (e.g., `event.OrderCreatedEvent.CreateOrderSagaHandler.OrderService`)
+  - Publisher topic pattern: `{event|command|response}.{MessageType}.#` – used only when publishing, never for queue declarations
+  - Exchange name: `{event|command|response}.{MessageType}`; shared between publishers and consumers
+  - Keep handler types non-generic and `ApplicationId` unique per service to prevent queues from overlapping
+
+- **RedisSagaStore / InMemorySagaStore**
+  - Step metadata keys use `step:{StepName}:handler:{HandlerName}:message-id:{MessageId}`
+  - Compensation chains remain traceable via `ParentMessageId` embedded in context headers
+  - Keys include `message-id` to enforce idempotency across retries
 
 - **RabbitMqEventBus**
-  - Routing keys use the pattern: `{applicationId}.{messageType}`
   - Headers include standardized fields such as `lycia-type`, `lycia-schema-id`, `lycia-schema-ver`
   - All events carry `CorrelationId`, `SagaId`, and `MessageId` to support distributed tracing
 
@@ -185,20 +195,96 @@ Understanding `MessageId` and `CorrelationId` is essential for building traceabl
 
 ## 🧬 Saga Types in Lycia
 
-Lycia supports three distinct Saga patterns, each serving a different coordination style:
+Lycia supports **three primary Saga coordination patterns**, each designed for different messaging and workflow requirements.  
+The key distinctions are **stateful vs. stateless**, **centralized vs. decentralized**, and **request–response vs. event-driven**.
+
+---
 
 ### 1. **Choreography (Reactive Saga)**
-- Event-driven
-- Only failure events are published (`SomethingFailedEvent`)
-- Compensation handlers react to these failure events
+- Pure event‑driven flow
 - No central coordinator
-- Stateless
+- Stateless (no `TSagaData`)
+- Each handler reacts to an event independently
+- Compensation triggered via `ISagaCompensationHandler<T>`
+- Implemented with:
+  - `StartReactiveSagaHandler<TStart>`
+  - `ReactiveSagaHandler<TMessage>`
+  - `ISagaCompensationHandler<TMessage>`
 
-### 2. **Sequential Orchestration**
-- Coordinated flow with ordered steps
-- When a step fails, `Context.MarkAsFailed<T>()` triggers compensation via `CompensateAndBubbleUp()`
-- Compensation walks backward through the chain using `ParentMessageId`
+---
 
-### 3. **Classic Orchestration**
-- Centralized handler using `StartCoordinatedSagaHandler<T>` or `CoordinatedSagaHandler<T>`
-- All transitions, step results, and compensations are controlled by the orchestrator
+### 2. **Sequential Orchestration (Coordinated Saga)**
+- Centralized orchestration logic
+- Stateful (`TSagaData` required)
+- Steps progress in an ordered sequence
+- Failures trigger compensation via `CompensateAndBubbleUp()`
+- Ideal for multi‑step business workflows
+- Implemented with:
+  - `StartCoordinatedSagaHandler<TStart, TSagaData>`
+  - `CoordinatedSagaHandler<TMessage, TSagaData>`
+
+---
+
+### 3. **Classic Orchestration (Coordinated + Request–Response)**
+- Central coordinator with **asynchronous request–response** flow
+- Stateful (`TSagaData`)
+- Each step sends a command and waits for a corresponding response
+- Includes full success/fail handlers per response type
+- Ideal for workflows where each action has a definitive result
+- Implemented with:
+  - `StartCoordinatedResponsiveSagaHandler<TStart, TResponse, TSagaData>`
+  - `CoordinatedResponsiveSagaHandler<TStart, TResponse, TSagaData>`
+  - `IResponseSagaHandler<TResponse>`
+
+**This is the pattern used in `Sample.Order.Orchestration.Consumer`.**
+
+---
+
+
+## ⚙️ Fluent Configuration
+
+### Tracing Integration
+
+Lycia optionally supports OpenTelemetry via the `Lycia.Extensions.OpenTelemetry` package.
+
+```csharp
+builder.Services
+    .AddOpenTelemetry()
+    .ConfigureResource(resource => resource
+        .AddService(
+            serviceName: "order-orchestration-consumer",
+            serviceVersion: "1.0.0"
+        ))
+    .AddLyciaTracing()
+    .WithTracing(tp =>
+    {
+        tp.AddSource("Lycia");
+        tp.AddAspNetCoreInstrumentation();
+        tp.AddOtlpExporter(options => options.Endpoint = new Uri("http://localhost:4317"));
+    });
+```
+
+```csharp
+services.AddLycia(configuration)
+        .UseMessageSerializer<CustomSerializer>()
+        .UseEventBus<RabbitMqEventBus>()
+        .UseSagaStore<RedisSagaStore>()
+        .AddSagasFromAssemblies(typeof(SomeHandler).Assembly)
+        .Build();
+```
+
+- Builder APIs:
+  - `UseMessageSerializer<T>()`, `UseEventBus<T>()`, `UseSagaStore<T>()`
+  - `AddSagasFromCurrentAssembly()`, `AddSagasFromAssemblies(...)`
+  - `ConfigureSaga(...)`, etc.
+
+### Queue Type Map
+
+- `_LyciaHandlerDiscovery` resolves types:
+  - `SafeGetTypes`, `IsSagaHandlerBase`, `ImplementsAnySagaInterface`
+  - `GetMessageTypesFromHandler()` analyzes interface and base classes
+
+---
+
+
+---
