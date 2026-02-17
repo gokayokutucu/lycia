@@ -15,7 +15,7 @@ public class CreateOrderSagaHandler :
     StartCoordinatedSagaHandler<CreateOrderCommand, CreateOrderSagaData>
 {
     /// <summary>
-    /// For test purposes, we can check if the compensation was called.
+    /// For unit test purposes, we can check if the compensation was called.
     /// </summary>
     public bool CompensateCalled { get; private set; }
     
