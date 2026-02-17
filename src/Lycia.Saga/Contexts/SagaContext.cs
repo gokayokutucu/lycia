@@ -9,7 +9,6 @@ using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Contexts;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Extensions;
-using Lycia.Saga.Messaging;
 
 namespace Lycia.Saga.Contexts;
 
@@ -51,7 +50,7 @@ public class SagaContext<TInitialMessage>(
         CancellationToken cancellationToken = default)
         where TNextStep : IEvent
     {
-        var nextEventType = nextEvent.GetType();
+        //var nextEventType = nextEvent.GetType();
 
         nextEvent.SetSagaId(SagaId);
         nextEvent.SetParentMessageId(CurrentStep.MessageId);
