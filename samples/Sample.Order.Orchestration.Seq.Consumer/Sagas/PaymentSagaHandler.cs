@@ -5,7 +5,6 @@
 using Lycia.Saga.Messaging.Handlers;
 using Sample.Shared.Messages.Commands;
 using Sample.Shared.Messages.Events;
-using Sample.Shared.Messages.Responses;
 using Sample.Shared.SagaStates;
 using Sample.Shared.Services;
 

@@ -24,7 +24,7 @@ public class CreateOrderSagaHandler :
         await Context.SendWithTracking(new ReserveInventoryCommand
         {
             OrderId = command.OrderId,
-        })
+        }, cancellationToken)
         .ThenMarkAsComplete();
     }
 
@@ -42,7 +42,7 @@ public class CreateOrderSagaHandler :
             Console.WriteLine($"❌ Compensation failed: {ex.Message}");
             
             await Context.MarkAsCompensationFailed<CreateOrderCommand>(ex);
-            // Optionally: rethrow or store for manual retrye
+            // Optionally: rethrow or store for manual retry
             throw; // Or suppress and log for retry system
         }
     }
