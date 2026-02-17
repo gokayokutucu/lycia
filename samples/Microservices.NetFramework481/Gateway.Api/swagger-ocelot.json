@@ -1,0 +1,54 @@
+{
+  "SwaggerEndPoints": [
+    {
+      "Key": "orders",
+      "Config": [
+        {
+          "Name": "Order API",
+          "Version": "v1",
+          "Url": "http://localhost:1000/swagger/docs/v1"
+        }
+      ]
+    },
+    {
+      "Key": "payments",
+      "Config": [
+        {
+          "Name": "Payment API",
+          "Version": "v1",
+          "Url": "http://localhost:3000/swagger/docs/v1"
+        }
+      ]
+    },
+    {
+      "Key": "products",
+      "Config": [
+        {
+          "Name": "Stock API",
+          "Version": "v1",
+          "Url": "http://localhost:2000/swagger/docs/v1"
+        }
+      ]
+    },
+    {
+      "Key": "deliveries",
+      "Config": [
+        {
+          "Name": "Delivery API",
+          "Version": "v1",
+          "Url": "http://localhost:4000/swagger/docs/v1"
+        }
+      ]
+    },
+    {
+      "Key": "notifications",
+      "Config": [
+        {
+          "Name": "Notification API",
+          "Version": "v1",
+          "Url": "http://localhost:6000/swagger/docs/v1"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+using Lycia.Saga.Messaging;
+using Shared.Contracts.Dtos;
+using System;
+using System.Collections.Generic;
+
+namespace Shared.Contracts.Events.Orders;
+
+public sealed class OrderCreatedEvent : EventBase
+{
+    public OrderCreatedEvent()
+    {
+        
+    }
+    public Guid OrderId { get; set; }
+    public List<OrderItemDto> Items { get; set; } = [];
+
+    public Guid CustomerId { get; set; }
+    public string CustomerName { get; set; } = string.Empty;
+    public string CustomerEmail { get; set; } = string.Empty;
+    public string CustomerPhone { get; set; } = string.Empty;
+
+    public Guid ShippingAddressId { get; set; }
+    public string ShippingStreet { get; set; } = string.Empty;
+    public string ShippingCity { get; set; } = string.Empty;
+    public string ShippingState { get; set; } = string.Empty;
+    public string ShippingZipCode { get; set; } = string.Empty;
+    public string ShippingCountry { get; set; } = string.Empty;
+
+    public Guid SavedCardId { get; set; }
+    public string CardHolderName { get; set; } = string.Empty;
+    public string CardLast4Digits { get; set; } = string.Empty;
+    public int CardExpiryMonth { get; set; }
+    public int CardExpiryYear { get; set; }
+}

@@ -28,9 +28,12 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Polly.Retry;
 using StackExchange.Redis;
 using IRetryPolicy = Lycia.Retry.IRetryPolicy;
+
+#if NET8_0_OR_GREATER
+using Polly.Retry;
+#endif
 
 namespace Lycia.Extensions
 {
@@ -181,7 +184,22 @@ namespace Lycia.Extensions
 
             RegisterMiddlewareAndPolicies(services);
 
-            services.AddHostedService<RabbitMqListener>();
+#if NET8_0_OR_GREATER
+            services.AddHostedService<RabbitMqListener>(); 
+#elif NETSTANDARD2_0
+            services.AddSingleton<RabbitMqListener>(sp =>
+            {
+                var listener = new RabbitMqListener(
+                    sp,
+                    sp.GetRequiredService<IEventBus>(),
+                    sp.GetRequiredService<ILogger<RabbitMqListener>>(),
+                    sp.GetRequiredService<IMessageSerializer>(),
+                    sp.GetRequiredService<LyciaActivitySourceHolder>()
+                );
+                listener.Start();
+                return listener;
+            });
+#endif
 
             // Health checks
             services.AddHealthChecks().AddCheck<Helpers.LyciaHealthCheck>("Lycia");
