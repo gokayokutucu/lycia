@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Polly;
 using Polly.Retry;
 
+#if NET8_0_OR_GREATER
 namespace Lycia.Retry;
 
 public class PollyRetryPolicy : IRetryPolicy
@@ -13,15 +14,15 @@ public class PollyRetryPolicy : IRetryPolicy
     public PollyRetryPolicy(IOptions<RetryStrategyOptions>? options)
     {
         var src = options?.Value;
-        
+
         var opts = new RetryStrategyOptions
         {
             MaxRetryAttempts = src?.MaxRetryAttempts is > 0 ? src.MaxRetryAttempts : 3,
-            BackoffType      = src?.BackoffType ?? DelayBackoffType.Exponential,
-            Delay            = src?.Delay ?? TimeSpan.FromSeconds(1),
-            MaxDelay         = src?.MaxDelay,                 
-            UseJitter        = src?.UseJitter ?? true,
-            ShouldHandle     = src?.ShouldHandle
+            BackoffType = src?.BackoffType ?? DelayBackoffType.Exponential,
+            Delay = src?.Delay ?? TimeSpan.FromSeconds(1),
+            MaxDelay = src?.MaxDelay,
+            UseJitter = src?.UseJitter ?? true,
+            ShouldHandle = src?.ShouldHandle
                                ?? new PredicateBuilder()
                                    .Handle<TransientSagaException>()
                                    .Handle<TimeoutException>()
@@ -59,4 +60,5 @@ public class PollyRetryPolicy : IRetryPolicy
 
     public ValueTask ExecuteAsync(Func<Task> action, CancellationToken cancellationToken = default)
         => _pipeline.ExecuteAsync(static (act, _) => new ValueTask(act()), action, cancellationToken);
-}
+} 
+#endif

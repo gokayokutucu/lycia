@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net48</TargetFramework>
+        <LangVersion>preview</LangVersion>
+        <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
+        <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="coverlet.collector" Version="6.0.2"/>
+        <PackageReference Include="FluentAssertions" Version="8.4.0" />
+        <PackageReference Include="Microsoft.Extensions.Configuration" Version="9.0.0" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.9" />
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1"/>
+        <PackageReference Include="Testcontainers.RabbitMq" Version="4.6.0" />
+        <PackageReference Include="Testcontainers.Redis" Version="4.6.0" />
+        <PackageReference Include="xunit" Version="2.9.2"/>
+        <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <Using Include="Xunit"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\samples\Sample.Shared\Sample.Shared.csproj" />
+        <ProjectReference Include="..\..\src\Lycia\Lycia.csproj" />
+        <ProjectReference Include="..\Lycia.Tests.Helpers\Lycia.Tests.Helpers.csproj" />
+    </ItemGroup>
+
+    <!-- Link to shared test message classes from Lycia.Tests -->
+    <ItemGroup>
+        <Compile Include="..\Lycia.Tests\Messages\*.cs" 
+                 Link="Messages\%(Filename)%(Extension)" />
+        <Compile Include="..\Lycia.Tests\Sagas\*.cs" 
+                 Link="Sagas\%(Filename)%(Extension)" />
+        <Compile Include="..\Lycia.Tests\SagaStates\*.cs" 
+                 Link="SagaStates\%(Filename)%(Extension)" />
+    </ItemGroup>
+
+</Project>
