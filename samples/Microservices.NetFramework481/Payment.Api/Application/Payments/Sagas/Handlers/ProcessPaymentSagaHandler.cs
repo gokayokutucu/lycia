@@ -22,7 +22,7 @@ public sealed class ProcessPaymentSagaHandler(
     {
         try
         {
-            throw new Exception("GOKCE");
+            //throw new Exception("GOKCE");
 
             cancellationToken.ThrowIfCancellationRequested();
 
