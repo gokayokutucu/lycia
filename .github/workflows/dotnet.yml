@@ -1,4 +1,4 @@
-﻿name: Publish NuGet
+name: Publish NuGet
 
 on:
   push:
@@ -125,7 +125,7 @@ jobs:
         run: dotnet build Lycia.sln -c Release --no-restore
 
       - name: Run unit tests (NetFramework)
-        run: dotnet test tests/Lycia.Tests.NetFramework/Lycia.Tests.NetFramework.csproj -c Release --no-build --logger "trx;LogFileName=unit-netframework.trx"
+        run: dotnet test tests/Lycia.Tests.NetFramework/Lycia.Tests.NetFramework.csproj -c Release --no-build --logger "trx;LogFileName=unit-netframework.trx" --filter "storeType!=Redis"
 
       - name: Publish test results
         if: always()
@@ -156,17 +156,19 @@ jobs:
 
       - name: Setup Redis (Windows)
         run: |
-          choco install redis-64 -y
-          redis-server --service-install
-          redis-server --service-start
+          choco install memurai-developer -y
+          Start-Service Memurai
           Start-Sleep -Seconds 5
+          Write-Host 'Memurai started, verifying port 6379...'
+          Test-NetConnection -ComputerName localhost -Port 6379
 
       - name: Setup RabbitMQ (Windows)
         run: |
           choco install rabbitmq -y
+          Start-Sleep -Seconds 15
+          $rabbitPath = Get-ChildItem 'C:\Program Files\RabbitMQ Server\rabbitmq_server-*\sbin\rabbitmq-plugins.bat' | Select-Object -First 1
+          & $rabbitPath enable rabbitmq_management
           Start-Sleep -Seconds 10
-          rabbitmq-plugins enable rabbitmq_management
-          Start-Sleep -Seconds 5
 
       - name: Restore
         run: dotnet restore Lycia.sln
