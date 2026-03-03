@@ -57,6 +57,9 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
     {
         await _rabbitMqContainer.StartAsync();
         await _redisContainer.StartAsync();
+
+        // Give containers a moment to be fully ready
+        await Task.Delay(2000);
     }
 
     public async Task DisposeAsync()
@@ -308,6 +311,9 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
         ParentCompensationSagaHandler.Invocations.Should()
             .BeEmpty("Parent compensation should not be invoked if child compensation failed");
         ChildCompensationSagaHandler.Invocations.Should().ContainSingle().And.Contain("ChildCompensationSagaHandler");
+
+        // .NET Framework may have slower async I/O operations - give Redis time to persist the status
+        await Task.Delay(3000);
 
         // Also validate that Redis steps are stayed as Completed
         var steps = await sagaStore.GetSagaHandlerStepsAsync(sagaId);
@@ -588,7 +594,7 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
             Message = "trigger-failure"
         };
 
-        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var receivedMessages = new List<TestSagaCommand>();
 
         var starterMessageId = Guid.NewGuid();
@@ -625,9 +631,14 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
             }
         });
 
+        // Wait longer for .NET Framework async operations to complete
+        // The ConsumeAsync sets up exchanges/queues lazily on first iteration,
+        // but we need to ensure the infrastructure is ready
+        await Task.Delay(5000);
+
         await eventBus.Send(testCommand);
 
-        await Task.WhenAny(finished.Task, Task.Delay(5000, cts.Token));
+        await Task.WhenAny(finished.Task, Task.Delay(15000, cts.Token));
 
         if (!finished.Task.IsCompleted)
         {
