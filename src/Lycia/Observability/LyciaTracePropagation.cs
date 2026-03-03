@@ -4,10 +4,10 @@
 
 namespace Lycia.Observability;
 
+using OpenTelemetry.Context.Propagation;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
-using OpenTelemetry.Context.Propagation;
 
 /// <summary>
 /// Helper for injecting and extracting W3C trace context to/from RabbitMQ headers.
