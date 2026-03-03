@@ -55,15 +55,9 @@ jobs:
       redis:
         image: redis:7-alpine
         ports: ['6379:6379']
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s --health-timeout 3s --health-retries 10
       rabbitmq:
         image: rabbitmq:3.13-management
         ports: ['5672:5672', '15672:15672']
-        options: >-
-          --health-cmd "rabbitmq-diagnostics -q ping"
-          --health-interval 5s --health-timeout 5s --health-retries 20
 
     steps:
       - name: Checkout (full history + tags for NBGV)
@@ -79,21 +73,6 @@ jobs:
             9.0.x
             8.0.x
             6.0.x
-
-      - name: Install Redis tools
-        run: sudo apt-get update && sudo apt-get install -y redis-tools
-
-      - name: Wait for Redis to be healthy
-        run: |
-          echo "Waiting for Redis to be healthy..."
-          timeout 30 bash -c 'until redis-cli -h 127.0.0.1 -p 6379 ping; do sleep 1; done'
-          echo "✅ Redis is healthy!"
-
-      - name: Wait for RabbitMQ to be healthy
-        run: |
-          echo "Waiting for RabbitMQ to be healthy..."
-          timeout 90 bash -c 'until curl -u guest:guest -f http://localhost:15672/api/overview 2>/dev/null; do sleep 3; done'
-          echo "✅ RabbitMQ is healthy!"
 
       - name: Restore
         run: dotnet restore Lycia.sln
@@ -133,6 +112,11 @@ jobs:
             9.0.x
             8.0.x
             6.0.x
+
+      - name: Pull Docker images for Testcontainers
+        run: |
+          docker pull redis:7-alpine
+          docker pull rabbitmq:3.13-management-alpine
 
       - name: Restore
         run: dotnet restore Lycia.sln
@@ -177,55 +161,12 @@ jobs:
           redis-server --service-start
           Start-Sleep -Seconds 5
 
-      - name: Wait for Redis to be healthy
-        run: |
-          $maxAttempts = 10
-          $attempt = 0
-          do {
-            $attempt++
-            Write-Host "Checking Redis health (attempt $attempt/$maxAttempts)..."
-            try {
-              $result = redis-cli ping
-              if ($result -eq "PONG") {
-                Write-Host "✅ Redis is healthy!"
-                exit 0
-              }
-            } catch {
-              Write-Host "Redis not ready yet..."
-            }
-            Start-Sleep -Seconds 2
-          } while ($attempt -lt $maxAttempts)
-          Write-Error "❌ Redis failed to become healthy"
-          exit 1
-
       - name: Setup RabbitMQ (Windows)
         run: |
           choco install rabbitmq -y
           Start-Sleep -Seconds 10
           rabbitmq-plugins enable rabbitmq_management
           Start-Sleep -Seconds 5
-
-      - name: Wait for RabbitMQ to be healthy
-        run: |
-          $maxAttempts = 30
-          $attempt = 0
-          $credentials = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("guest:guest"))
-          do {
-            $attempt++
-            Write-Host "Checking RabbitMQ health (attempt $attempt/$maxAttempts)..."
-            try {
-              $response = Invoke-WebRequest -Uri "http://localhost:15672/api/overview" -Headers @{Authorization=("Basic {0}" -f $credentials)} -UseBasicParsing -ErrorAction Stop
-              if ($response.StatusCode -eq 200) {
-                Write-Host "✅ RabbitMQ is healthy!"
-                exit 0
-              }
-            } catch {
-              Write-Host "RabbitMQ not ready yet..."
-            }
-            Start-Sleep -Seconds 3
-          } while ($attempt -lt $maxAttempts)
-          Write-Error "❌ RabbitMQ failed to become healthy"
-          exit 1
 
       - name: Restore
         run: dotnet restore Lycia.sln
