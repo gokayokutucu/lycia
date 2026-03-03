@@ -1,14 +1,14 @@
+using Lycia.Saga.Abstractions.Handlers;
 using Lycia.Saga.Messaging.Handlers;
+using Microsoft.Extensions.Logging;
 using Sample.Order.NetFramework481.Application.Interfaces;
 using Shared.Contracts.Commands;
 using Shared.Contracts.Events.Orders;
+using Shared.Contracts.Events.Stock;
 using System;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Logging;
-using Lycia.Saga.Abstractions.Handlers;
-using Shared.Contracts.Events.Stock;
 
 namespace Sample.Order.NetFramework481.Application.Orders.Sagas.Handlers;
 
