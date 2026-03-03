@@ -15,7 +15,16 @@ on:
 jobs:
   tests:
     name: Unit tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            artifact-suffix: linux
+          - os: windows-latest
+            artifact-suffix: windows
     steps:
       - name: Checkout (full history + tags for NBGV)
         uses: actions/checkout@v4
@@ -38,18 +47,31 @@ jobs:
         run: dotnet build Lycia.sln -c Release --no-restore
 
       - name: Run unit tests
-        run: dotnet test tests/Lycia.Tests/Lycia.Tests.csproj -c Release --no-build --logger "trx;LogFileName=unit.trx"
+        run: dotnet test tests/Lycia.Tests/Lycia.Tests.csproj -c Release --no-build --logger "trx;LogFileName=unit-${{ matrix.artifact-suffix }}.trx"
 
       - name: Publish test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: unit-test-results
-          path: '**/unit.trx'
+          name: unit-test-results-${{ matrix.artifact-suffix }}
+          path: '**/unit-${{ matrix.artifact-suffix }}.trx'
 
   integration-tests:
     name: Integration tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            artifact-suffix: linux
+            redis-host: 127.0.0.1
+            rabbitmq-host: 127.0.0.1
+          - os: windows-latest
+            artifact-suffix: windows
+            redis-host: localhost
+            rabbitmq-host: localhost
 
     services:
       redis:
@@ -88,16 +110,16 @@ jobs:
 
       - name: Run integration tests
         env:
-          LYCIA__EVENTBUS__CONNECTIONSTRING: amqp://guest:guest@127.0.0.1:5672/
-          LYCIA__EVENTSTORE__CONNECTIONSTRING: 127.0.0.1:6379
-        run: dotnet test tests/Lycia.IntegrationTests/Lycia.IntegrationTests.csproj -c Release --no-build --logger "trx;LogFileName=integration.trx"
+          LYCIA__EVENTBUS__CONNECTIONSTRING: amqp://guest:guest@${{ matrix.rabbitmq-host }}:5672/
+          LYCIA__EVENTSTORE__CONNECTIONSTRING: ${{ matrix.redis-host }}:6379
+        run: dotnet test tests/Lycia.IntegrationTests/Lycia.IntegrationTests.csproj -c Release --no-build --logger "trx;LogFileName=integration-${{ matrix.artifact-suffix }}.trx"
 
       - name: Publish test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: integration-test-results
-          path: '**/integration.trx'
+          name: integration-test-results-${{ matrix.artifact-suffix }}
+          path: '**/integration-${{ matrix.artifact-suffix }}.trx'
 
   publish:
     name: Pack & Publish

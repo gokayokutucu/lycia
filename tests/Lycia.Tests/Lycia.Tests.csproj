@@ -1,10 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFramework>net9.0</TargetFramework>
+        <TargetFrameworks>net9.0;net8.0</TargetFrameworks>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <IsPackable>false</IsPackable>
+		<LangVersion>preview</LangVersion>
     </PropertyGroup>
 
     <ItemGroup>
@@ -29,6 +30,5 @@
 
       <ProjectReference Include="..\Lycia.Tests.Helpers\Lycia.Tests.Helpers.csproj" />
     </ItemGroup>
-    
 
 </Project>
