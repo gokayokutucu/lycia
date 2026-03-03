@@ -28,19 +28,38 @@ public class RabbitMqListener(
 {
     private Thread? workerThread;
     private CancellationTokenSource? cts;
+    private readonly object startLock = new();
+    private volatile bool isStarted;
 
-    public void Start() // ← call withAutoActivate
+    public void Start()
     {
-        cts = new CancellationTokenSource();
-        workerThread = new Thread(async () =>
+        lock (startLock)
         {
-            await Task.Delay(2000);
-            await ExecuteAsync(cts.Token);
-        })
-        {
-            IsBackground = true
-        };
-        workerThread.Start();
+            if (isStarted)
+            {
+                logger.LogWarning("RabbitMqListener already started");
+                return;
+            }
+
+            cts = new CancellationTokenSource();
+            workerThread = new Thread(() =>
+            {
+                try
+                {
+                    ExecuteAsync(cts.Token).GetAwaiter().GetResult();
+                }
+                catch (Exception ex)
+                {
+                    logger.LogCritical(ex, "Fatal error in RabbitMqListener worker thread");
+                }
+            })
+            {
+                IsBackground = true,
+                Name = "RabbitMqListener-Worker"
+            };
+            workerThread.Start();
+            isStarted = true;
+        }
     }
 
     protected async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -48,15 +67,14 @@ public class RabbitMqListener(
     {
         logger.LogInformation("RabbitMqListener started");
 
-        using var scope = serviceProvider.CreateScope();
-
-        var sagaDispatcher = scope.ServiceProvider.GetRequiredService<ISagaDispatcher>();
-
         await foreach (var msg in eventBus.ConsumeWithAckAsync(stoppingToken))
         {
             var (body, messageType, handlerType, headers, ack, nack) = msg;
             if (stoppingToken.IsCancellationRequested)
                 break;
+
+            using var scope = serviceProvider.CreateScope();
+            var sagaDispatcher = scope.ServiceProvider.GetRequiredService<ISagaDispatcher>();
 
             try
             {
@@ -139,9 +157,20 @@ public class RabbitMqListener(
 #if NETSTANDARD2_0
     public void Dispose()
     {
-        cts?.Cancel();
-        workerThread?.Join(5000);
-        cts?.Dispose();
+        lock (startLock)
+        {
+            if (!isStarted) return;
+
+            cts?.Cancel();
+
+            if (workerThread?.Join(TimeSpan.FromSeconds(30)) == false)
+            {
+                logger.LogWarning("Worker thread did not stop gracefully within timeout");
+            }
+
+            cts?.Dispose();
+            isStarted = false;
+        }
     }
 #endif
 }
