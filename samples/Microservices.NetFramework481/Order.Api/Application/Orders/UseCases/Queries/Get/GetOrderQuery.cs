@@ -1,5 +1,5 @@
-using System;
 using MediatR;
+using System;
 
 namespace Sample.Order.NetFramework481.Application.Orders.UseCases.Queries.Get;
 
