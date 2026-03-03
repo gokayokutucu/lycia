@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>Sample.Delivery.NetFramework481.Application</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\src\Lycia\Lycia.csproj" />
+    <ProjectReference Include="..\Domain\Sample.Delivery.NetFramework481.Domain.csproj" />
+    <ProjectReference Include="..\..\Shared.Contracts\Shared.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\..\src\Lycia.Saga\Lycia.Saga.csproj" />
+    <ProjectReference Include="..\..\..\..\src\Lycia.Extensions\Lycia.Extensions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Autofac" Version="7.1.0" />
+    <PackageReference Include="Autofac.Extensions.DependencyInjection" Version="8.0.0" />
+    <PackageReference Include="FluentValidation" Version="11.9.0" />
+    <PackageReference Include="Mapster" Version="7.3.0" />
+    <PackageReference Include="MediatR" Version="12.2.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="6.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="6.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Deliveries\UseCases\Commands\Create\" />
+    <Folder Include="Deliveries\UseCases\Commands\Delete\" />
+    <Folder Include="Deliveries\UseCases\Commands\Update\" />
+    <Folder Include="Deliveries\UseCases\Queries\Get\" />
+    <Folder Include="Deliveries\UseCases\Queries\List\" />
+  </ItemGroup>
+
+</Project>

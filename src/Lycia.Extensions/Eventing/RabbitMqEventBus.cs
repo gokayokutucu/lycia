@@ -3,6 +3,7 @@
 // https://www.apache.org/licenses/LICENSE-2.0
 // All async operations are now cancellation-aware and propagate the CancellationToken for graceful shutdown and responsiveness.
 
+#if NET8_0_OR_GREATER
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
@@ -135,7 +136,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
 
         // Inject current Activity context into headers for downstream consumers
         Observability.LyciaTracePropagation.Inject(headers);
-        
+
         // Ask serializer to produce a body and its own headers (content-type, lycia-type, schema metadata, etc.)
         var (_, serCtx) = _serializer.CreateContextFor(typeof(TEvent));
         var (body, serializerHeaders) = _serializer.Serialize(@event, serCtx);
@@ -195,7 +196,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         // Build base headers (Lycia metadata)
         var headers =
             RabbitMqEventBusHelper.BuildMessageHeaders(command, sagaId, typeof(TCommand), Constants.CommandTypeHeader);
-        
+
         // Inject current Activity context into headers for downstream consumers
         Observability.LyciaTracePropagation.Inject(headers);
 
@@ -290,8 +291,8 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             _logger.LogError(ex, "Failed to publish message to dead letter queue: {DlqName}", dlqName);
         }
     }
-    
-    
+
+
     public IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType, IReadOnlyDictionary<string, object?>
             Headers)>
         ConsumeAsync(bool autoAck = true, CancellationToken cancellationToken = default)
@@ -408,7 +409,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             await Task.Delay(50, cancellationToken);
         }
     }
-    
+
     public async IAsyncEnumerable<IncomingMessage> ConsumeWithAckAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
@@ -540,7 +541,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             ["x-dead-letter-routing-key"] = dlqName
         };
     }
-    
+
     /// <summary>
     /// Performs application-defined tasks associated with freeing, releasing, or
     /// resetting unmanaged resources asynchronously.</summary>
@@ -630,4 +631,5 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             _logger.LogWarning(ex, "RabbitMQ channel DisposeAsync failed");
         }
     }
-}
+} 
+#endif
