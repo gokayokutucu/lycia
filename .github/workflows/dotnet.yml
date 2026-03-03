@@ -92,7 +92,7 @@ jobs:
       - name: Wait for RabbitMQ to be healthy
         run: |
           echo "Waiting for RabbitMQ to be healthy..."
-          timeout 60 bash -c 'until curl -f http://localhost:15672/api/health/checks/alarms 2>/dev/null; do sleep 2; done'
+          timeout 90 bash -c 'until curl -u guest:guest -f http://localhost:15672/api/overview 2>/dev/null; do sleep 3; done'
           echo "✅ RabbitMQ is healthy!"
 
       - name: Restore
@@ -207,13 +207,14 @@ jobs:
 
       - name: Wait for RabbitMQ to be healthy
         run: |
-          $maxAttempts = 20
+          $maxAttempts = 30
           $attempt = 0
+          $credentials = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("guest:guest"))
           do {
             $attempt++
             Write-Host "Checking RabbitMQ health (attempt $attempt/$maxAttempts)..."
             try {
-              $response = Invoke-WebRequest -Uri "http://localhost:15672/api/health/checks/alarms" -UseBasicParsing -ErrorAction Stop
+              $response = Invoke-WebRequest -Uri "http://localhost:15672/api/overview" -Headers @{Authorization=("Basic {0}" -f $credentials)} -UseBasicParsing -ErrorAction Stop
               if ($response.StatusCode -eq 200) {
                 Write-Host "✅ RabbitMQ is healthy!"
                 exit 0
