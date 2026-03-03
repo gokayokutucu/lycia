@@ -13,8 +13,8 @@ on:
       - 'version.json'
 
 jobs:
-  tests:
-    name: Unit tests
+  unit-tests:
+    name: Unit tests (.NET Core)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (full history + tags for NBGV)
@@ -48,7 +48,7 @@ jobs:
           path: '**/unit.trx'
 
   integration-tests:
-    name: Integration tests
+    name: Integration tests (.NET Core)
     runs-on: ubuntu-latest
 
     services:
@@ -80,6 +80,18 @@ jobs:
             8.0.x
             6.0.x
 
+      - name: Wait for Redis to be healthy
+        run: |
+          echo "Waiting for Redis to be healthy..."
+          timeout 30 bash -c 'until redis-cli -h 127.0.0.1 -p 6379 ping; do sleep 1; done'
+          echo "✅ Redis is healthy!"
+
+      - name: Wait for RabbitMQ to be healthy
+        run: |
+          echo "Waiting for RabbitMQ to be healthy..."
+          timeout 60 bash -c 'until curl -f http://localhost:15672/api/health/checks/alarms 2>/dev/null; do sleep 2; done'
+          echo "✅ RabbitMQ is healthy!"
+
       - name: Restore
         run: dotnet restore Lycia.sln
 
@@ -99,9 +111,10 @@ jobs:
           name: integration-test-results
           path: '**/integration.trx'
 
-  tests-netframework:
+  unit-tests-netframework:
     name: Unit tests (NetFramework)
     runs-on: windows-latest
+    needs: [unit-tests, integration-tests]
 
     steps:
       - name: Checkout (full history + tags for NBGV)
@@ -135,8 +148,9 @@ jobs:
           path: '**/unit-netframework.trx'
 
   integration-tests-netframework:
-    name: Integration tests (NetFramework validates netstandard2.0)
+    name: Integration tests (NetFramework)
     runs-on: windows-latest
+    needs: [unit-tests, integration-tests]
 
     steps:
       - name: Checkout (full history + tags for NBGV)
@@ -159,7 +173,27 @@ jobs:
           redis-server --service-install
           redis-server --service-start
           Start-Sleep -Seconds 5
-          redis-cli ping
+
+      - name: Wait for Redis to be healthy
+        run: |
+          $maxAttempts = 10
+          $attempt = 0
+          do {
+            $attempt++
+            Write-Host "Checking Redis health (attempt $attempt/$maxAttempts)..."
+            try {
+              $result = redis-cli ping
+              if ($result -eq "PONG") {
+                Write-Host "✅ Redis is healthy!"
+                exit 0
+              }
+            } catch {
+              Write-Host "Redis not ready yet..."
+            }
+            Start-Sleep -Seconds 2
+          } while ($attempt -lt $maxAttempts)
+          Write-Error "❌ Redis failed to become healthy"
+          exit 1
 
       - name: Setup RabbitMQ (Windows)
         run: |
@@ -167,6 +201,27 @@ jobs:
           Start-Sleep -Seconds 10
           rabbitmq-plugins enable rabbitmq_management
           Start-Sleep -Seconds 5
+
+      - name: Wait for RabbitMQ to be healthy
+        run: |
+          $maxAttempts = 20
+          $attempt = 0
+          do {
+            $attempt++
+            Write-Host "Checking RabbitMQ health (attempt $attempt/$maxAttempts)..."
+            try {
+              $response = Invoke-WebRequest -Uri "http://localhost:15672/api/health/checks/alarms" -UseBasicParsing -ErrorAction Stop
+              if ($response.StatusCode -eq 200) {
+                Write-Host "✅ RabbitMQ is healthy!"
+                exit 0
+              }
+            } catch {
+              Write-Host "RabbitMQ not ready yet..."
+            }
+            Start-Sleep -Seconds 3
+          } while ($attempt -lt $maxAttempts)
+          Write-Error "❌ RabbitMQ failed to become healthy"
+          exit 1
 
       - name: Restore
         run: dotnet restore Lycia.sln
@@ -190,7 +245,7 @@ jobs:
   publish:
     name: Pack & Publish
     runs-on: ubuntu-latest
-    needs: [tests, integration-tests, tests-netframework, integration-tests-netframework]
+    needs: [unit-tests-netframework, integration-tests-netframework]
 
     steps:
       - name: Checkout (full history + tags)
@@ -210,7 +265,6 @@ jobs:
       - name: Clear NuGet caches
         run: dotnet nuget locals all --clear
 
-      # (Optional) it creates a nuget.config for local feed and mapping
       - name: Create nuget.config with source mapping
         run: |
           cat > nuget.config <<'XML'
@@ -221,11 +275,9 @@ jobs:
               <add key="local" value="./artifacts/nupkgs" />
             </packageSources>
             <packageSourceMapping>
-              <!-- Lycia isimli paket local'den çözülsün -->
               <packageSource key="local">
                 <package pattern="Lycia" />
               </packageSource>
-              <!-- Diğer her şey nuget.org -->
               <packageSource key="nuget.org">
                 <package pattern="*" />
               </packageSource>
@@ -244,7 +296,6 @@ jobs:
           dotnet tool install -g nbgv || true
           nbgv get-version -v SemVer2
 
-      # ---- Pack + Push Lycia (Core) ----
       - name: Pack Lycia
         run: dotnet pack src/Lycia/Lycia.csproj -c Release -o artifacts/nupkgs /p:ContinuousIntegrationBuild=true --no-restore
 
@@ -260,19 +311,16 @@ jobs:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: dotnet nuget push "artifacts/nupkgs/Lycia.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
 
-      # ---- Compute Lycia floor (strip commit hash) ----
       - name: Compute Lycia min floor (strip commit hash)
         id: floor
         run: |
           LATEST=$(ls artifacts/nupkgs/Lycia.*.nupkg | sort -V | tail -n1)
           VER=${LATEST##*/Lycia.}
           VER=${VER%.nupkg}
-          # '1.17.0-beta-0023-gxxxx' -> '1.17.0-beta-0023'
           FLOOR=$(echo "$VER" | sed -E 's/-g[0-9a-f]+$//')
           echo "Lycia floor: $FLOOR"
           echo "floor=$FLOOR" >> $GITHUB_OUTPUT
 
-      # ---- Restore + Pack + Push Lycia.Extensions ----
       - name: Restore Extensions with floor (pack mode)
         run: |
           dotnet restore src/Lycia.Extensions/Lycia.Extensions.csproj \
@@ -302,7 +350,6 @@ jobs:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: dotnet nuget push "artifacts/nupkgs/Lycia.Extensions.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
 
-      # ---- Restore + Pack + Push Lycia.Extensions.OpenTelemetry ----
       - name: Restore OpenTelemetry Extensions with floor (pack mode)
         run: |
           dotnet restore src/Lycia.Extensions.OpenTelemetry/Lycia.Extensions.OpenTelemetry.csproj \
