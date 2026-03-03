@@ -2,7 +2,6 @@
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 
-using System.Collections.Concurrent;
 using Lycia.Common.Enums;
 using Lycia.Common.SagaSteps;
 using Lycia.Extensions;
@@ -14,6 +13,7 @@ using Lycia.Saga.Contexts;
 using Lycia.Saga.Exceptions;
 using Lycia.Saga.Helpers;
 using Newtonsoft.Json;
+using System.Collections.Concurrent;
 
 namespace Lycia.Stores;
 
