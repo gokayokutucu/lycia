@@ -2,13 +2,14 @@
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 
-using System.Diagnostics;
+
 using Lycia.Observability;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Serializers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 
 namespace Lycia.Extensions.Listener;
 
@@ -18,28 +19,68 @@ public class RabbitMqListener(
     ILogger<RabbitMqListener> logger,
     IMessageSerializer serializer,
     LyciaActivitySourceHolder activitySourceHolder)
-    : BackgroundService
+#if NET8_0_OR_GREATER
+: BackgroundService
 {
-    private readonly IMessageSerializer _serializer = serializer;
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+#elif NETSTANDARD2_0
+: IDisposable
+{
+    private Thread? workerThread;
+    private CancellationTokenSource? cts;
+    private readonly object startLock = new();
+    private volatile bool isStarted;
+
+    public void Start()
+    {
+        lock (startLock)
+        {
+            if (isStarted)
+            {
+                logger.LogWarning("RabbitMqListener already started");
+                return;
+            }
+
+            cts = new CancellationTokenSource();
+            workerThread = new Thread(() =>
+            {
+                try
+                {
+                    ExecuteAsync(cts.Token).GetAwaiter().GetResult();
+                }
+                catch (Exception ex)
+                {
+                    logger.LogCritical(ex, "Fatal error in RabbitMqListener worker thread");
+                }
+            })
+            {
+                IsBackground = true,
+                Name = "RabbitMqListener-Worker"
+            };
+            workerThread.Start();
+            isStarted = true;
+        }
+    }
+
+    protected async Task ExecuteAsync(CancellationToken stoppingToken)
+#endif
     {
         logger.LogInformation("RabbitMqListener started");
 
-        using var scope = serviceProvider.CreateScope();
-
-        var sagaDispatcher = scope.ServiceProvider.GetRequiredService<ISagaDispatcher>();
-        
         await foreach (var msg in eventBus.ConsumeWithAckAsync(stoppingToken))
         {
             var (body, messageType, handlerType, headers, ack, nack) = msg;
             if (stoppingToken.IsCancellationRequested)
                 break;
 
+            using var scope = serviceProvider.CreateScope();
+            var sagaDispatcher = scope.ServiceProvider.GetRequiredService<ISagaDispatcher>();
+
             try
             {
-                var (_, serCtx) = _serializer.CreateContextFor(messageType);
-                var normalizedHeaders = _serializer.NormalizeTransportHeaders(headers);
-                var deserialized = _serializer.Deserialize(body, normalizedHeaders, serCtx);
+                var (_, serCtx) = serializer.CreateContextFor(messageType);
+                var normalizedHeaders = serializer.NormalizeTransportHeaders(headers);
+                var deserialized = serializer.Deserialize(body, normalizedHeaders, serCtx);
 
                 logger.LogInformation("Dispatching {MessageType} to SagaDispatcher", messageType.Name);
 
@@ -79,7 +120,7 @@ public class RabbitMqListener(
                     logger.LogWarning("No suitable DispatchAsync<TMessage> found for message type {MessageType}", messageType.Name);
                     continue;
                 }
-                
+
                 var sagaIdProp = deserialized.GetType().GetProperty("SagaId");
                 Guid? sagaId = null;
                 if (sagaIdProp != null && sagaIdProp.GetValue(deserialized) is Guid id && id != Guid.Empty)
@@ -105,11 +146,31 @@ public class RabbitMqListener(
                 try
                 {
                     await nack(false);
-                } catch (Exception nackEx) { logger.LogWarning(nackEx, "Nack failed for {MessageType}", messageType.Name); }
+                }
+                catch (Exception nackEx) { logger.LogWarning(nackEx, "Nack failed for {MessageType}", messageType.Name); }
                 // Optional: DLQ/retry/metrics logic.
             }
         }
 
         logger.LogInformation("RabbitMqListener stopped");
     }
+#if NETSTANDARD2_0
+    public void Dispose()
+    {
+        lock (startLock)
+        {
+            if (!isStarted) return;
+
+            cts?.Cancel();
+
+            if (workerThread?.Join(TimeSpan.FromSeconds(30)) == false)
+            {
+                logger.LogWarning("Worker thread did not stop gracefully within timeout");
+            }
+
+            cts?.Dispose();
+            isStarted = false;
+        }
+    }
+#endif
 }

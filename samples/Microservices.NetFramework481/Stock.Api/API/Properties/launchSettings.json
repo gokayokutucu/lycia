@@ -1,0 +1,13 @@
+{
+  "profiles": {
+    "Sample.Product.NetFramework481.API": {
+      "commandName": "Project",
+      "dotnetRunMessages": false,
+      "launchBrowser": false,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "http://localhost:2000"
+    }
+  }
+}
