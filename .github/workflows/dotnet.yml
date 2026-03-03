@@ -13,8 +13,42 @@ on:
       - 'version.json'
 
 jobs:
-  tests-netcore:
-    name: .NET Core Tests (net8.0, net9.0) - Linux Only
+  tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history + tags for NBGV)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            9.0.x
+            8.0.x
+            6.0.x
+
+      - name: Restore
+        run: dotnet restore Lycia.sln
+
+      - name: Build (Release)
+        run: dotnet build Lycia.sln -c Release --no-restore
+
+      - name: Run unit tests
+        run: dotnet test tests/Lycia.Tests/Lycia.Tests.csproj -c Release --no-build --logger "trx;LogFileName=unit.trx"
+
+      - name: Publish test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: '**/unit.trx'
+
+  integration-tests:
+    name: Integration tests
     runs-on: ubuntu-latest
 
     services:
@@ -52,24 +86,56 @@ jobs:
       - name: Build (Release)
         run: dotnet build Lycia.sln -c Release --no-restore
 
-      - name: Run unit tests
-        run: dotnet test tests/Lycia.Tests/Lycia.Tests.csproj -c Release --no-build --logger "trx;LogFileName=unit-netcore.trx"
-
       - name: Run integration tests
         env:
           LYCIA__EVENTBUS__CONNECTIONSTRING: amqp://guest:guest@127.0.0.1:5672/
           LYCIA__EVENTSTORE__CONNECTIONSTRING: 127.0.0.1:6379
-        run: dotnet test tests/Lycia.IntegrationTests/Lycia.IntegrationTests.csproj -c Release --no-build --logger "trx;LogFileName=integration-netcore.trx"
+        run: dotnet test tests/Lycia.IntegrationTests/Lycia.IntegrationTests.csproj -c Release --no-build --logger "trx;LogFileName=integration.trx"
 
       - name: Publish test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: netcore-test-results
-          path: '**/*-netcore.trx'
+          name: integration-test-results
+          path: '**/integration.trx'
 
   tests-netframework:
-    name: .NET Framework Tests (net48 validates netstandard2.0) - Windows Only
+    name: Unit tests (NetFramework)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout (full history + tags for NBGV)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            9.0.x
+            8.0.x
+            6.0.x
+
+      - name: Restore
+        run: dotnet restore Lycia.sln
+
+      - name: Build (Release)
+        run: dotnet build Lycia.sln -c Release --no-restore
+
+      - name: Run unit tests (NetFramework)
+        run: dotnet test tests/Lycia.Tests.NetFramework/Lycia.Tests.NetFramework.csproj -c Release --no-build --logger "trx;LogFileName=unit-netframework.trx"
+
+      - name: Publish test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-netframework-test-results
+          path: '**/unit-netframework.trx'
+
+  integration-tests-netframework:
+    name: Integration tests (NetFramework validates netstandard2.0)
     runs-on: windows-latest
 
     steps:
@@ -108,9 +174,6 @@ jobs:
       - name: Build (Release)
         run: dotnet build Lycia.sln -c Release --no-restore
 
-      - name: Run unit tests (NetFramework)
-        run: dotnet test tests/Lycia.Tests.NetFramework/Lycia.Tests.NetFramework.csproj -c Release --no-build --logger "trx;LogFileName=unit-netframework.trx"
-
       - name: Run integration tests (NetFramework)
         env:
           LYCIA__EVENTBUS__CONNECTIONSTRING: amqp://guest:guest@localhost:5672/
@@ -121,13 +184,13 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: netframework-test-results
-          path: '**/*-netframework.trx'
+          name: integration-netframework-test-results
+          path: '**/integration-netframework.trx'
 
   publish:
-    name: Pack & Publish All Targets (netstandard2.0, net8.0, net9.0)
+    name: Pack & Publish
     runs-on: ubuntu-latest
-    needs: [tests-netcore, tests-netframework]
+    needs: [tests, integration-tests, tests-netframework, integration-tests-netframework]
 
     steps:
       - name: Checkout (full history + tags)
@@ -147,9 +210,10 @@ jobs:
       - name: Clear NuGet caches
         run: dotnet nuget locals all --clear
 
+      # (Optional) it creates a nuget.config for local feed and mapping
       - name: Create nuget.config with source mapping
         run: |
-          cat > nuget.config <<'''XML'''
+          cat > nuget.config <<'XML'
           <?xml version="1.0" encoding="utf-8"?>
           <configuration>
             <packageSources>
@@ -157,9 +221,11 @@ jobs:
               <add key="local" value="./artifacts/nupkgs" />
             </packageSources>
             <packageSourceMapping>
+              <!-- Lycia isimli paket local'den çözülsün -->
               <packageSource key="local">
                 <package pattern="Lycia" />
               </packageSource>
+              <!-- Diğer her şey nuget.org -->
               <packageSource key="nuget.org">
                 <package pattern="*" />
               </packageSource>
@@ -178,7 +244,8 @@ jobs:
           dotnet tool install -g nbgv || true
           nbgv get-version -v SemVer2
 
-      - name: Pack Lycia (netstandard2.0, net8.0, net9.0)
+      # ---- Pack + Push Lycia (Core) ----
+      - name: Pack Lycia
         run: dotnet pack src/Lycia/Lycia.csproj -c Release -o artifacts/nupkgs /p:ContinuousIntegrationBuild=true --no-restore
 
       - name: Validate Lycia package contents
@@ -186,78 +253,79 @@ jobs:
           ls -la artifacts/nupkgs
           PKG=$(ls artifacts/nupkgs/Lycia.*.nupkg | sort -V | tail -n1)
           echo "Lycia nupkg: $PKG"
-          echo "=== Package should contain: lib/netstandard2.0, lib/net8.0, lib/net9.0 ==="
-          unzip -l "$PKG" | sed -n '''1,200p'''
+          unzip -l "$PKG" | sed -n '1,200p'
 
       - name: Push Lycia (nuget.org)
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: dotnet nuget push "artifacts/nupkgs/Lycia.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
 
+      # ---- Compute Lycia floor (strip commit hash) ----
       - name: Compute Lycia min floor (strip commit hash)
         id: floor
         run: |
           LATEST=$(ls artifacts/nupkgs/Lycia.*.nupkg | sort -V | tail -n1)
           VER=${LATEST##*/Lycia.}
           VER=${VER%.nupkg}
-          FLOOR=$(echo "$VER" | sed -E '''s/-g[0-9a-f]+$//''')
+          # '1.17.0-beta-0023-gxxxx' -> '1.17.0-beta-0023'
+          FLOOR=$(echo "$VER" | sed -E 's/-g[0-9a-f]+$//')
           echo "Lycia floor: $FLOOR"
           echo "floor=$FLOOR" >> $GITHUB_OUTPUT
 
+      # ---- Restore + Pack + Push Lycia.Extensions ----
       - name: Restore Extensions with floor (pack mode)
         run: |
           dotnet restore src/Lycia.Extensions/Lycia.Extensions.csproj \
             -p:UsePackageRefForLyciaOnPack=true \
-            -p:LyciaMinVersion='''${{ steps.floor.outputs.floor }}''' \
+            -p:LyciaMinVersion='${{ steps.floor.outputs.floor }}' \
             --source "./artifacts/nupkgs" --source "https://api.nuget.org/v3/index.json"
 
-      - name: Pack Lycia.Extensions (netstandard2.0, net8.0, net9.0)
+      - name: Pack Extensions (no restore)
         run: |
           dotnet pack src/Lycia.Extensions/Lycia.Extensions.csproj -c Release \
             -o artifacts/nupkgs \
             -p:ContinuousIntegrationBuild=true \
             -p:UsePackageRefForLyciaOnPack=true \
-            -p:LyciaMinVersion='''${{ steps.floor.outputs.floor }}''' \
+            -p:LyciaMinVersion='${{ steps.floor.outputs.floor }}' \
             --no-restore
 
       - name: Validate Lycia.Extensions package contents
         run: |
           PKG=$(ls artifacts/nupkgs/Lycia.Extensions.*.nupkg | sort -V | tail -n1)
           echo "Lycia.Extensions nupkg: $PKG"
-          echo "=== Package should contain: lib/netstandard2.0, lib/net8.0, lib/net9.0 ==="
-          unzip -l "$PKG" | sed -n '''1,200p'''
+          unzip -l "$PKG" | sed -n '1,200p'
           echo "NUSPEC dependencies (should only contain Lycia):"
-          unzip -p "$PKG" *.nuspec | sed -n '''1,200p'''
+          unzip -p "$PKG" *.nuspec | sed -n '1,200p'
 
       - name: Push Lycia.Extensions (nuget.org)
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: dotnet nuget push "artifacts/nupkgs/Lycia.Extensions.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
 
+      # ---- Restore + Pack + Push Lycia.Extensions.OpenTelemetry ----
       - name: Restore OpenTelemetry Extensions with floor (pack mode)
         run: |
           dotnet restore src/Lycia.Extensions.OpenTelemetry/Lycia.Extensions.OpenTelemetry.csproj \
             -p:UsePackageRefForLyciaOnPack=true \
-            -p:LyciaMinVersion='''${{ steps.floor.outputs.floor }}''' \
+            -p:LyciaMinVersion='${{ steps.floor.outputs.floor }}' \
             --source "./artifacts/nupkgs" --source "https://api.nuget.org/v3/index.json"
 
-      - name: Pack Lycia.Extensions.OpenTelemetry (netstandard2.0, net8.0, net9.0)
+      - name: Pack Lycia.Extensions.OpenTelemetry (no restore)
         run: |
           dotnet pack src/Lycia.Extensions.OpenTelemetry/Lycia.Extensions.OpenTelemetry.csproj -c Release \
             -o artifacts/nupkgs \
             -p:ContinuousIntegrationBuild=true \
             -p:UsePackageRefForLyciaOnPack=true \
-            -p:LyciaMinVersion='''${{ steps.floor.outputs.floor }}''' \
+            -p:LyciaMinVersion='${{ steps.floor.outputs.floor }}' \
             --no-restore
 
       - name: Validate Lycia.Extensions.OpenTelemetry package contents
         run: |
           PKG=$(ls artifacts/nupkgs/Lycia.Extensions.OpenTelemetry.*.nupkg | sort -V | tail -n1)
           echo "Lycia.Extensions.OpenTelemetry nupkg: $PKG"
-          echo "=== Package should contain: lib/netstandard2.0, lib/net8.0, lib/net9.0 ==="
-          unzip -l "$PKG" | sed -n '''1,200p'''
+          unzip -l "$PKG" | sed -n '1,200p'
           echo "NUSPEC dependencies (should only contain Lycia / Lycia.Extensions if applicable):"
-          unzip -p "$PKG" *.nuspec | sed -n '''1,200p'''
+          unzip -p "$PKG" *.nuspec | sed -n '1,200p'
 
       - name: Push Lycia.Extensions.OpenTelemetry (nuget.org)
         env:
