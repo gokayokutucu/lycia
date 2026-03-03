@@ -5,8 +5,8 @@ using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Contexts;
 using Lycia.Saga.Abstractions.Middlewares;
 using Microsoft.Extensions.Logging;
-using Serilog;
 using Microsoft.Extensions.Options;
+using Serilog;
 using Serilog.Events;
 using ILogger = Serilog.ILogger;
 
