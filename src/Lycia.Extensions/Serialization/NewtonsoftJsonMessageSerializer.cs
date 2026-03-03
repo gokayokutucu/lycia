@@ -1,13 +1,13 @@
 // Copyright 2023 Lycia Contributors
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
-using System.Text;
 using Lycia.Extensions.Converters;
 using Lycia.Saga.Abstractions.Contexts;
 using Lycia.Saga.Abstractions.Serializers;
 using Lycia.Saga.Contexts;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
+using System.Text;
 
 namespace Lycia.Extensions.Serialization;
 
