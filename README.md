@@ -17,7 +17,7 @@ Our motto: *“Turning difficult paths into joyful simplicity.”* Inspired by t
 Lycia is a messaging framework (Message-oriented Middleware, MoM) built for .NET applications, supporting .NET Standard 2.0 and higher. It provides a robust foundation for distributed systems where reliable message flow and state coordination are essential.
 
 For architectural deep-dive, compensation coordination, and integration test strategies, see [DEVELOPERS.md](DEVELOPERS.md).
-
+ 
 ---
 
 ## Getting Started / Samples
