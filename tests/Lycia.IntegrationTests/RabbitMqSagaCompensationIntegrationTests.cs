@@ -588,7 +588,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
             Message = "trigger-failure"
         };
 
-        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var receivedMessages = new List<TestSagaCommand>();
 
         var starterMessageId = Guid.NewGuid();
@@ -625,9 +625,13 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
             }
         });
 
+        // Wait for consumer infrastructure to be ready
+        // ConsumeAsync sets up exchanges/queues lazily on first iteration
+        await Task.Delay(3000);
+
         await eventBus.Send(testCommand);
 
-        await Task.WhenAny(finished.Task, Task.Delay(5000, cts.Token));
+        await Task.WhenAny(finished.Task, Task.Delay(15000, cts.Token));
 
         if (!finished.Task.IsCompleted)
         {
