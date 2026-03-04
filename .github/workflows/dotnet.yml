@@ -31,6 +31,12 @@ jobs:
             8.0.x
             6.0.x
 
+      - name: Setup Redis (Windows)
+        run: |
+          choco install memurai-developer -y
+          Start-Service Memurai
+          Start-Sleep -Seconds 5
+
       - name: Restore
         run: dotnet restore Lycia.sln
 
@@ -74,6 +80,12 @@ jobs:
             8.0.x
             6.0.x
 
+      - name: Setup Redis (Windows)
+        run: |
+          choco install memurai-developer -y
+          Start-Service Memurai
+          Start-Sleep -Seconds 5
+
       - name: Restore
         run: dotnet restore Lycia.sln
 
@@ -113,6 +125,12 @@ jobs:
             8.0.x
             6.0.x
 
+      - name: Setup Redis (Windows)
+        run: |
+          choco install memurai-developer -y
+          Start-Service Memurai
+          Start-Sleep -Seconds 5
+
       - name: Restore
         run: dotnet restore Lycia.sln
 
@@ -120,7 +138,9 @@ jobs:
         run: dotnet build Lycia.sln -c Release --no-restore
 
       - name: Run unit tests (NetFramework)
-        run: dotnet test tests/Lycia.Tests.NetFramework/Lycia.Tests.NetFramework.csproj -c Release --no-build --logger "trx;LogFileName=unit-netframework.trx" --filter "storeType!=Redis"
+        env:
+          LYCIA__EVENTSTORE__CONNECTIONSTRING: localhost:6379
+        run: dotnet test tests/Lycia.Tests.NetFramework/Lycia.Tests.NetFramework.csproj -c Release --no-build --logger "trx;LogFileName=unit-netframework.trx"
 
       - name: Publish test results
         if: always()

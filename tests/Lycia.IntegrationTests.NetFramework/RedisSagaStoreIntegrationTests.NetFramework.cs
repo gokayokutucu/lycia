@@ -7,7 +7,6 @@ using Lycia.Common.Enums;
 using Lycia.Common.SagaSteps;
 using Lycia.Extensions.Configurations;
 using StackExchange.Redis;
-using Testcontainers.Redis;
 using Lycia.Extensions.Stores;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Contexts;
@@ -21,11 +20,7 @@ namespace Lycia.IntegrationTests;
 
 public class RedisSagaStoreIntegrationTestsNetFramework : IAsyncLifetime
 {
-    private readonly RedisContainer _redisContainer = new RedisBuilder()
-        .WithImage("redis:7-alpine")
-        .WithCleanUp(true)
-        .Build();
-
+    // Use existing Redis from environment (Memurai installed by workflow)
     private IDatabase _db = null!;
 
     private RedisSagaStore _store = null!;
@@ -38,9 +33,9 @@ public class RedisSagaStoreIntegrationTestsNetFramework : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        await _redisContainer.StartAsync();
-        var connectionString = _redisContainer.GetConnectionString();
-        //var connectionString = "127.0.0.1:6379";
+        var connectionString = Environment.GetEnvironmentVariable("LYCIA__EVENTSTORE__CONNECTIONSTRING") 
+            ?? "localhost:6379";
+
         var redis = await ConnectionMultiplexer.ConnectAsync(connectionString);
         _db = redis.GetDatabase();
 
@@ -49,7 +44,7 @@ public class RedisSagaStoreIntegrationTestsNetFramework : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        await _redisContainer.DisposeAsync();
+        await Task.CompletedTask;
     }
 
     [Fact]

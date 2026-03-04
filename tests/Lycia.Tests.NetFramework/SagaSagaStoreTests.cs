@@ -10,31 +10,29 @@ using Lycia.Saga.Exceptions;
 using Lycia.Stores;
 using Lycia.Tests.Messages;
 using StackExchange.Redis;
-using Testcontainers.Redis;
 
 namespace Lycia.Tests;
 
 public class SagaSagaStoreTests : IAsyncLifetime
 {
-    private readonly RedisContainer _redisContainer = new RedisBuilder()
-        .WithImage("redis:7-alpine")
-        .WithCleanUp(true)
-        .Build();
-
+    // Use existing Redis from environment (Memurai installed by workflow)
+    // No Testcontainers on Windows!
     private IDatabase _db = null!;
 
     public async Task InitializeAsync()
     {
-        await _redisContainer.StartAsync();
-        var connectionString = _redisContainer.GetConnectionString();
-        //var connectionString = "127.0.0.1:6379";
+        // Use environment variable from workflow
+        var connectionString = Environment.GetEnvironmentVariable("LYCIA__EVENTSTORE__CONNECTIONSTRING") 
+            ?? "localhost:6379";
+
         var redis = await ConnectionMultiplexer.ConnectAsync(connectionString);
         _db = redis.GetDatabase();
     }
 
     public async Task DisposeAsync()
     {
-        await _redisContainer.DisposeAsync();
+        // No cleanup needed - Redis is managed by workflow
+        await Task.CompletedTask;
     }
 
     [Theory]
