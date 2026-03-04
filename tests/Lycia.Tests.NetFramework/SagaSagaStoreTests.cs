@@ -1,38 +1,67 @@
 // Copyright 2023 Lycia Contributors
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
-using Lycia.Extensions.Configurations;
-using Lycia.Extensions.Stores;
 using Lycia.Common.Enums;
 using Lycia.Common.SagaSteps;
+using Lycia.Extensions.Configurations;
+using Lycia.Extensions.Stores;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Exceptions;
 using Lycia.Stores;
 using Lycia.Tests.Messages;
 using StackExchange.Redis;
+using Testcontainers.Redis;
 
 namespace Lycia.Tests;
 
 public class SagaSagaStoreTests : IAsyncLifetime
 {
-    // Use existing Redis from environment (Memurai installed by workflow)
-    // No Testcontainers on Windows!
+    // Hybrid approach:
+    // - Local (Development): Use Testcontainers (Docker)
+    // - CI/CD (Workflow): Use environment variable (Memurai service)
+    private readonly bool _isCI = Environment.GetEnvironmentVariable("CI") == "true";
+    private RedisContainer? _redisContainer;
+    private ConnectionMultiplexer _redis = null!;
     private IDatabase _db = null!;
 
     public async Task InitializeAsync()
     {
-        // Use environment variable from workflow
-        var connectionString = Environment.GetEnvironmentVariable("LYCIA__EVENTSTORE__CONNECTIONSTRING") 
-            ?? "localhost:6379";
+        string connectionString;
 
-        var redis = await ConnectionMultiplexer.ConnectAsync(connectionString);
-        _db = redis.GetDatabase();
+        if (_isCI)
+        {
+            // CI/CD: Use environment variable
+            connectionString = Environment.GetEnvironmentVariable("LYCIA__EVENTSTORE__CONNECTIONSTRING") 
+                ?? "localhost:6379";
+        }
+        else
+        {
+            // Local: Use Testcontainers
+            _redisContainer = new RedisBuilder()
+                .WithImage("redis:7-alpine")
+                .WithCleanUp(true)
+                .Build();
+
+            await _redisContainer.StartAsync();
+            connectionString = _redisContainer.GetConnectionString();
+        }
+
+        _redis = await ConnectionMultiplexer.ConnectAsync(connectionString);
+        _db = _redis.GetDatabase();
     }
 
     public async Task DisposeAsync()
     {
-        // No cleanup needed - Redis is managed by workflow
-        await Task.CompletedTask;
+        if (_redis != null)
+        {
+            await _redis.CloseAsync();
+            _redis.Dispose();
+        }
+
+        if (_redisContainer != null)
+        {
+            await _redisContainer.DisposeAsync();
+        }
     }
 
     [Theory]
