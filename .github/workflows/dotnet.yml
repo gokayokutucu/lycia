@@ -127,6 +127,7 @@ jobs:
 
       - name: Run unit tests (NetFramework)
         env:
+          CI: true
           LYCIA__EVENTSTORE__CONNECTIONSTRING: localhost:6379
         run: dotnet test tests/Lycia.Tests.NetFramework/Lycia.Tests.NetFramework.csproj -c Release --no-build --logger "trx;LogFileName=unit-netframework.trx"
 
@@ -181,6 +182,7 @@ jobs:
 
       - name: Run integration tests (NetFramework)
         env:
+          CI: true
           LYCIA__EVENTBUS__CONNECTIONSTRING: amqp://guest:guest@localhost:5672/
           LYCIA__EVENTSTORE__CONNECTIONSTRING: localhost:6379
         run: dotnet test tests/Lycia.IntegrationTests.NetFramework/Lycia.IntegrationTests.NetFramework.csproj -c Release --no-build --logger "trx;LogFileName=integration-netframework.trx"

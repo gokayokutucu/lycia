@@ -15,12 +15,18 @@ using Lycia.Saga.Messaging;
 using Lycia.Saga.Messaging.Handlers;
 using Lycia.Tests.Helpers;
 using Microsoft.Extensions.Options;
+using Testcontainers.Redis;
 
 namespace Lycia.IntegrationTests;
 
 public class RedisSagaStoreIntegrationTestsNetFramework : IAsyncLifetime
 {
-    // Use existing Redis from environment (Memurai installed by workflow)
+    // Hybrid approach:
+    // - Local (Development): Use Testcontainers (Docker)
+    // - CI/CD (Workflow): Use environment variable (Memurai service)
+    private readonly bool _isCI = Environment.GetEnvironmentVariable("CI") == "true";
+    private RedisContainer? _redisContainer;
+    private ConnectionMultiplexer _redis = null!;
     private IDatabase _db = null!;
 
     private RedisSagaStore _store = null!;
@@ -33,18 +39,44 @@ public class RedisSagaStoreIntegrationTestsNetFramework : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        var connectionString = Environment.GetEnvironmentVariable("LYCIA__EVENTSTORE__CONNECTIONSTRING") 
-            ?? "localhost:6379";
+        string connectionString;
 
-        var redis = await ConnectionMultiplexer.ConnectAsync(connectionString);
-        _db = redis.GetDatabase();
+        if (_isCI)
+        {
+            // CI/CD: Use environment variable
+            connectionString = Environment.GetEnvironmentVariable("LYCIA__EVENTSTORE__CONNECTIONSTRING") 
+                ?? "localhost:6379";
+        }
+        else
+        {
+            // Local: Use Testcontainers
+            _redisContainer = new RedisBuilder()
+                .WithImage("redis:7-alpine")
+                .WithCleanUp(true)
+                .Build();
+
+            await _redisContainer.StartAsync();
+            connectionString = _redisContainer.GetConnectionString();
+        }
+
+        _redis = await ConnectionMultiplexer.ConnectAsync(connectionString);
+        _db = _redis.GetDatabase();
 
         _store = new RedisSagaStore(_db, null!, null!, null!, _storeOptions);
     }
 
     public async Task DisposeAsync()
     {
-        await Task.CompletedTask;
+        if (_redis != null)
+        {
+            await _redis.CloseAsync();
+            _redis.Dispose();
+        }
+
+        if (_redisContainer != null)
+        {
+            await _redisContainer.DisposeAsync();
+        }
     }
 
     [Fact]
