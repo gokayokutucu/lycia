@@ -30,11 +30,4 @@
         <ProjectReference Include="..\Lycia.Tests.Helpers\Lycia.Tests.Helpers.csproj" />
     </ItemGroup>
 
-    <!-- Link to shared test files from Lycia.Tests -->
-    <ItemGroup>
-        <Compile Include="..\Lycia.Tests\**\*.cs" 
-                 Exclude="..\Lycia.Tests\obj\**\*.cs;..\Lycia.Tests\bin\**\*.cs;..\Lycia.Tests\Retry\**\*.cs;..\Lycia.Tests\SagaSagaStoreTests.cs;..\Lycia.Tests\SagaCompensationCoordinatorTests.cs;..\Lycia.Tests\Middleware\ActivityTracingMiddlewareTests.cs" 
-                 Link="%(RecursiveDir)%(Filename)%(Extension)" />
-    </ItemGroup>
-
 </Project>

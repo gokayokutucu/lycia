@@ -16,9 +16,14 @@ namespace Lycia.Retry
             var src = options?.Value;
             var maxRetryAttempts = src?.MaxRetryAttempts ?? 3;
 
-            _policy = Policy
-                .Handle<TransientSagaException>()
-                .Or<TimeoutException>()
+            var policyBuilder = Policy.Handle<Exception>(ex =>
+            {
+                if (src?.ShouldHandle != null)
+                    return src.ShouldHandle.ShouldHandle(ex);
+                return ex is TransientSagaException or TimeoutException;
+            });
+
+            _policy = policyBuilder
                 .WaitAndRetryAsync(
                     maxRetryAttempts,
                     retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
@@ -57,6 +62,33 @@ namespace Lycia.Retry
         public TimeSpan Delay { get; set; } = TimeSpan.FromSeconds(1);
         public TimeSpan? MaxDelay { get; set; }
         public bool UseJitter { get; set; } = true;
+        public DelayBackoffType BackoffType { get; set; } = DelayBackoffType.Exponential;
+        public PredicateBuilder? ShouldHandle { get; set; }
+    }
+
+    // Mirror Polly v8 DelayBackoffType enum
+    public enum DelayBackoffType
+    {
+        Constant,
+        Linear,
+        Exponential
+    }
+
+    // Mirror Polly v8 PredicateBuilder (simplified)
+    public class PredicateBuilder
+    {
+        private readonly List<Type> _exceptionTypes = new();
+
+        public PredicateBuilder Handle<TException>() where TException : Exception
+        {
+            _exceptionTypes.Add(typeof(TException));
+            return this;
+        }
+
+        internal bool ShouldHandle(Exception ex)
+        {
+            return _exceptionTypes.Any(t => t.IsInstanceOfType(ex));
+        }
     }
 }
 #endif

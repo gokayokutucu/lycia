@@ -15,8 +15,11 @@ namespace Lycia.Tests.Retry
             var opts = Options.Create(new RetryStrategyOptions
             {
                 MaxRetryAttempts = 3,
+                BackoffType = DelayBackoffType.Exponential,
                 Delay = TimeSpan.FromMilliseconds(1),
-                UseJitter = false
+                UseJitter = false,
+                ShouldHandle = new PredicateBuilder()
+                    .Handle<TransientSagaException>()
             });
 
             var policy = new PollyRetryPolicy(opts);
@@ -45,7 +48,8 @@ namespace Lycia.Tests.Retry
             {
                 MaxRetryAttempts = 5,
                 Delay = TimeSpan.FromMilliseconds(1),
-                UseJitter = false
+                UseJitter = false,
+                ShouldHandle = new PredicateBuilder().Handle<TransientSagaException>()
             });
 
             var policy = new PollyRetryPolicy(opts);
@@ -68,8 +72,10 @@ namespace Lycia.Tests.Retry
             var opts = Options.Create(new RetryStrategyOptions
             {
                 MaxRetryAttempts = 3,
+                BackoffType = DelayBackoffType.Exponential,
                 Delay = TimeSpan.FromMilliseconds(1),
-                UseJitter = false
+                UseJitter = false,
+                ShouldHandle = new PredicateBuilder().Handle<TransientSagaException>()
             });
 
             var policy = new PollyRetryPolicy(opts);

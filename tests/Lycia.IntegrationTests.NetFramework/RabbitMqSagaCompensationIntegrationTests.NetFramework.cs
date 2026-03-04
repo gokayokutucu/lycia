@@ -11,9 +11,6 @@ using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Eventing;
 using Lycia.Extensions.Serialization;
 using Lycia.Extensions.Stores;
-
-
-
 using Lycia.Helpers;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Handlers;
@@ -25,6 +22,8 @@ using Lycia.Tests.Helpers;
 using Lycia.Tests.Messages;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Testcontainers.RabbitMq;
+using Testcontainers.Redis;
 
 namespace Lycia.IntegrationTests;
 
@@ -33,27 +32,69 @@ namespace Lycia.IntegrationTests;
 /// </summary>
 public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifetime
 {
-    // Use existing services from environment (Memurai + RabbitMQ installed by workflow)
-    // No Testcontainers on Windows!
+    // Hybrid approach:
+    // - Local (Development): Use Testcontainers (Docker)
+    // - CI/CD (Workflow): Use environment variables (Memurai/RabbitMQ service)
+    private readonly bool _isCI = Environment.GetEnvironmentVariable("CI") == "true";
+    private RabbitMqContainer? _rabbitMqContainer;
+    private RedisContainer? _redisContainer;
+    private ConnectionMultiplexer _redis = null!;
 
-    private string RabbitMqConnectionString =>
-        Environment.GetEnvironmentVariable("LYCIA__EVENTBUS__CONNECTIONSTRING") 
-        ?? "amqp://guest:guest@localhost:5672/";
-
-    private string RedisEndpoint =>
-        Environment.GetEnvironmentVariable("LYCIA__EVENTSTORE__CONNECTIONSTRING")
-        ?? "localhost:6379";
+    private string RabbitMqConnectionString { get; set; } = null!;
+    private string RedisEndpoint { get; set; } = null!;
 
     public async Task InitializeAsync()
     {
-        // No container startup - use services from workflow
-        await Task.CompletedTask;
+        if (_isCI)
+        {
+            // CI/CD: Use environment variables
+            RabbitMqConnectionString = Environment.GetEnvironmentVariable("LYCIA__EVENTBUS__CONNECTIONSTRING") 
+                ?? "amqp://guest:guest@localhost:5672/";
+            RedisEndpoint = Environment.GetEnvironmentVariable("LYCIA__EVENTSTORE__CONNECTIONSTRING")
+                ?? "localhost:6379";
+        }
+        else
+        {
+            // Local: Use Testcontainers
+            _rabbitMqContainer = new RabbitMqBuilder()
+                .WithImage("rabbitmq:3.13-management-alpine")
+                .WithCleanUp(true)
+                .Build();
+
+            _redisContainer = new RedisBuilder()
+                .WithImage("redis:7-alpine")
+                .WithCleanUp(true)
+                .Build();
+
+            await Task.WhenAll(
+                _rabbitMqContainer.StartAsync(),
+                _redisContainer.StartAsync()
+            );
+
+            RabbitMqConnectionString = _rabbitMqContainer.GetConnectionString();
+            RedisEndpoint = _redisContainer.GetConnectionString();
+        }
+
+        _redis = await ConnectionMultiplexer.ConnectAsync(RedisEndpoint);
     }
 
     public async Task DisposeAsync()
     {
-        // No cleanup needed
-        await Task.CompletedTask;
+        if (_redis != null)
+        {
+            await _redis.CloseAsync();
+            _redis.Dispose();
+        }
+
+        if (_rabbitMqContainer != null)
+        {
+            await _rabbitMqContainer.DisposeAsync();
+        }
+
+        if (_redisContainer != null)
+        {
+            await _redisContainer.DisposeAsync();
+        }
     }
 
     [Fact]

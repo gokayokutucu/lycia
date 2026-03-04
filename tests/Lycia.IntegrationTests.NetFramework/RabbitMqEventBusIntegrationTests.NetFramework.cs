@@ -11,15 +11,19 @@ using Lycia.Saga.Messaging;
 using Lycia.Saga.Messaging.Handlers;
 using Microsoft.Extensions.Logging.Abstractions;
 using RabbitMQ.Client;
+using Testcontainers.RabbitMq;
 
 namespace Lycia.IntegrationTests;
 
 public class RabbitMqEventBusIntegrationTestsNetFramework : IAsyncLifetime
 {
-    // Use existing RabbitMQ from environment (installed by workflow)
-    private string RabbitMqConnectionString =>
-        Environment.GetEnvironmentVariable("LYCIA__EVENTBUS__CONNECTIONSTRING") 
-        ?? "amqp://guest:guest@localhost:5672/";
+    // Hybrid approach:
+    // - Local (Development): Use Testcontainers (Docker)
+    // - CI/CD (Workflow): Use environment variable (Memurai/RabbitMQ service)
+    private readonly bool _isCI = Environment.GetEnvironmentVariable("CI") == "true";
+    private RabbitMqContainer? _rabbitMqContainer;
+
+    private string RabbitMqConnectionString { get; set; } = null!;
 
     private static async Task CleanupQueuesAsync(string connectionString, string queueName)
     {
@@ -32,10 +36,33 @@ public class RabbitMqEventBusIntegrationTestsNetFramework : IAsyncLifetime
     }
 
     public async Task InitializeAsync()
-        => await Task.CompletedTask;
+    {
+        if (_isCI)
+        {
+            // CI/CD: Use environment variable
+            RabbitMqConnectionString = Environment.GetEnvironmentVariable("LYCIA__EVENTBUS__CONNECTIONSTRING") 
+                ?? "amqp://guest:guest@localhost:5672/";
+        }
+        else
+        {
+            // Local: Use Testcontainers
+            _rabbitMqContainer = new RabbitMqBuilder()
+                .WithImage("rabbitmq:3.13-management-alpine")
+                .WithCleanUp(true)
+                .Build();
+
+            await _rabbitMqContainer.StartAsync();
+            RabbitMqConnectionString = _rabbitMqContainer.GetConnectionString();
+        }
+    }
 
     public async Task DisposeAsync()
-        => await Task.CompletedTask;
+    {
+        if (_rabbitMqContainer != null)
+        {
+            await _rabbitMqContainer.DisposeAsync();
+        }
+    }
     
     
     [Fact]
@@ -345,6 +372,12 @@ public class RabbitMqEventBusIntegrationTestsNetFramework : IAsyncLifetime
         var applicationId = "TestApp";
         var handlerType1 = typeof(TestEventHandlerA);
         var handlerType2 = typeof(TestEventHandlerB);
+
+        // Clean up queues before test to avoid parameter conflicts
+        var queueName1 = MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType1, applicationId);
+        var queueName2 = MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType2, applicationId);
+        await CleanupQueuesAsync(RabbitMqConnectionString, queueName1);
+        await CleanupQueuesAsync(RabbitMqConnectionString, queueName2);
 
         // Separate queueTypeMap entry for each handler
         var queueTypeMap = new Dictionary<string, (Type, Type)>
