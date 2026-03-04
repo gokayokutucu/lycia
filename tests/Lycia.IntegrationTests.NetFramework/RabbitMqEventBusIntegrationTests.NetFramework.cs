@@ -11,22 +11,15 @@ using Lycia.Saga.Messaging;
 using Lycia.Saga.Messaging.Handlers;
 using Microsoft.Extensions.Logging.Abstractions;
 using RabbitMQ.Client;
-using Testcontainers.RabbitMq;
 
 namespace Lycia.IntegrationTests;
 
 public class RabbitMqEventBusIntegrationTestsNetFramework : IAsyncLifetime
 {
-    // Use the official RabbitMqContainer builder
-    private readonly RabbitMqContainer _rabbitMqContainer =
-        new RabbitMqBuilder()
-            .WithImage("rabbitmq:3.13-management-alpine")
-            .WithCleanUp(true)
-            .Build();
-    
+    // Use existing RabbitMQ from environment (installed by workflow)
     private string RabbitMqConnectionString =>
-        //"amqp://guest:guest@127.0.0.1:5672/"; 
-        _rabbitMqContainer.GetConnectionString();
+        Environment.GetEnvironmentVariable("LYCIA__EVENTBUS__CONNECTIONSTRING") 
+        ?? "amqp://guest:guest@localhost:5672/";
 
     private static async Task CleanupQueuesAsync(string connectionString, string queueName)
     {
@@ -39,10 +32,10 @@ public class RabbitMqEventBusIntegrationTestsNetFramework : IAsyncLifetime
     }
 
     public async Task InitializeAsync()
-        => await _rabbitMqContainer.StartAsync().ConfigureAwait(false);
+        => await Task.CompletedTask;
 
     public async Task DisposeAsync()
-        => await _rabbitMqContainer.DisposeAsync().ConfigureAwait(false);
+        => await Task.CompletedTask;
     
     
     [Fact]
