@@ -7,8 +7,6 @@ using Lycia.Common.SagaSteps;
 using Lycia.Compensating;
 using Lycia.Dispatching;
 using StackExchange.Redis;
-using Testcontainers.RabbitMq;
-using Testcontainers.Redis;
 using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Eventing;
 using Lycia.Extensions.Serialization;
