@@ -25,7 +25,9 @@ namespace Lycia.Tests.Retry
             {
                 o.MaxRetryAttempts = 3;
                 o.Delay = TimeSpan.FromMilliseconds(1);
+                o.BackoffType = DelayBackoffType.Exponential;
                 o.UseJitter = false;
+                o.ShouldHandle = new PredicateBuilder().Handle<TransientSagaException>();
             });
 
             services.AddSingleton<IRetryPolicy, PollyRetryPolicy>();
@@ -70,6 +72,7 @@ namespace Lycia.Tests.Retry
                 o.MaxRetryAttempts = 5;
                 o.Delay = TimeSpan.FromMilliseconds(1);
                 o.UseJitter = false;
+                o.ShouldHandle = new PredicateBuilder().Handle<TransientSagaException>();
             });
 
             services.AddSingleton<IRetryPolicy, PollyRetryPolicy>();
