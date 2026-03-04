@@ -31,12 +31,6 @@ jobs:
             8.0.x
             6.0.x
 
-      - name: Setup Redis (Windows)
-        run: |
-          choco install memurai-developer -y
-          Start-Service Memurai
-          Start-Sleep -Seconds 5
-
       - name: Restore
         run: dotnet restore Lycia.sln
 
@@ -79,12 +73,6 @@ jobs:
             9.0.x
             8.0.x
             6.0.x
-
-      - name: Setup Redis (Windows)
-        run: |
-          choco install memurai-developer -y
-          Start-Service Memurai
-          Start-Sleep -Seconds 5
 
       - name: Restore
         run: dotnet restore Lycia.sln
