@@ -35,37 +35,27 @@ namespace Lycia.IntegrationTests;
 /// </summary>
 public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifetime
 {
-    private readonly RabbitMqContainer _rabbitMqContainer = new RabbitMqBuilder()
-        .WithImage("rabbitmq:3.13-management-alpine")
-        .WithCleanUp(true)
-        .Build();
-
-    private readonly RedisContainer _redisContainer = new RedisBuilder()
-        .WithImage("redis:7-alpine")
-        .WithCleanUp(true)
-        .Build();
+    // Use existing services from environment (Memurai + RabbitMQ installed by workflow)
+    // No Testcontainers on Windows!
 
     private string RabbitMqConnectionString =>
-           //"amqp://guest:guest@127.0.0.1:5672/"; 
-        _rabbitMqContainer.GetConnectionString();
+        Environment.GetEnvironmentVariable("LYCIA__EVENTBUS__CONNECTIONSTRING") 
+        ?? "amqp://guest:guest@localhost:5672/";
 
     private string RedisEndpoint =>
-           //"127.0.0.1:6379"; 
-        $"{_redisContainer.Hostname}:{_redisContainer.GetMappedPublicPort(6379)}";
+        Environment.GetEnvironmentVariable("LYCIA__EVENTSTORE__CONNECTIONSTRING")
+        ?? "localhost:6379";
 
     public async Task InitializeAsync()
     {
-        await _rabbitMqContainer.StartAsync();
-        await _redisContainer.StartAsync();
-
-        // Give containers a moment to be fully ready
-        await Task.Delay(2000);
+        // No container startup - use services from workflow
+        await Task.CompletedTask;
     }
 
     public async Task DisposeAsync()
     {
-        await _rabbitMqContainer.DisposeAsync();
-        await _redisContainer.DisposeAsync();
+        // No cleanup needed
+        await Task.CompletedTask;
     }
 
     [Fact]
