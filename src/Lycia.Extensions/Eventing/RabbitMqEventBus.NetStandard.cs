@@ -519,7 +519,14 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             while (queue.TryDequeue(out var msg))
                 yield return msg;
 
-            await Task.Delay(50, cancellationToken);
+            try
+            {
+                await Task.Delay(50, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
         }
     }
 

@@ -48,6 +48,10 @@ public class RabbitMqListener(
                 {
                     ExecuteAsync(cts.Token).GetAwaiter().GetResult();
                 }
+                catch (OperationCanceledException)
+                {
+                    logger.LogInformation("RabbitMqListener worker thread stopped gracefully");
+                }
                 catch (Exception ex)
                 {
                     logger.LogCritical(ex, "Fatal error in RabbitMqListener worker thread");
