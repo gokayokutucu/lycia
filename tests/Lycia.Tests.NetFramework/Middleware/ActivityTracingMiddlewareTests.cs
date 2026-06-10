@@ -11,9 +11,6 @@ namespace Lycia.Tests.Middleware;
 
 public class ActivityTracingMiddlewareTests
 {
-    private readonly LyciaActivitySourceHolder _sourceHolder =
-        new(new ActivitySource("Lycia"));
-
     private readonly ISagaContextAccessor _dummyAccessor =
         new DummySagaContextAccessor();
 
@@ -26,7 +23,8 @@ public class ActivityTracingMiddlewareTests
         // Arrange
         Activity.Current = null; // start clean
 
-        var middleware = new ActivityTracingMiddleware(_sourceHolder, _dummyAccessor, _logger);
+        using var sourceHolder = CreateSourceHolder(out var sourceName);
+        var middleware = new ActivityTracingMiddleware(sourceHolder, _dummyAccessor, _logger);
 
         var sagaId = Guid.NewGuid();
         var message = new FakeInvocationMessage
@@ -43,27 +41,20 @@ public class ActivityTracingMiddlewareTests
             Message = message
         };
 
-        // Act
-        await middleware.InvokeAsync(context, () => Task.CompletedTask);
-
-        // Assert
-        // Middleware disposes the Activity it creates,
-        // so capturing the Activity during testing is safer using an ActivityListener.
-        // Here, a simple approach: capture the last span via ActivityListener.
-
         Activity? captured = null;
         using var listener = new ActivityListener
         {
-            ShouldListenTo = s => s.Name == _sourceHolder.Source.Name,
+            ShouldListenTo = s => s.Name == sourceName,
             Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
             ActivityStopped = a => captured = a
         };
 
         ActivitySource.AddActivityListener(listener);
 
-        // Run again (this time the listener will see the span)
+        // Act
         await middleware.InvokeAsync(context, () => Task.CompletedTask);
 
+        // Assert
         Assert.NotNull(captured);
         Assert.Equal("Saga.FakeSagaHandler", captured!.DisplayName);
 
@@ -81,7 +72,8 @@ public class ActivityTracingMiddlewareTests
         // Arrange
         Activity.Current = null;
 
-        var middleware = new ActivityTracingMiddleware(_sourceHolder, _dummyAccessor, _logger);
+        using var sourceHolder = CreateSourceHolder(out var sourceName);
+        var middleware = new ActivityTracingMiddleware(sourceHolder, _dummyAccessor, _logger);
 
         var sagaId = Guid.NewGuid();
         var message = new FakeInvocationMessage
@@ -101,7 +93,7 @@ public class ActivityTracingMiddlewareTests
         Activity? captured = null;
         using var listener = new ActivityListener
         {
-            ShouldListenTo = s => s.Name == _sourceHolder.Source.Name,
+            ShouldListenTo = s => s.Name == sourceName,
             Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
             ActivityStopped = a => captured = a
         };
@@ -118,6 +110,12 @@ public class ActivityTracingMiddlewareTests
     }
 
     // --- Fake types for tests ---
+
+    private static LyciaActivitySourceHolder CreateSourceHolder(out string sourceName)
+    {
+        sourceName = $"Lycia.Tests.{Guid.NewGuid():N}";
+        return new LyciaActivitySourceHolder(new ActivitySource(sourceName));
+    }
 
     private sealed class DummySagaContextAccessor : ISagaContextAccessor
     {
