@@ -32,8 +32,18 @@ public sealed class TopologyManifestWorker(
             ? manager.TransportName
             : eventBus.GetType().Name.Replace("EventBus", string.Empty).ToLowerInvariant();
         var canonicalApplicationKey = EndpointIdentityNormalizer.Default.Normalize(eventBus.ApplicationId);
+        var ownedResources = new HashSet<string>(StringComparer.Ordinal);
         foreach (var pair in topology)
         {
+            var messageKind = MessageKindResolver.Resolve(pair.Value.MessageType);
+            if (!TryToScheduledKind(messageKind, out var scheduledKind))
+            {
+                logger.LogDebug(
+                    "Skipping topology manifest resource {ResourceName} because message type {MessageType} has no command, event, or response semantic",
+                    pair.Key, pair.Value.MessageType.FullName);
+                continue;
+            }
+            ownedResources.Add(pair.Key);
             await resources.UpsertAsync(new SchedulingResourceRecord
             {
                 ResourceId = pair.Key,
@@ -42,7 +52,7 @@ public sealed class TopologyManifestWorker(
                 CanonicalName = pair.Key,
                 CanonicalApplicationKey = canonicalApplicationKey,
                 MessageType = pair.Value.MessageType.AssemblyQualifiedName,
-                MessageKind = ToScheduledKind(MessageKindResolver.Resolve(pair.Value.MessageType)),
+                MessageKind = scheduledKind,
                 Destination = pair.Key,
                 ManagementMode = SchedulingResourceManagementMode.LyciaManaged,
                 Lifecycle = SchedulingResourceLifecycle.Active,
@@ -61,19 +71,30 @@ public sealed class TopologyManifestWorker(
             InstanceId = _instanceId,
             StartedAtUtc = _startedAtUtc,
             LastHeartbeatAtUtc = now,
-            OwnedResources = new HashSet<string>(topology.Keys, StringComparer.Ordinal)
+            OwnedResources = ownedResources
         };
         await registry.HeartbeatAsync(manifest, cancellationToken).ConfigureAwait(false);
         return manifest;
     }
 
-    private static ScheduledMessageKind ToScheduledKind(MessageKind kind) => kind switch
+    private static bool TryToScheduledKind(MessageKind kind, out ScheduledMessageKind scheduledKind)
     {
-        MessageKind.Command => ScheduledMessageKind.Command,
-        MessageKind.Event => ScheduledMessageKind.Event,
-        MessageKind.Response => ScheduledMessageKind.Response,
-        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unsupported topology message kind.")
-    };
+        switch (kind)
+        {
+            case MessageKind.Command:
+                scheduledKind = ScheduledMessageKind.Command;
+                return true;
+            case MessageKind.Event:
+                scheduledKind = ScheduledMessageKind.Event;
+                return true;
+            case MessageKind.Response:
+                scheduledKind = ScheduledMessageKind.Response;
+                return true;
+            default:
+                scheduledKind = default;
+                return false;
+        }
+    }
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

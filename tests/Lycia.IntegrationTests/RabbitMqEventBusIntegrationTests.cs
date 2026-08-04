@@ -14,6 +14,7 @@ using Lycia.Saga.Messaging;
 using Lycia.Saga.Messaging.Handlers;
 using Microsoft.Extensions.Logging.Abstractions;
 using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
 using Testcontainers.RabbitMq;
 
 namespace Lycia.IntegrationTests;
@@ -371,13 +372,14 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task PublishThenConsume_Event_Succeeds()
     {
-        var applicationId = "TestApp";
+        var applicationId = "EventSingle" + Guid.NewGuid().ToString("N");
         var handlerType = typeof(TestEventHandlerA);
+        var queueName = MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType, applicationId);
 
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
             {
-                MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType, applicationId),
+                queueName,
                 (typeof(TestEvent), typeof(TestEventHandlerA))
             }
         };
@@ -429,24 +431,27 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         received.Should().BeTrue();
 
         await eventBus.DisposeAsync();
+        await CleanupQueuesAsync(RabbitMqConnectionString, queueName);
     }
 
     [Fact]
     public async Task PublishThenConsume_Event_MultiConsumer_Succeeds()
     {
-        var applicationId = "TestApp";
+        var applicationId = "EventMulti" + Guid.NewGuid().ToString("N");
         var handlerType1 = typeof(TestEventHandlerA);
         var handlerType2 = typeof(TestEventHandlerB);
+        var queueName1 = MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType1, applicationId);
+        var queueName2 = MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType2, applicationId);
 
         // Separate queueTypeMap entry for each handler
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
             {
-                MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType1, applicationId),
+                queueName1,
                 (typeof(TestEvent), typeof(TestEventHandlerA))
             },
             {
-                MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType2, applicationId),
+                queueName2,
                 (typeof(TestEvent), typeof(TestEventHandlerB))
             }
         };
@@ -501,6 +506,8 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         receivedCount.Should().Be(2);
 
         await eventBus.DisposeAsync();
+        await CleanupQueuesAsync(RabbitMqConnectionString, queueName1);
+        await CleanupQueuesAsync(RabbitMqConnectionString, queueName2);
     }
 
     [Fact]
@@ -508,12 +515,14 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
     {
         var applicationId = "TestApp";
         var handlerType = typeof(TestCommandHandlerA);
+        var queueName = MessagingNamingHelper.GetQueueName(typeof(TestCommand), handlerType, applicationId);
+        await CleanupQueuesAsync(RabbitMqConnectionString, queueName);
 
         // Only a single consumer/queue mapping for command (point-to-point)
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
             {
-                MessagingNamingHelper.GetQueueName(typeof(TestCommand), handlerType, applicationId),
+                queueName,
                 (typeof(TestCommand), typeof(TestCommandHandlerA))
             }
         };
@@ -565,6 +574,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         received.Should().BeTrue();
 
         await eventBus.DisposeAsync();
+        await CleanupQueuesAsync(RabbitMqConnectionString, queueName);
     }
 
     [Fact]
@@ -675,6 +685,120 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         }
         delivered.Should().NotBeNull();
         delivered!.Body.ToArray().Should().Equal(1, 2, 3);
+    }
+
+    [Fact]
+    public async Task Native_dynamic_schedule_delivers_no_earlier_than_due_preserves_metadata_and_vacuums_conditionally()
+    {
+        var applicationId = "DynamicScheduleTest" + Guid.NewGuid().ToString("N");
+        var options = new EventBusOptions
+        {
+            ApplicationId = applicationId,
+            ConnectionString = RabbitMqConnectionString
+        };
+        var serializer = new NewtonsoftJsonMessageSerializer();
+        await using var bus = await RabbitMqEventBus.CreateAsync(
+            NullLogger<RabbitMqEventBus>.Instance, new Dictionary<string, (Type, Type)>(), options, serializer);
+        var finalExchange = MessagingNamingHelper.GetExchangeName(typeof(TestEvent));
+        var finalQueue = "lycia.schedule.dynamic.integration." + Guid.NewGuid().ToString("N");
+        var factory = new ConnectionFactory { Uri = new Uri(RabbitMqConnectionString) };
+        await using var connection = await factory.CreateConnectionAsync(CancellationToken.None);
+        await using var channel = await connection.CreateChannelAsync(cancellationToken: CancellationToken.None);
+        await channel.ExchangeDeclareAsync(finalExchange, ExchangeType.Fanout, durable: true, autoDelete: false);
+        await channel.QueueDeclareAsync(finalQueue, durable: false, exclusive: false, autoDelete: true);
+        await channel.QueueBindAsync(finalQueue, finalExchange, string.Empty);
+        var messageId = Guid.NewGuid();
+        var correlationId = Guid.NewGuid();
+        var causationId = Guid.NewGuid();
+        var sagaId = Guid.NewGuid();
+        var record = new ScheduleRecord
+        {
+            ScheduleId = Guid.NewGuid(),
+            MessageId = messageId,
+            CorrelationId = correlationId,
+            CausationId = causationId,
+            ParentMessageId = causationId,
+            SagaId = sagaId,
+            MessageType = typeof(TestEvent).AssemblyQualifiedName!,
+            MessageKind = ScheduledMessageKind.Event,
+            Destination = applicationId,
+            DueAtUtc = DateTimeOffset.UtcNow.AddSeconds(2),
+            ScheduledAtUtc = DateTimeOffset.UtcNow,
+            Status = ScheduleStatus.Pending,
+            Payload = [4, 5, 6],
+            Headers = new Dictionary<string, object?>
+            {
+                ["MessageId"] = messageId.ToString(),
+                ["CorrelationId"] = correlationId.ToString(),
+                ["CausationId"] = causationId.ToString(),
+                ["ParentMessageId"] = causationId.ToString(),
+                ["SagaId"] = sagaId.ToString()
+            },
+            IsPredefined = false,
+            DelaySuffix = "2000ms",
+            IdempotencyKey = "delay:2000ms"
+        };
+
+        var resourceName = await bus.ScheduleNativeAsync(new NativeScheduleEnvelope
+        {
+            Record = record,
+            Delay = TimeSpan.FromSeconds(2)
+        });
+        resourceName.Should().NotBeNullOrWhiteSpace();
+        var resource = new SchedulingResourceRecord
+        {
+            ResourceId = resourceName!,
+            CanonicalName = resourceName!,
+            Transport = "rabbitmq",
+            ResourceType = "queue",
+            ManagementMode = SchedulingResourceManagementMode.DynamicScheduling,
+            IsDynamic = true
+        };
+
+        (await bus.DeleteConditionallyAsync(resource)).Should().BeFalse("the delay queue still contains a message");
+        await Task.Delay(500);
+        (await channel.BasicGetAsync(finalQueue, autoAck: true, cancellationToken: CancellationToken.None))
+            .Should().BeNull("RabbitMQ must not deliver a scheduled message before its TTL");
+
+        BasicGetResult? delivered = null;
+        var deliveryDeadline = DateTimeOffset.UtcNow.AddSeconds(10);
+        while (delivered == null && DateTimeOffset.UtcNow < deliveryDeadline)
+        {
+            delivered = await channel.BasicGetAsync(finalQueue, autoAck: true, cancellationToken: CancellationToken.None);
+            if (delivered == null) await Task.Delay(100);
+        }
+        delivered.Should().NotBeNull();
+        delivered!.Body.ToArray().Should().Equal(4, 5, 6);
+        delivered.BasicProperties.MessageId.Should().Be(messageId.ToString("D"));
+        HeaderText(delivered, "CorrelationId").Should().Be(correlationId.ToString());
+        HeaderText(delivered, "CausationId").Should().Be(causationId.ToString());
+        HeaderText(delivered, "ParentMessageId").Should().Be(causationId.ToString());
+        HeaderText(delivered, "SagaId").Should().Be(sagaId.ToString());
+
+        await using var manager = await RabbitMqEventBus.CreateAsync(
+            NullLogger<RabbitMqEventBus>.Instance, new Dictionary<string, (Type, Type)>(), options, serializer);
+        var state = await manager.InspectAsync(resource);
+        state.Exists.Should().BeTrue();
+        state.MessageCount.Should().Be(0);
+        state.ConsumerCount.Should().Be(0);
+        state.OwnershipProven.Should().BeTrue();
+
+        var consumer = new AsyncEventingBasicConsumer(channel);
+        consumer.ReceivedAsync += (_, _) => Task.CompletedTask;
+        var consumerTag = await channel.BasicConsumeAsync(resourceName!, autoAck: true, consumer);
+        (await manager.DeleteConditionallyAsync(resource)).Should().BeFalse("the queue has an active consumer");
+        await channel.BasicCancelAsync(consumerTag);
+
+        await using var finalManager = await RabbitMqEventBus.CreateAsync(
+            NullLogger<RabbitMqEventBus>.Instance, new Dictionary<string, (Type, Type)>(), options, serializer);
+        (await finalManager.DeleteConditionallyAsync(resource)).Should().BeTrue();
+        (await finalManager.InspectAsync(resource)).Exists.Should().BeFalse();
+    }
+
+    private static string HeaderText(BasicGetResult delivery, string name)
+    {
+        delivery.BasicProperties.Headers.Should().ContainKey(name);
+        return Encoding.UTF8.GetString((byte[])delivery.BasicProperties.Headers![name]!);
     }
 
 // Dummy command handler for test

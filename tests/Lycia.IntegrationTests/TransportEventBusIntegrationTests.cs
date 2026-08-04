@@ -20,10 +20,14 @@ public sealed class NatsEventBusIntegrationTests : IAsyncLifetime
 {
     private readonly IContainer? _container;
     private readonly string? _externalUrl;
+    private readonly string _streamName;
 
     public NatsEventBusIntegrationTests()
     {
         _externalUrl = Environment.GetEnvironmentVariable("LYCIA_NATS_URL");
+        _streamName = string.IsNullOrWhiteSpace(_externalUrl)
+            ? $"LYCIA_{Guid.NewGuid():N}"
+            : "LYCIA_INTEGRATION_TESTS";
         if (string.IsNullOrWhiteSpace(_externalUrl))
             _container = new ContainerBuilder()
                 .WithImage("nats:2.11-alpine")
@@ -43,18 +47,17 @@ public sealed class NatsEventBusIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task JetStream_preserves_command_ownership_and_independent_event_subscriptions()
     {
-        var stream = $"LYCIA_{Guid.NewGuid():N}";
         var ownerOptions = new NatsEventBusOptions
         {
             Url = NatsUrl,
             ApplicationId = "OwnerService",
-            StreamName = stream
+            StreamName = _streamName
         };
         var senderOptions = new NatsEventBusOptions
         {
             Url = ownerOptions.Url,
             ApplicationId = "RequesterService",
-            StreamName = stream
+            StreamName = _streamName
         };
         var queue = MessagingNamingHelper.GetQueueName(
             typeof(OwnedCommand), typeof(OwnedCommandHandler), ownerOptions.ApplicationId);
@@ -105,18 +108,17 @@ public sealed class NatsEventBusIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task Nats_uses_durable_worker_when_native_delay_is_unavailable()
     {
-        var stream = $"LYCIA_{Guid.NewGuid():N}";
         var ownerOptions = new NatsEventBusOptions
         {
             Url = NatsUrl,
             ApplicationId = "OwnerService",
-            StreamName = stream
+            StreamName = _streamName
         };
         var senderOptions = new NatsEventBusOptions
         {
             Url = ownerOptions.Url,
             ApplicationId = "RequesterService",
-            StreamName = stream,
+            StreamName = _streamName,
             SchedulingMode = NatsSchedulingMode.FallbackToWorker
         };
         var map = new Dictionary<string, (Type, Type)>
@@ -137,16 +139,36 @@ public sealed class NatsEventBusIntegrationTests : IAsyncLifetime
         var command = new OwnedCommand { Value = "nats-scheduled" };
         var scheduleId = await scheduler.ScheduleAsync(command, new OwnedCommand(), typeof(OwnedCommandHandler),
             Guid.NewGuid(), ScheduleDelay.FiveSeconds, cancellationToken: timeout.Token);
-        (await store.GetAsync(scheduleId))!.Strategy.Should().Be(SchedulingStrategy.DurableWorker);
+        var persisted = (await store.GetAsync(scheduleId))!;
+        persisted.Strategy.Should().Be(SchedulingStrategy.DurableWorker);
+        var nativeCapability = (INativeSchedulingTransport)publisher;
+        var nativeEnvelope = new NativeScheduleEnvelope
+        {
+            Record = persisted,
+            Delay = TimeSpan.FromSeconds(5)
+        };
+        (await nativeCapability.CanScheduleAsync(nativeEnvelope, timeout.Token)).Should().BeFalse();
+        await Assert.ThrowsAsync<NotSupportedException>(() =>
+            nativeCapability.ScheduleNativeAsync(nativeEnvelope, timeout.Token));
 
-        clock.Advance(TimeSpan.FromSeconds(5));
         var worker = new SchedulerWorker(store, new EventBusSchedulingDispatcher(publisher, serializer), clock,
             Options.Create(new SchedulingOptions()), NullLogger<SchedulerWorker>.Instance);
+        (await worker.RunOnceAsync(timeout.Token)).Should().Be(0);
+        receive.IsCompleted.Should().BeFalse("NATS fallback must not dispatch before the due time");
+        clock.Advance(TimeSpan.FromSeconds(5));
         (await worker.RunOnceAsync(timeout.Token)).Should().Be(1);
 
         var incoming = await receive;
         incoming.MessageType.Should().Be(typeof(OwnedCommand));
+        incoming.Headers["MessageId"].Should().Be(persisted.MessageId.ToString());
+        incoming.Headers["CorrelationId"].Should().Be(persisted.CorrelationId.ToString());
+        incoming.Headers["CausationId"].Should().Be(persisted.CausationId!.Value.ToString());
+        incoming.Headers["ParentMessageId"].Should().Be(persisted.ParentMessageId.ToString());
+        incoming.Headers["SagaId"].Should().Be(persisted.SagaId!.Value.ToString());
         (await store.GetAsync(scheduleId))!.Status.Should().Be(ScheduleStatus.Completed);
+        var restartedWorker = new SchedulerWorker(store, new EventBusSchedulingDispatcher(publisher, serializer), clock,
+            Options.Create(new SchedulingOptions()), NullLogger<SchedulerWorker>.Instance);
+        (await restartedWorker.RunOnceAsync(timeout.Token)).Should().Be(0);
     }
 
     private static async Task<IncomingMessage> ReceiveOneAsync(
@@ -297,13 +319,14 @@ public sealed class KafkaEventBusIntegrationTests : IAsyncLifetime
         await using var publisher = new KafkaEventBus(new Dictionary<string, (Type, Type)>(), senderOptions, serializer);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var received = new TaskCompletionSource<IncomingMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var deliveryCount = 0;
         var pump = Task.Run(async () =>
         {
             await foreach (var incoming in consumer.ConsumeWithAckAsync(timeout.Token))
             {
                 await incoming.Ack();
+                Interlocked.Increment(ref deliveryCount);
                 received.TrySetResult(incoming);
-                return;
             }
         }, timeout.Token);
         await Task.Delay(3000, timeout.Token);
@@ -314,14 +337,34 @@ public sealed class KafkaEventBusIntegrationTests : IAsyncLifetime
         var command = new OwnedCommand { Value = "kafka-scheduled" };
         var scheduleId = await scheduler.ScheduleAsync(command, new OwnedCommand(), typeof(OwnedCommandHandler),
             Guid.NewGuid(), ScheduleDelay.FiveSeconds, cancellationToken: timeout.Token);
-        clock.Advance(TimeSpan.FromSeconds(5));
         var worker = new SchedulerWorker(store, new EventBusSchedulingDispatcher(publisher, serializer), clock,
             Options.Create(new SchedulingOptions()), NullLogger<SchedulerWorker>.Instance);
 
+        (await worker.RunOnceAsync(timeout.Token)).Should().Be(0);
+        received.Task.IsCompleted.Should().BeFalse("Kafka scheduling must not dispatch before the due time");
+        clock.Advance(TimeSpan.FromSeconds(5));
+        var abandonedClaim = await store.ClaimDueAsync(clock.UtcNow, 1, "crashed-worker", TimeSpan.FromSeconds(2),
+            timeout.Token);
+        abandonedClaim.Should().ContainSingle();
+        clock.Advance(TimeSpan.FromSeconds(3));
         (await worker.RunOnceAsync(timeout.Token)).Should().Be(1);
-        (await received.Task.WaitAsync(timeout.Token)).MessageType.Should().Be(typeof(OwnedCommand));
+        var incoming = await received.Task.WaitAsync(timeout.Token);
+        incoming.MessageType.Should().Be(typeof(OwnedCommand));
+        var persisted = (await store.GetAsync(scheduleId))!;
+        incoming.Headers["MessageId"].Should().Be(persisted.MessageId.ToString());
+        incoming.Headers["CorrelationId"].Should().Be(persisted.CorrelationId.ToString());
+        incoming.Headers["CausationId"].Should().Be(persisted.CausationId!.Value.ToString());
+        incoming.Headers["ParentMessageId"].Should().Be(persisted.ParentMessageId.ToString());
+        incoming.Headers["SagaId"].Should().Be(persisted.SagaId!.Value.ToString());
         (await store.GetAsync(scheduleId))!.Status.Should().Be(ScheduleStatus.Completed);
-        await pump;
+        var restartedWorker = new SchedulerWorker(store, new EventBusSchedulingDispatcher(publisher, serializer), clock,
+            Options.Create(new SchedulingOptions()), NullLogger<SchedulerWorker>.Instance);
+        (await restartedWorker.RunOnceAsync(timeout.Token)).Should().Be(0);
+        await Task.Delay(1000, timeout.Token);
+        Volatile.Read(ref deliveryCount).Should().Be(1, "a reclaimed schedule must be dispatched exactly once");
+        timeout.Cancel();
+        try { await pump; }
+        catch (OperationCanceledException) { }
     }
 
     private static async Task PumpAsync(

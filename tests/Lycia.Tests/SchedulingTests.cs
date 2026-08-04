@@ -283,6 +283,29 @@ public sealed class SchedulingTests
         Assert.Contains("validated NATS 2.11 baseline", error.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Topology_manifest_skips_generic_messages_without_disabling_supported_heartbeats()
+    {
+        var resources = new InMemorySchedulingResourceRegistry();
+        var manifests = new InMemoryTopologyManifestRegistry();
+        var topology = new Dictionary<string, (Type MessageType, Type HandlerType)>
+        {
+            ["message.generic"] = (typeof(Messages.DummyEvent), typeof(SchedulingTests)),
+            ["command.supported"] = (typeof(TestCommand), typeof(SchedulingTests))
+        };
+        var worker = new TopologyManifestWorker(manifests, resources, new RecordingEventBus(), topology,
+            new ManualSchedulingClock(DateTimeOffset.Parse("2030-01-01T00:00:00Z")),
+            Options.Create(new SchedulingOptions()), NullLogger<TopologyManifestWorker>.Instance);
+
+        var manifest = await worker.HeartbeatOnceAsync();
+
+        Assert.DoesNotContain("message.generic", manifest.OwnedResources);
+        Assert.Contains("command.supported", manifest.OwnedResources);
+        Assert.Null(await resources.GetAsync("message.generic"));
+        Assert.Equal(ScheduledMessageKind.Command,
+            (await resources.GetAsync("command.supported"))!.MessageKind);
+    }
+
     private static ScheduleRecord Record(DateTimeOffset dueAtUtc) => new()
     {
         ScheduleId = Guid.NewGuid(),
