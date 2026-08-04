@@ -66,10 +66,102 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ResponseProducedByOneReplica_IsContinuedByAnotherReplica_FromSharedRedisState()
+    {
+        const string producerApplicationId = "Replica-App";
+        const string consumerApplicationId = "replica_app";
+        var producerQueue = MessagingNamingHelper.GetResponseQueueName(
+            typeof(ReplicaResponse), producerApplicationId);
+        var consumerQueue = MessagingNamingHelper.GetResponseQueueName(
+            typeof(ReplicaResponse), consumerApplicationId);
+        producerQueue.Should().Be(consumerQueue);
+
+        var queueTypeMap = new Dictionary<string, (Type, Type)>
+        {
+            [producerQueue] = (typeof(ReplicaResponse), typeof(FailingSagaHandler))
+        };
+        var serializer = new NewtonsoftJsonMessageSerializer();
+        await using var producerBus = await RabbitMqEventBus.CreateAsync(
+            NullLogger<RabbitMqEventBus>.Instance,
+            queueTypeMap,
+            new EventBusOptions
+            {
+                ApplicationId = producerApplicationId,
+                MessageTTL = TimeSpan.FromMinutes(1),
+                ConnectionString = RabbitMqConnectionString
+            },
+            serializer);
+        await using var consumerBus = await RabbitMqEventBus.CreateAsync(
+            NullLogger<RabbitMqEventBus>.Instance,
+            queueTypeMap,
+            new EventBusOptions
+            {
+                ApplicationId = consumerApplicationId,
+                MessageTTL = TimeSpan.FromMinutes(1),
+                ConnectionString = RabbitMqConnectionString
+            },
+            serializer);
+
+        await using var redisA = await ConnectionMultiplexer.ConnectAsync(RedisEndpoint);
+        await using var redisB = await ConnectionMultiplexer.ConnectAsync(RedisEndpoint);
+        var storeA = new RedisSagaStore(
+            redisA.GetDatabase(), producerBus, null!, null!,
+            new SagaStoreOptions { ApplicationId = producerApplicationId, StepLogTtl = TimeSpan.FromMinutes(5) });
+        var storeB = new RedisSagaStore(
+            redisB.GetDatabase(), consumerBus, null!, null!,
+            new SagaStoreOptions { ApplicationId = consumerApplicationId, StepLogTtl = TimeSpan.FromMinutes(5) });
+
+        var sagaId = Guid.NewGuid();
+        var workflowId = Guid.NewGuid();
+        await storeA.SaveSagaDataAsync(sagaId, new DummySagaData { SomeField = "persisted-by-replica-a" });
+        var request = new TestSagaCommand
+        {
+            SagaId = sagaId,
+            CorrelationId = workflowId,
+            RequestId = Guid.Empty,
+            ResponseEndpoint = producerApplicationId,
+            Message = "produced-by-replica-a"
+        };
+        request.RequestId = request.MessageId;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        var continuation = Task.Run(async () =>
+        {
+            await foreach (var incoming in consumerBus.ConsumeWithAckAsync(timeout.Token))
+            {
+                await incoming.Ack();
+                var normalized = serializer.NormalizeTransportHeaders(incoming.Headers);
+                var (_, context) = serializer.CreateContextFor(typeof(ReplicaResponse));
+                var received = (ReplicaResponse)serializer.Deserialize(incoming.Body, normalized, context);
+                var loaded = await storeB.LoadSagaDataAsync<DummySagaData>(received.SagaId!.Value);
+                return (Response: received, State: loaded);
+            }
+
+            throw new InvalidOperationException("Replica B response consumer completed early.");
+        }, timeout.Token);
+
+        await Task.Delay(300, timeout.Token);
+        await producerBus.Respond(
+            request,
+            new ReplicaResponse { Message = "continued-by-replica-b" },
+            cancellationToken: timeout.Token);
+
+        var result = await continuation.WaitAsync(timeout.Token);
+        result.State.SomeField.Should().Be("persisted-by-replica-a");
+        result.Response.SagaId.Should().Be(sagaId);
+        result.Response.CorrelationId.Should().Be(workflowId);
+        result.Response.RequestId.Should().Be(request.MessageId);
+        result.Response.CausationId.Should().Be(request.MessageId);
+        result.Response.ParentMessageId.Should().Be(request.MessageId);
+        result.Response.ResponseEndpoint.Should().Be("replicaapp");
+        result.Response.MessageId.Should().NotBe(request.MessageId);
+    }
+
+    [Fact]
     public async Task CompensationChain_Should_Be_Idempotent_For_Multiple_Compensation_Attempts()
     {
         // Arrange: Setup saga chain handlers (grandparent -> parent -> child)
-        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTests)}:{nameof(SagaChain_Should_Compensate_On_Failure)}:{Guid.NewGuid():N}";
+        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTests)}-{nameof(SagaChain_Should_Compensate_On_Failure)}-{Guid.NewGuid():N}";
         var handlerTypeGrandparent = typeof(GrandparentCompensationSagaHandler);
         var handlerTypeParent = typeof(ParentCompensationSagaHandler);
         var handlerTypeChild = typeof(ChildCompensationSagaHandler);
@@ -85,17 +177,26 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
             { SagaId = sagaId, MessageId = grandparentId, Message = "grandparent" };
         var parentMsg = new DummyParentEvent
             { SagaId = sagaId, MessageId = parentId, ParentMessageId = grandparentId, Message = "parent" };
-        var childMsg = new DummyChildEvent
-            { SagaId = sagaId, MessageId = childId, ParentMessageId = parentId, Message = "trigger-failure" };
+        var childMsg = new RoutedDummyChildEvent
+        {
+            SagaId = sagaId,
+            MessageId = childId,
+            ParentMessageId = parentId,
+            RequestId = Guid.NewGuid(),
+            CausationId = Guid.NewGuid(),
+            Message = "trigger-failure"
+        };
+        childMsg.RequestId.Should().NotBe(parentId);
+        childMsg.CausationId.Should().NotBe(parentId);
 
         // EventBus and Redis-backed SagaStore setup
-        var grandParentQueueName = Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyGrandparentEvent),
+        var grandParentQueueName = Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyGrandparentEvent),
             handlerTypeGrandparent, applicationId);
         var parentQueueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyParentEvent), handlerTypeParent,
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyParentEvent), handlerTypeParent,
                 applicationId);
         var childQueueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyChildEvent), handlerTypeChild, applicationId);
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyChildEvent), handlerTypeChild, applicationId);
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
             { grandParentQueueName, (typeof(DummyGrandparentEvent), typeof(GrandparentCompensationSagaHandler)) },
@@ -201,7 +302,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
     public async Task CompensationChain_Should_Halt_If_Child_Is_CompensationFailed()
     {
         // Arrange: Setup saga chain handlers (grandparent -> parent -> child)
-        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTests)}:{nameof(SagaChain_Should_Compensate_On_Failure)}:{Guid.NewGuid():N}";
+        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTests)}-{nameof(SagaChain_Should_Compensate_On_Failure)}-{Guid.NewGuid():N}";
         var handlerTypeGrandparent = typeof(GrandparentCompensationSagaHandler);
         var handlerTypeParent = typeof(ParentCompensationSagaHandler);
         var handlerTypeChild = typeof(ChildCompensationSagaHandler);
@@ -225,13 +326,13 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         };
 
         // EventBus and Redis-backed SagaStore setup
-        var grandParentQueueName = Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyGrandparentEvent),
+        var grandParentQueueName = Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyGrandparentEvent),
             handlerTypeGrandparent, applicationId);
         var parentQueueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyParentEvent), handlerTypeParent,
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyParentEvent), handlerTypeParent,
                 applicationId);
         var childQueueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyChildEvent), handlerTypeChild, applicationId);
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyChildEvent), handlerTypeChild, applicationId);
         
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
@@ -323,7 +424,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
     public async Task CompensationChain_Should_Recursively_Compensate_Parent_And_Grandparent_When_Child_Is_Compensated()
     {
         // Arrange: Setup saga chain handlers (grandparent -> parent -> child)
-        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTests)}:{nameof(SagaChain_Should_Compensate_On_Failure)}:{Guid.NewGuid():N}";
+        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTests)}-{nameof(SagaChain_Should_Compensate_On_Failure)}-{Guid.NewGuid():N}";
         var handlerTypeGrandparent = typeof(GrandparentCompensationSagaHandler);
         var handlerTypeParent = typeof(ParentCompensationSagaHandler);
         var handlerTypeChild = typeof(ChildCompensationSagaHandler);
@@ -349,13 +450,13 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         };
 
         // EventBus and Redis-backed SagaStore setup
-        var grandParentQueueName = Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyGrandparentEvent),
+        var grandParentQueueName = Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyGrandparentEvent),
             handlerTypeGrandparent, applicationId);
         var parentQueueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyParentEvent), handlerTypeParent,
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyParentEvent), handlerTypeParent,
                 applicationId);
         var childQueueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyChildEvent), handlerTypeChild, applicationId);
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyChildEvent), handlerTypeChild, applicationId);
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
             { grandParentQueueName, (typeof(DummyGrandparentEvent), typeof(GrandparentCompensationSagaHandler)) },
@@ -453,7 +554,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         CompensationChain_Should_Recursively_Compensate_Parent_And_Grandparent_When_Steps_Are_Compensated()
     {
         // Arrange: Setup the saga chain with grandparent -> parent -> child handlers.
-        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTests)}:{nameof(SagaChain_Should_Compensate_On_Failure)}:{Guid.NewGuid():N}";
+        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTests)}-{nameof(SagaChain_Should_Compensate_On_Failure)}-{Guid.NewGuid():N}";
         var handlerTypeGrandparent = typeof(GrandparentCompensationHandler);
         var handlerTypeParent = typeof(ParentCompensationHandler);
         var handlerTypeChild = typeof(ChildCompensationHandler);
@@ -473,7 +574,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
 
         // Configure EventBus (RabbitMQ) and SagaStore (Redis).
         var queueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyEvent), handlerTypeChild, applicationId);
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyEvent), handlerTypeChild, applicationId);
         var queueTypeMap = new Dictionary<string, (Type, Type)> { { queueName, (typeof(DummyEvent), typeof(ChildCompensationHandler)) } };
         var serializer = new NewtonsoftJsonMessageSerializer();
         var eventBusOptions = new EventBusOptions
@@ -547,11 +648,11 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
     public async Task SagaChain_Should_Compensate_On_Failure()
     {
         // Arrange: Set up EventBus and Redis-backed SagaStore
-        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTests)}:{nameof(SagaChain_Should_Compensate_On_Failure)}:{Guid.NewGuid():N}";
+        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTests)}-{nameof(SagaChain_Should_Compensate_On_Failure)}-{Guid.NewGuid():N}";
         var handlerType = typeof(FailingSagaHandler);
 
         var queueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(TestSagaCommand), handlerType, applicationId);
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(TestSagaCommand), handlerType, applicationId);
         var queueTypeMap = new Dictionary<string, (Type, Type)> { { queueName, (typeof(TestSagaCommand), typeof(FailingSagaHandler)) } };
         var eventBusOptions = new EventBusOptions
         {
@@ -612,7 +713,10 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
                     // Log step as Failed on exception
                     if (msg.Message == "trigger-failure")
                     {
-                        await sagaStore.LogStepAsync(msg.SagaId.Value, starterMessageId, null, typeof(TestSagaCommand),
+                        if (msg.SagaId is not { } sagaId)
+                            throw new InvalidOperationException("A saga identifier is required for compensation.");
+
+                        await sagaStore.LogStepAsync(sagaId, starterMessageId, null, typeof(TestSagaCommand),
                             StepStatus.Failed, handlerType, msg, (SagaStepFailureInfo?)null);
                         finished.TrySetResult(true);
                         throw new InvalidOperationException("Intentional failure for compensation.");
@@ -647,7 +751,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         // Assert: Message should have been received
         receivedMessages.Should().ContainSingle(x => x.Message == "trigger-failure");
 
-        // Assert: Redis log should contain Failed adım
+        // Assert: the Redis log should contain a failed step.
         var sagaSteps = await sagaStore.GetSagaHandlerStepsAsync(testCommand.SagaId.Value);
         sagaSteps.Should().Contain(x => x.Value.Status == StepStatus.Failed);
 
@@ -655,9 +759,30 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
     }
 
     // Dummy saga command
-    private class TestSagaCommand : CommandBase
+    private interface ITestAppCommand : ICommand, ICommandEndpoint { }
+
+    private class TestSagaCommand : CommandBase, ITestAppCommand
     {
         public string Message { get; set; } = string.Empty;
+    }
+
+    private sealed class ReplicaResponse : ResponseBase<TestSagaCommand>
+    {
+        public string Message { get; set; } = string.Empty;
+    }
+
+    private sealed class RoutedDummyChildEvent : DummyChildEvent, IRequestRoutingMetadata
+    {
+        public Guid RequestId { get; set; }
+        public string? ResponseEndpoint { get; set; }
+
+#pragma warning disable CS0618
+        public string? ReplyTo
+        {
+            get => ResponseEndpoint;
+            set => ResponseEndpoint = value;
+        }
+#pragma warning restore CS0618
     }
 
     // Dummy handler that always throws (simulates saga failure and compensation path)

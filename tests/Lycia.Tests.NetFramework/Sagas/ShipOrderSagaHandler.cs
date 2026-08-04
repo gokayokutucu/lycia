@@ -15,7 +15,7 @@ public class ShipOrderSagaHandler : CoordinatedSagaHandler<OrderCreatedEvent, Cr
         try
         {
             // Simulated logic
-            const bool stockAvailable = true; // Simulate failure
+            var stockAvailable = true; // Test seam for simulating availability.
             
             if (!stockAvailable)
             {

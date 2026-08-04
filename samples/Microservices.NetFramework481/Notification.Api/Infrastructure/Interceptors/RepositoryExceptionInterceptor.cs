@@ -78,7 +78,7 @@ public class RepositoryExceptionInterceptor : IInterceptor
         }
     }
 
-    private static string SerializeToJson(object obj)
+    private static string SerializeToJson(object? obj)
     {
         try
         {

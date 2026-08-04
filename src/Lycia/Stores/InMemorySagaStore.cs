@@ -32,6 +32,7 @@ public class InMemorySagaStore(
     // Stores step logs per sagaId with a composite key "stepTypeName_handlerTypeFullName"
     private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<string, SagaStepMetadata>> _stepLogs = new();
 
+    /// <inheritdoc />
     public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
         Type handlerType, object? payload, Exception? exception)
     {
@@ -39,6 +40,7 @@ public class InMemorySagaStore(
             new SagaStepFailureInfo("Exception occurred", exception?.GetType().Name, exception?.ToString()  ));
     }
     
+    /// <inheritdoc />
     public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
         Type handlerType, object? payload, SagaStepFailureInfo? failureInfo)
     {
@@ -118,6 +120,7 @@ public class InMemorySagaStore(
         return Task.FromResult(StepStatus.None);
     }
 
+    /// <inheritdoc />
     public Task<KeyValuePair<(string stepType, string handlerType, string messageId), SagaStepMetadata>?>
         GetSagaHandlerStepAsync(Guid sagaId, Guid messageId)
     {
@@ -180,6 +183,7 @@ public class InMemorySagaStore(
 
     }
     
+    /// <inheritdoc />
     public Task<IMessage?> LoadSagaStepMessageAsync(Guid sagaId, Type stepType)
     {
         if (!_stepLogs.TryGetValue(sagaId, out var steps)) return Task.FromResult<IMessage?>(null);
@@ -207,6 +211,7 @@ public class InMemorySagaStore(
         return Task.FromResult<IMessage?>(null);
     }
 
+    /// <inheritdoc />
     public Task<IMessage?> LoadSagaStepMessageAsync(Guid sagaId, Guid messageId)
     {
         if (!_stepLogs.TryGetValue(sagaId, out var steps)) return Task.FromResult<IMessage?>(null);
@@ -233,6 +238,7 @@ public class InMemorySagaStore(
         return Task.FromResult<IMessage?>(null);
     }
 
+    /// <inheritdoc />
     public Task<TSagaData> LoadSagaDataAsync<TSagaData>(Guid sagaId)
         where TSagaData : SagaData, new()
     {
@@ -245,6 +251,7 @@ public class InMemorySagaStore(
         return Task.FromResult(defaultData);
     }
 
+    /// <inheritdoc />
     public Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data)
         where TSagaData : SagaData
     {
@@ -255,6 +262,7 @@ public class InMemorySagaStore(
         return Task.CompletedTask;
     }
 
+    /// <inheritdoc />
     public Task<ISagaContext<TMessage, TSagaData>> LoadContextAsync<TMessage, TSagaData>(Guid sagaId, TMessage message,
         Type handlerType)
         where TMessage : IMessage

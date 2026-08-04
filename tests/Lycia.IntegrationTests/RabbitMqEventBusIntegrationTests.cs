@@ -8,6 +8,7 @@ using Lycia.Extensions.Eventing;
 using Lycia.Extensions.Serialization;
 
 using Lycia.Helpers;
+using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Messaging;
 using Lycia.Saga.Messaging.Handlers;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -51,7 +52,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
 
         var applicationId = "TestApp";
         var handlerType = typeof(TestEventHandlerA);
-        var queueName = MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType, applicationId);
+        var queueName = MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType, applicationId);
 
         // Clean up before test (best practice for integration tests)
         var factory = new ConnectionFactory { Uri = new Uri(RabbitMqConnectionString) };
@@ -159,7 +160,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
     {
         var applicationId = "TestApp";
         var handlerType = typeof(TestEventHandlerA);
-        var queueName = MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType, applicationId);
+        var queueName = MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType, applicationId);
 
         await CleanupQueuesAsync(RabbitMqConnectionString, queueName);
 
@@ -226,7 +227,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
     {
         var applicationId = "TestApp";
         var handlerType = typeof(TestEventHandlerA);
-        var queueName = MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType, applicationId);
+        var queueName = MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType, applicationId);
 
         await CleanupQueuesAsync(RabbitMqConnectionString, queueName);
 
@@ -285,6 +286,76 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task TargetedResponse_NackToDlq_PreservesRequestAndCausationMetadata()
+    {
+        var applicationId = $"Response-Dlq-{Guid.NewGuid():N}";
+        var queueName = MessagingNamingHelper.GetResponseQueueName(typeof(TestResponse), applicationId);
+        await CleanupQueuesAsync(RabbitMqConnectionString, queueName);
+        var serializer = new NewtonsoftJsonMessageSerializer();
+        var queueTypeMap = new Dictionary<string, (Type, Type)>
+        {
+            [queueName] = (typeof(TestResponse), typeof(TestCommandHandlerA))
+        };
+        var options = new EventBusOptions
+        {
+            ApplicationId = applicationId,
+            MessageTTL = TimeSpan.FromMinutes(1),
+            ConnectionString = RabbitMqConnectionString
+        };
+        await using var bus = await RabbitMqEventBus.CreateAsync(
+            NullLogger<RabbitMqEventBus>.Instance, queueTypeMap, options, serializer);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        var consume = Task.Run(async () =>
+        {
+            await foreach (var incoming in bus.ConsumeWithAckAsync(timeout.Token))
+            {
+                await incoming.Nack(false);
+                return;
+            }
+        }, timeout.Token);
+
+        await Task.Delay(250, timeout.Token);
+        var sagaId = Guid.NewGuid();
+        var workflowId = Guid.NewGuid();
+        var request = new TestCommand
+        {
+            SagaId = sagaId,
+            CorrelationId = workflowId,
+            ResponseEndpoint = applicationId,
+            Message = "request-for-dlq"
+        };
+        request.RequestId = request.MessageId;
+        await bus.Respond(
+            request,
+            new TestResponse { Message = "response-for-dlq" },
+            cancellationToken: timeout.Token);
+        await consume.WaitAsync(timeout.Token);
+
+        var factory = new ConnectionFactory { Uri = new Uri(RabbitMqConnectionString) };
+        await using var connection = await factory.CreateConnectionAsync(CancellationToken.None);
+        await using var channel = await connection.CreateChannelAsync(cancellationToken: CancellationToken.None);
+        var dlqResult = await channel.BasicGetAsync(
+            queueName + ".dlq", autoAck: true, cancellationToken: CancellationToken.None);
+        dlqResult.Should().NotBeNull();
+        var normalized = serializer.NormalizeTransportHeaders(
+            new Dictionary<string, object?>(
+                dlqResult.BasicProperties.Headers ?? new Dictionary<string, object?>()));
+        var (_, context) = serializer.CreateContextFor(typeof(TestResponse));
+        var response = (TestResponse)serializer.Deserialize(dlqResult.Body.ToArray(), normalized, context);
+
+        response.Message.Should().Be("response-for-dlq");
+        response.MessageId.Should().NotBe(request.MessageId);
+        response.RequestId.Should().Be(request.MessageId);
+        response.CorrelationId.Should().Be(workflowId);
+        response.CausationId.Should().Be(request.MessageId);
+        response.ParentMessageId.Should().Be(request.MessageId);
+        response.SagaId.Should().Be(sagaId);
+        response.ResponseEndpoint.Should().Be(
+            Lycia.Messaging.EndpointIdentityNormalizer.Default.Normalize(applicationId));
+    }
+
+    [Fact]
     public async Task PublishThenConsume_Event_Succeeds()
     {
         var applicationId = "TestApp";
@@ -293,7 +364,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
             {
-                MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType, applicationId),
+                MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType, applicationId),
                 (typeof(TestEvent), typeof(TestEventHandlerA))
             }
         };
@@ -358,11 +429,11 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
             {
-                MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType1, applicationId),
+                MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType1, applicationId),
                 (typeof(TestEvent), typeof(TestEventHandlerA))
             },
             {
-                MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType2, applicationId),
+                MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType2, applicationId),
                 (typeof(TestEvent), typeof(TestEventHandlerB))
             }
         };
@@ -429,7 +500,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
             {
-                MessagingNamingHelper.GetRoutingKey(typeof(TestCommand), handlerType, applicationId),
+                MessagingNamingHelper.GetQueueName(typeof(TestCommand), handlerType, applicationId),
                 (typeof(TestCommand), typeof(TestCommandHandlerA))
             }
         };
@@ -483,6 +554,61 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         await eventBus.DisposeAsync();
     }
 
+    [Fact]
+    public async Task Respond_TargetsCanonicalEndpoint_AndPreservesIdentityMetadata()
+    {
+        var applicationId = "Test-App";
+        var queueName = MessagingNamingHelper.GetResponseQueueName(typeof(TestResponse), applicationId);
+        var queueTypeMap = new Dictionary<string, (Type, Type)>
+        {
+            [queueName] = (typeof(TestResponse), typeof(TestCommandHandlerA))
+        };
+        var consumerOptions = new EventBusOptions
+        {
+            ApplicationId = applicationId,
+            MessageTTL = TimeSpan.FromMinutes(1),
+            ConnectionString = RabbitMqConnectionString
+        };
+        var serializer = new NewtonsoftJsonMessageSerializer();
+        await using var consumerBus = await RabbitMqEventBus.CreateAsync(
+            NullLogger<RabbitMqEventBus>.Instance, queueTypeMap, consumerOptions, serializer);
+        var producerOptions = new EventBusOptions
+        {
+            ApplicationId = "test_app",
+            MessageTTL = TimeSpan.FromMinutes(1),
+            ConnectionString = RabbitMqConnectionString
+        };
+        await using var producerBus = await RabbitMqEventBus.CreateAsync(
+            NullLogger<RabbitMqEventBus>.Instance,
+            new Dictionary<string, (Type, Type)>(), producerOptions, serializer);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        var receive = Task.Run(async () =>
+        {
+            await foreach (var incoming in consumerBus.ConsumeWithAckAsync(timeout.Token))
+            {
+                await incoming.Ack();
+                var normalized = serializer.NormalizeTransportHeaders(incoming.Headers);
+                var (_, context) = serializer.CreateContextFor(typeof(TestResponse));
+                return (TestResponse)serializer.Deserialize(incoming.Body, normalized, context);
+            }
+            throw new InvalidOperationException("RabbitMQ response consumer completed early.");
+        }, timeout.Token);
+
+        await Task.Delay(300, timeout.Token);
+        var request = new TestCommand { SagaId = Guid.NewGuid(), Message = "request" };
+        await producerBus.Send(request, cancellationToken: timeout.Token);
+        var response = new TestResponse { Message = "response" };
+        await producerBus.Respond(request, response, cancellationToken: timeout.Token);
+
+        var received = await receive.WaitAsync(timeout.Token);
+        received.RequestId.Should().Be(request.MessageId);
+        received.MessageId.Should().NotBe(request.MessageId);
+        received.CausationId.Should().Be(request.MessageId);
+        received.ParentMessageId.Should().Be(request.MessageId);
+        received.ResponseEndpoint.Should().Be("testapp");
+    }
+
 // Dummy command handler for test
     private class TestCommandHandlerA : StartReactiveSagaHandler<TestCommand>
     {
@@ -491,7 +617,14 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
     }
 
 // Test command for Send
-    private class TestCommand : CommandBase
+    private interface ITestAppCommand : ICommand, ICommandEndpoint { }
+
+    private class TestCommand : CommandBase, ITestAppCommand
+    {
+        public string Message { get; set; } = string.Empty;
+    }
+
+    private sealed class TestResponse : ResponseBase<TestCommand>
     {
         public string Message { get; set; } = string.Empty;
     }

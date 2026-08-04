@@ -101,7 +101,7 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
     public async Task CompensationChain_Should_Be_Idempotent_For_Multiple_Compensation_Attempts()
     {
         // Arrange: Setup saga chain handlers (grandparent -> parent -> child)
-        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTestsNetFramework)}:{nameof(SagaChain_Should_Compensate_On_Failure)}:{Guid.NewGuid():N}";
+        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTestsNetFramework)}-{nameof(SagaChain_Should_Compensate_On_Failure)}-{Guid.NewGuid():N}";
         var handlerTypeGrandparent = typeof(GrandparentCompensationSagaHandler);
         var handlerTypeParent = typeof(ParentCompensationSagaHandler);
         var handlerTypeChild = typeof(ChildCompensationSagaHandler);
@@ -121,13 +121,13 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
             { SagaId = sagaId, MessageId = childId, ParentMessageId = parentId, Message = "trigger-failure" };
 
         // EventBus and Redis-backed SagaStore setup
-        var grandParentQueueName = Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyGrandparentEvent),
+        var grandParentQueueName = Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyGrandparentEvent),
             handlerTypeGrandparent, applicationId);
         var parentQueueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyParentEvent), handlerTypeParent,
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyParentEvent), handlerTypeParent,
                 applicationId);
         var childQueueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyChildEvent), handlerTypeChild, applicationId);
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyChildEvent), handlerTypeChild, applicationId);
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
             { grandParentQueueName, (typeof(DummyGrandparentEvent), typeof(GrandparentCompensationSagaHandler)) },
@@ -233,7 +233,7 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
     public async Task CompensationChain_Should_Halt_If_Child_Is_CompensationFailed()
     {
         // Arrange: Setup saga chain handlers (grandparent -> parent -> child)
-        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTestsNetFramework)}:{nameof(SagaChain_Should_Compensate_On_Failure)}:{Guid.NewGuid():N}";
+        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTestsNetFramework)}-{nameof(SagaChain_Should_Compensate_On_Failure)}-{Guid.NewGuid():N}";
         var handlerTypeGrandparent = typeof(GrandparentCompensationSagaHandler);
         var handlerTypeParent = typeof(ParentCompensationSagaHandler);
         var handlerTypeChild = typeof(ChildCompensationSagaHandler);
@@ -257,13 +257,13 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
         };
 
         // EventBus and Redis-backed SagaStore setup
-        var grandParentQueueName = Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyGrandparentEvent),
+        var grandParentQueueName = Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyGrandparentEvent),
             handlerTypeGrandparent, applicationId);
         var parentQueueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyParentEvent), handlerTypeParent,
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyParentEvent), handlerTypeParent,
                 applicationId);
         var childQueueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyChildEvent), handlerTypeChild, applicationId);
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyChildEvent), handlerTypeChild, applicationId);
         
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
@@ -358,7 +358,7 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
     public async Task CompensationChain_Should_Recursively_Compensate_Parent_And_Grandparent_When_Child_Is_Compensated()
     {
         // Arrange: Setup saga chain handlers (grandparent -> parent -> child)
-        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTestsNetFramework)}:{nameof(SagaChain_Should_Compensate_On_Failure)}:{Guid.NewGuid():N}";
+        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTestsNetFramework)}-{nameof(SagaChain_Should_Compensate_On_Failure)}-{Guid.NewGuid():N}";
         var handlerTypeGrandparent = typeof(GrandparentCompensationSagaHandler);
         var handlerTypeParent = typeof(ParentCompensationSagaHandler);
         var handlerTypeChild = typeof(ChildCompensationSagaHandler);
@@ -384,13 +384,13 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
         };
 
         // EventBus and Redis-backed SagaStore setup
-        var grandParentQueueName = Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyGrandparentEvent),
+        var grandParentQueueName = Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyGrandparentEvent),
             handlerTypeGrandparent, applicationId);
         var parentQueueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyParentEvent), handlerTypeParent,
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyParentEvent), handlerTypeParent,
                 applicationId);
         var childQueueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyChildEvent), handlerTypeChild, applicationId);
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyChildEvent), handlerTypeChild, applicationId);
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
             { grandParentQueueName, (typeof(DummyGrandparentEvent), typeof(GrandparentCompensationSagaHandler)) },
@@ -488,7 +488,7 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
         CompensationChain_Should_Recursively_Compensate_Parent_And_Grandparent_When_Steps_Are_Compensated()
     {
         // Arrange: Setup the saga chain with grandparent -> parent -> child handlers.
-        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTestsNetFramework)}:{nameof(SagaChain_Should_Compensate_On_Failure)}:{Guid.NewGuid():N}";
+        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTestsNetFramework)}-{nameof(SagaChain_Should_Compensate_On_Failure)}-{Guid.NewGuid():N}";
         var handlerTypeGrandparent = typeof(GrandparentCompensationHandler);
         var handlerTypeParent = typeof(ParentCompensationHandler);
         var handlerTypeChild = typeof(ChildCompensationHandler);
@@ -508,7 +508,7 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
 
         // Configure EventBus (RabbitMQ) and SagaStore (Redis).
         var queueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyEvent), handlerTypeChild, applicationId);
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyEvent), handlerTypeChild, applicationId);
         var queueTypeMap = new Dictionary<string, (Type, Type)> { { queueName, (typeof(DummyEvent), typeof(ChildCompensationHandler)) } };
         var serializer = new NewtonsoftJsonMessageSerializer();
         var eventBusOptions = new EventBusOptions
@@ -582,11 +582,11 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
     public async Task SagaChain_Should_Compensate_On_Failure()
     {
         // Arrange: Set up EventBus and Redis-backed SagaStore
-        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTestsNetFramework)}:{nameof(SagaChain_Should_Compensate_On_Failure)}:{Guid.NewGuid():N}";
+        var applicationId = $"{nameof(RabbitMqSagaCompensationIntegrationTestsNetFramework)}-{nameof(SagaChain_Should_Compensate_On_Failure)}-{Guid.NewGuid():N}";
         var handlerType = typeof(FailingSagaHandler);
 
         var queueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(TestSagaCommand), handlerType, applicationId);
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(TestSagaCommand), handlerType, applicationId);
         var queueTypeMap = new Dictionary<string, (Type, Type)> { { queueName, (typeof(TestSagaCommand), typeof(FailingSagaHandler)) } };
         var eventBusOptions = new EventBusOptions
         {
@@ -647,7 +647,10 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
                     // Log step as Failed on exception
                     if (msg.Message == "trigger-failure")
                     {
-                        await sagaStore.LogStepAsync(msg.SagaId.Value, starterMessageId, null, typeof(TestSagaCommand),
+                        if (msg.SagaId is not { } sagaId)
+                            throw new InvalidOperationException("A saga identifier is required for compensation.");
+
+                        await sagaStore.LogStepAsync(sagaId, starterMessageId, null, typeof(TestSagaCommand),
                             StepStatus.Failed, handlerType, msg, (SagaStepFailureInfo?)null);
                         finished.TrySetResult(true);
                         throw new InvalidOperationException("Intentional failure for compensation.");
@@ -683,7 +686,7 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
         // Assert: Message should have been received
         receivedMessages.Should().ContainSingle(x => x.Message == "trigger-failure");
 
-        // Assert: Redis log should contain Failed adım
+        // Assert: the Redis log should contain a failed step.
         var sagaSteps = await sagaStore.GetSagaHandlerStepsAsync(testCommand.SagaId.Value);
         sagaSteps.Should().Contain(x => x.Value.Status == StepStatus.Failed);
 
@@ -691,7 +694,9 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
     }
 
     // Dummy saga command
-    private class TestSagaCommand : CommandBase
+    private interface ITestAppCommand : ICommand, ICommandEndpoint { }
+
+    private class TestSagaCommand : CommandBase, ITestAppCommand
     {
         public string Message { get; set; } = string.Empty;
     }

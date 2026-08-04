@@ -37,12 +37,14 @@ public sealed class SerilogLoggingMiddleware(
         _ => LogEventLevel.Information
     };
 
+    /// <inheritdoc />
     public async Task InvokeAsync(IInvocationContext context, Func<Task> next)
     {
+        var sagaId = context.SagaId ?? accessor?.Current?.SagaId;
         void OnRetry(RetryContext rc)
         {
             _logger
-                .ForContext("SagaId", context.SagaId, false)
+                .ForContext("SagaId", sagaId, false)
                 .ForContext("MessageId", context.Message.MessageId, false)
                 .ForContext("CorrelationId", context.Message.CorrelationId, false)
                 .ForContext("Handler", context.HandlerType.Name, false)

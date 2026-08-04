@@ -572,7 +572,7 @@ public class SagaDispatcherTests
         {
             await dispatcher.DispatchAsync(command, handlerType: typeof(CreateOrderSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
         }
-        catch (Exception e)
+        catch (Exception)
         {
             throw;
         }
@@ -623,7 +623,7 @@ public class SagaDispatcherTests
         Assert.True(TestStartReactiveCompensateHandler.CompensateCalled);
     }
 
-    public class InitialCommand : CommandBase
+    public class InitialCommand : CommandBase, ITestAppCommand
     {
     }
 

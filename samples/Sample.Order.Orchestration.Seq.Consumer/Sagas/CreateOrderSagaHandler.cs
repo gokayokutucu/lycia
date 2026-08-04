@@ -21,11 +21,12 @@ public class CreateOrderSagaHandler :
     
     public override async Task HandleStartAsync(CreateOrderCommand command, CancellationToken cancellationToken = default)
     {
-        await Context.SendWithTracking(new ReserveInventoryCommand
-        {
-            OrderId = command.OrderId,
-        }, cancellationToken)
-        .ThenMarkAsComplete();
+        await Context
+            .SendWithTracking(new ReserveInventoryCommand
+            {
+                OrderId = command.OrderId,
+            }, cancellationToken)
+            .ThenMarkAsComplete();
     }
 
     public override async Task CompensateStartAsync(CreateOrderCommand message, CancellationToken cancellationToken = default)

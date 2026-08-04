@@ -1,5 +1,4 @@
 using System.Web.Http;
-using MediatR;
 using Sample.Product.NetFramework481.API.Filters;
 
 namespace Sample.Product.NetFramework481.API.Controllers;
@@ -9,7 +8,7 @@ namespace Sample.Product.NetFramework481.API.Controllers;
 /// </summary>
 [RoutePrefix("api/products")]
 [GatewayOnlyFilter]
-public sealed class ProductsController(IMediator mediator) : ApiController
+public sealed class ProductsController : ApiController
 {
 
 }

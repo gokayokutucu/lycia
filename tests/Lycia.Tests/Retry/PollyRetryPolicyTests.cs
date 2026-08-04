@@ -30,7 +30,7 @@ namespace Lycia.Tests.Retry
             await policy.ExecuteAsync(Flaky, CancellationToken.None);
 
             // Assert
-            Assert.Equal(3, attempts); // 2 retry + 1 başarı
+            Assert.Equal(3, attempts); // Two retries plus one successful attempt.
             return;
 
             Task Flaky()

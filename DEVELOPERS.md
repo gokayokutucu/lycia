@@ -4,6 +4,26 @@ This document provides an in-depth look into the architecture, components, confi
 
 ---
 
+## Request-response implementation contract
+
+Use `Context.Send` for owned commands, `Context.Respond` for targeted replies, and `Context.Publish` only
+for facts. The context centralizes identity propagation. Commands get a fresh `MessageId`, self
+`RequestId`, and current correlation, saga, causation, parent and response endpoint. Responses get a
+fresh identity, the request `MessageId` as request, causation and parent, and the waiting application's
+canonical endpoint. Events get workflow and lineage metadata but no request metadata. Redelivery
+preserves all identities.
+
+`ParentMessageId` alone drives compensation and bubble-up; `RequestId` matches a pair and `CausationId`
+traces the direct cause. Responses are not events and every transport rejects response publication.
+
+`EndpointIdentityNormalizer` produces invariant lowercase ASCII-alphanumeric keys, ignoring dash,
+underscore, dot and whitespace. RabbitMQ, NATS, Kafka and in-memory topology use this one key. A change
+from raw resource names is operator-managed: never auto-delete or silently bind both forms.
+
+Lycia ownership is not global broker exclusivity. Independent RabbitMQ queues, NATS groups/durables, or
+Kafka groups can consume the same logical stream. Processing is at least once, business effects must be
+idempotent, and Kafka ordering is partition-scoped.
+
 ## 🚀 Architecture Overview
 
 ### Core Components
@@ -21,6 +41,73 @@ This document provides an in-depth look into the architecture, components, confi
 - **SagaContext**
   - Manages step state and message-specific state.
   - Includes methods like `MarkAsComplete<T>()`, `MarkAsFailed<T>()`, `MarkAsCancelled<T>()`
+
+## Message Topology and Ownership
+
+Lycia derives topology from message contracts and discovered handlers. Applications do not maintain a
+manual route registry. `ApplicationId` names a logical service and is identical across every replica; it
+must never contain a pod, host, process, or container identity.
+
+### Contract rules
+
+- A command implements exactly one application endpoint marker inheriting `ICommandEndpoint`.
+- Endpoint markers are named `I{LogicalOwner}Command`; for example, `IStockServiceCommand` resolves to
+  `StockService`. The transformation is centralized in `CommandEndpointResolver` and is ordinal and
+  deterministic.
+- A command has exactly one handler type in its owning logical application. Multiple instances of that
+  handler are valid replicas and are not duplicate registrations.
+- An event may have any number of subscriptions. Each `MessageType + HandlerType + ApplicationId`
+  combination is an independent logical subscription; replicas share it.
+- A response targets the requesting application from canonical `ResponseEndpoint`; obsolete `ReplyTo`
+  remains a forwarding compatibility alias. `RequestId`, `CorrelationId`, and
+  `SagaId` correlate it without creating per-saga transport resources.
+
+Startup validation rejects missing or multiple endpoint markers, wrong `ApplicationId`, and conflicting
+command handler types. Owner matching uses `StringComparison.OrdinalIgnoreCase`; generated names retain
+the configured spelling. Errors include the command, handlers, expected owner, and actual application.
+
+### Transport mapping
+
+| Semantic identity | RabbitMQ | NATS JetStream | Kafka |
+|---|---|---|---|
+| Command address | direct exchange `command.{Type}`; key `{Owner}` | `command.{Owner}.{Type}` | `{prefix}.command.{Owner}.{Type}` |
+| Command consumer | `command.{Type}.{ApplicationId}` | durable consumer from the logical command queue | one consumer group from the logical command queue |
+| Event address | fanout exchange `event.{Type}` | `event.{Type}` | `{prefix}.event.{Type}` |
+| Event consumer | `event.{Type}.{Handler}.{ApplicationId}` | one durable consumer per handler/application | one group per handler/application |
+| Response address | direct exchange `response.{Type}`; key `{ResponseEndpoint}` | `response.{ResponseEndpoint}.{Type}` | `{prefix}.response.{ResponseEndpoint}.{Type}` |
+| Response consumer | `response.{Type}.{ApplicationId}` | requester durable consumer | requester consumer group |
+
+RabbitMQ queues are durable, non-exclusive, and non-auto-delete. Event routing keys are empty because a
+per-type fanout exchange performs distribution. Commands never use `#`; their queue identity excludes the
+handler class, so renaming a handler does not create a new queue.
+
+JetStream is the NATS default and uses explicit acknowledgments, bounded redelivery, and durable consumers.
+Core NATS can be selected for intentionally ephemeral workloads only; it cannot retain a saga command while
+subscribers are absent.
+
+Kafka commits an offset only after listener acknowledgment. Ordering is partition-scoped and the stable key
+preference is `CorrelationId`, then `SagaId`, then `MessageId`. Only one consumer in a group processes a
+partition at a time, so replicas above the partition count remain idle. Kafka transactions do not remove
+the need for application idempotency.
+
+### Replica semantics
+
+Three `StockService` pods all use `ApplicationId = StockService` and share the same command queue or group.
+They are competing consumers: one logical handler type, many runtime instances. Values such as
+`StockService-1` and `StockService-2` represent different logical applications and therefore create
+independent subscriptions. This can duplicate event processing and defeats replica competition.
+
+The topology is intentionally at-least-once. A broker failure after a side effect but before acknowledgment
+can redeliver a message, so handlers remain idempotent.
+
+### Migration from handler-derived command routing
+
+Commands must now implement one `I{Owner}Command` marker. Missing markers fail clearly; there is no silent
+namespace or handler-name fallback. Existing `Send(command, handlerType, ...)` signatures remain source
+compatible, but `handlerType` is correlation/tracing context and no longer determines command transport
+routing. `MessagingNamingHelper.GetRoutingKey` and topic-style helpers are obsolete compatibility APIs;
+new code uses `GetQueueName` and the message-kind-specific topology components. Events retain handler names
+because distinct handlers are distinct subscriptions.
 
 ---
 
@@ -155,10 +242,11 @@ For questions or contributions, feel free to open an issue or start a discussion
 Lycia enforces a consistent naming convention across store and bus implementations to enhance clarity and maintainability. Use a unique `ApplicationId` per service/consumer and always bind queues with concrete handler types to avoid cross-service collisions.
 
 - **MessagingNamingHelper (RabbitMQ bindings)**
-  - Consumer queue/routing key format: `{event|command|response}.{MessageType}.{HandlerType}.{ApplicationId}` (e.g., `event.OrderCreatedEvent.CreateOrderSagaHandler.OrderService`)
-  - Publisher topic pattern: `{event|command|response}.{MessageType}.#` – used only when publishing, never for queue declarations
-  - Exchange name: `{event|command|response}.{MessageType}`; shared between publishers and consumers
-  - Keep handler types non-generic and `ApplicationId` unique per service to prevent queues from overlapping
+  - Command queue: `command.{MessageType}.{ApplicationId}`; direct binding key is the marker-derived owner.
+  - Event queue: `event.{MessageType}.{HandlerType}.{ApplicationId}`; the per-type exchange is fanout.
+  - Response queue: `response.{MessageType}.{ApplicationId}`; direct binding and publish keys target the requester.
+  - Exchange names remain `{event|command|response}.{MessageType}`.
+  - Keep `ApplicationId` unique per logical service and identical across its replicas.
 
 - **RedisSagaStore / InMemorySagaStore**
   - Step metadata keys use `step:{StepName}:handler:{HandlerName}:message-id:{MessageId}`

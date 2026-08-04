@@ -13,6 +13,7 @@ using System.Diagnostics;
 
 namespace Lycia.Extensions.Listener;
 
+/// <summary>Consumes transport messages, restores tracing and metadata, dispatches handlers, and acknowledges outcomes.</summary>
 public class RabbitMqListener(
     IServiceProvider serviceProvider,
     IEventBus eventBus,
@@ -22,6 +23,7 @@ public class RabbitMqListener(
 #if NET8_0_OR_GREATER
 : BackgroundService
 {
+    /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
 #elif NETSTANDARD2_0
 : IDisposable
@@ -31,6 +33,7 @@ public class RabbitMqListener(
     private readonly object startLock = new();
     private volatile bool isStarted;
 
+    /// <summary>Starts the background consumer thread on .NET Standard hosts.</summary>
     public void Start()
     {
         lock (startLock)
@@ -66,6 +69,7 @@ public class RabbitMqListener(
         }
     }
 
+    /// <summary>Consumes and dispatches messages until cancellation is requested.</summary>
     protected async Task ExecuteAsync(CancellationToken stoppingToken)
 #endif
     {
@@ -159,6 +163,7 @@ public class RabbitMqListener(
         logger.LogInformation("RabbitMqListener stopped");
     }
 #if NETSTANDARD2_0
+    /// <inheritdoc />
     public void Dispose()
     {
         lock (startLock)

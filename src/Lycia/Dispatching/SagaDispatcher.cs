@@ -45,12 +45,14 @@ public class SagaDispatcher(
         await InvokeHandlerAsync(handler, message, sagaId, cancellationToken: cancellationToken);
     }
 
+    /// <summary>Dispatches a command or event to the resolved saga handler through the configured middleware pipeline.</summary>
     public async Task DispatchAsync<TMessage>(TMessage message, Type? handlerType, Guid? sagaId,
         CancellationToken cancellationToken) where TMessage : IMessage
     {
              await DispatchByMessageTypeAsync(message, handlerType, sagaId, cancellationToken);
     }
 
+    /// <summary>Dispatches a strongly typed response to its request handler without publishing it as an event.</summary>
     public async Task DispatchAsync<TMessage, TResponse>(TResponse message, Type? handlerType, Guid? sagaId,
         CancellationToken cancellationToken)
         where TMessage : IMessage
@@ -66,7 +68,10 @@ public class SagaDispatcher(
 
         if (IsSuccessResponse(messageType))
         {
-            logger?.LogInformation("Dispatching {Message} to {Handler}", messageType.Name, handlerType!.Name);
+            if (handlerType is null)
+                throw new InvalidOperationException($"No handler is registered for response '{messageType.FullName}'.");
+
+            logger.LogInformation("Dispatching {Message} to {Handler}", messageType.Name, handlerType.Name);
             await InvokeHandlerAsync(serviceProvider.GetServices(handlerType), message,
                 cancellationToken: cancellationToken);
         }

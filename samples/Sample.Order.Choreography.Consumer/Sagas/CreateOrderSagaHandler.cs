@@ -23,8 +23,7 @@ public class CreateOrderSagaHandler :
     {
         await Context.Publish(new OrderCreatedEvent
         {
-            OrderId = cmd.OrderId,
-            ParentMessageId = cmd.MessageId
+            OrderId = cmd.OrderId
         }, cancellationToken);
         await Context.MarkAsComplete<CreateOrderCommand>();
     }

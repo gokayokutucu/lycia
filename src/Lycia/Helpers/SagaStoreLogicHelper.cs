@@ -4,14 +4,17 @@
 
 namespace Lycia.Helpers;
 
+/// <summary>Provides shared type-name and step-key logic for saga-store implementations.</summary>
 public static class SagaStoreLogicHelper
 {
+    /// <summary>Returns the assembly-qualified message type name stored with a saga step.</summary>
     public static string GetMessageTypeName(Type stepType)
     {
         return stepType.AssemblyQualifiedName 
                ?? throw new InvalidOperationException($"Step type {stepType.FullName} does not have an AssemblyQualifiedName");
     }
 
+    /// <summary>Parses a persisted step key into step type, handler type, and message identifier components.</summary>
     public static (string stepType, string handlerType, string messageId) ParseStepKey(string key)
     {
         // Parse Redis/in-memory key and return tuple or null for malformed

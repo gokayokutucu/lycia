@@ -17,6 +17,7 @@ public static class SagaTestHelper
             var stepTypeFullName = typeof(TMessage).FullName;
             var handlerTypeFullName = typeof(THandler).FullName;
             return stepTypeFullName != null &&
+                   handlerTypeFullName != null &&
                    x.Key.stepType.Contains(stepTypeFullName) &&
                    x.Key.handlerType.Contains(handlerTypeFullName);
         });

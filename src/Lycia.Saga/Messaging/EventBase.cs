@@ -13,7 +13,8 @@ public abstract class EventBase : IEvent
     {
         SagaId = Guid.Empty;
         MessageId = GuidV7.NewGuidV7();
-        ParentMessageId = Guid.Empty; // CausationId
+        ParentMessageId = Guid.Empty;
+        CausationId = null;
         CorrelationId = MessageId;
         Timestamp = DateTime.UtcNow;
         ApplicationId  = EventMetadata.ApplicationId;
@@ -23,7 +24,8 @@ public abstract class EventBase : IEvent
     {
         SagaId = sagaId;
         MessageId = GuidV7.NewGuidV7();
-        ParentMessageId = Guid.Empty; // CausationId
+        ParentMessageId = Guid.Empty;
+        CausationId = null;
         CorrelationId = MessageId;
         Timestamp = DateTime.UtcNow;
         ApplicationId  = EventMetadata.ApplicationId;
@@ -33,14 +35,16 @@ public abstract class EventBase : IEvent
     {
         SagaId = sagaId;
         MessageId = GuidV7.NewGuidV7();
-        ParentMessageId = parentMessageId ?? Guid.Empty; // CausationId
+        ParentMessageId = parentMessageId ?? Guid.Empty;
+        CausationId = null;
         CorrelationId = correlationId ?? MessageId;
         Timestamp = DateTime.UtcNow;
         ApplicationId  = EventMetadata.ApplicationId;
     }
 
     public Guid MessageId { get; set; }
-    public Guid ParentMessageId { get; set; } // CausationId
+    public Guid ParentMessageId { get; set; }
+    public Guid? CausationId { get; set; }
     public Guid CorrelationId { get; set; }
 
     public DateTime Timestamp { get; set; }

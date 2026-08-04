@@ -6,6 +6,7 @@ using Lycia.Extensions;
 
 namespace Lycia.Helpers;
 
+/// <summary>Builds stable storage keys for saga steps and their handlers.</summary>
 public static class NamingHelper
 {
     //TODO: “TypeName:Version” can be add to the end of the step name to ensure uniqueness across different versions of the same step.

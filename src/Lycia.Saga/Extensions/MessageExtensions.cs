@@ -18,4 +18,17 @@ public static class MessageExtensions
         };
         return next;
     }
+
+    /// <summary>Compatibility helper that copies request routing metadata without changing message identity.</summary>
+    [Obsolete("Use Context.Respond(request, response), which initializes complete response identity and routing metadata.")]
+    public static void PropagateResponseRouting(this IMessage outgoing, IMessage current)
+    {
+        if (!(outgoing is IRequestRoutingMetadata response) ||
+            !(current is IRequestRoutingMetadata request))
+            return;
+
+        response.RequestId = current.MessageId;
+        if (string.IsNullOrWhiteSpace(response.ResponseEndpoint))
+            response.ResponseEndpoint = request.ResponseEndpoint;
+    }
 }

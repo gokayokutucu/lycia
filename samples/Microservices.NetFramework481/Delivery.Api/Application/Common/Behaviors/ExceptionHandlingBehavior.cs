@@ -77,7 +77,7 @@ public class ExceptionHandlingBehavior<TRequest, TResponse> : IPipelineBehavior<
         }
     }
 
-    private static string SerializeToJson(object obj)
+    private static string SerializeToJson(object? obj)
     {
         try
         {

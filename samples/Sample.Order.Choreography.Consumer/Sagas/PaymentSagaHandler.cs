@@ -12,13 +12,12 @@ public class PaymentSagaHandler : ReactiveSagaHandler<InventoryReservedEvent>
 {
     public override async Task HandleAsync(InventoryReservedEvent evt, CancellationToken cancellationToken = default)
     {
-        var ok = PaymentService.SimulatePayment(false);
+        var ok = PaymentService.SimulatePayment(!SampleScenario.FailPayment);
         if (!ok)
         {
             await Context.Publish(new PaymentFailedEvent
             {
-                OrderId = evt.OrderId,
-                ParentMessageId = evt.MessageId
+                OrderId = evt.OrderId
             }, cancellationToken);
 
             // Mark only this step as failed (step logging/metrics)
@@ -28,8 +27,7 @@ public class PaymentSagaHandler : ReactiveSagaHandler<InventoryReservedEvent>
 
         await Context.Publish(new PaymentSucceededEvent
         {
-            OrderId = evt.OrderId,
-            ParentMessageId = evt.MessageId
+            OrderId = evt.OrderId
         }, cancellationToken);
         await Context.MarkAsComplete<InventoryReservedEvent>();
     }

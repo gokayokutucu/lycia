@@ -1,5 +1,4 @@
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                using System.Web.Http;
-using MediatR;
 using Sample.Delivery.NetFramework481.API.Filters;
 
 namespace Sample.Delivery.NetFramework481.API.Controllers;
@@ -9,7 +8,7 @@ namespace Sample.Delivery.NetFramework481.API.Controllers;
 /// </summary>
 [RoutePrefix("api/deliveries")]
 [GatewayOnlyFilter]
-public sealed class DeliveriesController(IMediator mediator) : ApiController
+public sealed class DeliveriesController : ApiController
 {
 
 }

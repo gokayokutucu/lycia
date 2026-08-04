@@ -11,6 +11,7 @@ using System.Text;
 
 namespace Lycia.Extensions.Serialization;
 
+/// <summary>Serializes Lycia messages as UTF-8 JSON while preserving explicit contract metadata in transport headers.</summary>
 public sealed class NewtonsoftJsonMessageSerializer : IMessageSerializer
 {
     private static readonly JsonSerializerSettings Settings = new()
@@ -28,8 +29,10 @@ public sealed class NewtonsoftJsonMessageSerializer : IMessageSerializer
     private const string H_Content = "content-type"; // "application/json"
     private const string H_Version = "lycia-schema-ver";
 
+    /// <inheritdoc />
     public string ContentTypeHeaderKey  => H_Content;
 
+    /// <inheritdoc />
     public (byte[] Body, IReadOnlyDictionary<string, object?> Headers) Serialize(
         object message,
         IMessageSerializationContext ctx)
@@ -82,6 +85,7 @@ public sealed class NewtonsoftJsonMessageSerializer : IMessageSerializer
 
 
 
+    /// <inheritdoc />
     public object Deserialize(
         ReadOnlyMemory<byte> body,
         IReadOnlyDictionary<string, object?> headers,
@@ -165,6 +169,7 @@ public sealed class NewtonsoftJsonMessageSerializer : IMessageSerializer
         return normalized;
     }
     
+    /// <inheritdoc />
     public (IReadOnlyDictionary<string, object?> Headers, IMessageSerializationContext Ctx)
         CreateContextFor(Type payloadType, string? schemaId = null, string? schemaVersion = null)
     {

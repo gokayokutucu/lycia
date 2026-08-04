@@ -12,5 +12,5 @@ public sealed class Payment : Entity
     public Guid SaveCardId { get; set; }
     public PaymentStatus Status { get; set; }
     public DateTime? PaidAt { get; set; }
-    public string FailureReason { get; set; }
+    public string FailureReason { get; set; } = string.Empty;
 }

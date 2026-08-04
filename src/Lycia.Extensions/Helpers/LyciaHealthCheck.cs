@@ -3,6 +3,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Lycia.Extensions.Helpers;
 
+/// <summary>Reports aggregate health for registered Lycia stores, transports, serializers, and outbox components.</summary>
 public sealed class LyciaHealthCheck(IServiceProvider serviceProvider) : IHealthCheck
 {
     private const string Missing = "Missing";
@@ -12,6 +13,7 @@ public sealed class LyciaHealthCheck(IServiceProvider serviceProvider) : IHealth
     private const string Timeout = "Timeout";
     private const string Error = "Error";
     
+    /// <inheritdoc />
     public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
         var details = new Dictionary<string, object>();

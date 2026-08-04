@@ -5,7 +5,7 @@ using System.Collections.Generic;
 
 namespace Shared.Contracts.Commands;
 
-public sealed class CreateOrderSagaCommand : CommandBase
+public sealed class CreateOrderSagaCommand : CommandBase, IOrderApiCommand
 {
     public CreateOrderSagaCommand()
     {
