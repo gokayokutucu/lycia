@@ -286,6 +286,76 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task TargetedResponse_NackToDlq_PreservesRequestAndCausationMetadata()
+    {
+        var applicationId = $"Response-Dlq-{Guid.NewGuid():N}";
+        var queueName = MessagingNamingHelper.GetResponseQueueName(typeof(TestResponse), applicationId);
+        await CleanupQueuesAsync(RabbitMqConnectionString, queueName);
+        var serializer = new NewtonsoftJsonMessageSerializer();
+        var queueTypeMap = new Dictionary<string, (Type, Type)>
+        {
+            [queueName] = (typeof(TestResponse), typeof(TestCommandHandlerA))
+        };
+        var options = new EventBusOptions
+        {
+            ApplicationId = applicationId,
+            MessageTTL = TimeSpan.FromMinutes(1),
+            ConnectionString = RabbitMqConnectionString
+        };
+        await using var bus = await RabbitMqEventBus.CreateAsync(
+            NullLogger<RabbitMqEventBus>.Instance, queueTypeMap, options, serializer);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        var consume = Task.Run(async () =>
+        {
+            await foreach (var incoming in bus.ConsumeWithAckAsync(timeout.Token))
+            {
+                await incoming.Nack(false);
+                return;
+            }
+        }, timeout.Token);
+
+        await Task.Delay(250, timeout.Token);
+        var sagaId = Guid.NewGuid();
+        var workflowId = Guid.NewGuid();
+        var request = new TestCommand
+        {
+            SagaId = sagaId,
+            CorrelationId = workflowId,
+            ResponseEndpoint = applicationId,
+            Message = "request-for-dlq"
+        };
+        request.RequestId = request.MessageId;
+        await bus.Respond(
+            request,
+            new TestResponse { Message = "response-for-dlq" },
+            cancellationToken: timeout.Token);
+        await consume.WaitAsync(timeout.Token);
+
+        var factory = new ConnectionFactory { Uri = new Uri(RabbitMqConnectionString) };
+        await using var connection = await factory.CreateConnectionAsync(CancellationToken.None);
+        await using var channel = await connection.CreateChannelAsync(cancellationToken: CancellationToken.None);
+        var dlqResult = await channel.BasicGetAsync(
+            queueName + ".dlq", autoAck: true, cancellationToken: CancellationToken.None);
+        dlqResult.Should().NotBeNull();
+        var normalized = serializer.NormalizeTransportHeaders(
+            new Dictionary<string, object?>(
+                dlqResult.BasicProperties.Headers ?? new Dictionary<string, object?>()));
+        var (_, context) = serializer.CreateContextFor(typeof(TestResponse));
+        var response = (TestResponse)serializer.Deserialize(dlqResult.Body.ToArray(), normalized, context);
+
+        response.Message.Should().Be("response-for-dlq");
+        response.MessageId.Should().NotBe(request.MessageId);
+        response.RequestId.Should().Be(request.MessageId);
+        response.CorrelationId.Should().Be(workflowId);
+        response.CausationId.Should().Be(request.MessageId);
+        response.ParentMessageId.Should().Be(request.MessageId);
+        response.SagaId.Should().Be(sagaId);
+        response.ResponseEndpoint.Should().Be(
+            Lycia.Messaging.EndpointIdentityNormalizer.Default.Normalize(applicationId));
+    }
+
+    [Fact]
     public async Task PublishThenConsume_Event_Succeeds()
     {
         var applicationId = "TestApp";

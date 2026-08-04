@@ -145,6 +145,19 @@ public class MessageTopologyTests
         Assert.NotEqual(response.MessageId, response.RequestId);
     }
 
+    [Fact]
+    public void ResponseRouting_RejectsMissingWaitingEndpointClearly()
+    {
+        var request = new UnownedCommand { ResponseEndpoint = null };
+        var response = new StockResponse { ResponseEndpoint = null };
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => RequestRouting.RequireResponseEndpoint(request, response));
+
+        Assert.Contains(nameof(IRequestRoutingMetadata.ResponseEndpoint), exception.Message);
+        Assert.Contains(typeof(UnownedCommand).FullName!, exception.Message);
+    }
+
     [Theory]
     [InlineData("StockService")]
     [InlineData("stockservice")]

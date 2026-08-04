@@ -9,6 +9,21 @@ namespace Lycia.Messaging;
 /// <summary>Initializes transport-independent request/reply metadata.</summary>
 public static class RequestRouting
 {
+    /// <summary>Resolves the canonical logical endpoint waiting for a response.</summary>
+    public static string RequireResponseEndpoint(IMessage request, IRequestRoutingMetadata response)
+    {
+        var endpoint = string.IsNullOrWhiteSpace(response.ResponseEndpoint)
+            ? (request as IRequestRoutingMetadata)?.ResponseEndpoint
+            : response.ResponseEndpoint;
+
+        if (string.IsNullOrWhiteSpace(endpoint))
+            throw new InvalidOperationException(
+                $"Request '{request.GetType().FullName}' has no ResponseEndpoint. " +
+                "Send the request through Lycia or set an explicit logical response endpoint before responding.");
+
+        return EndpointIdentityNormalizer.Default.Normalize(endpoint!);
+    }
+
     /// <summary>
     /// Ensures a command has a request identifier and a canonical logical response endpoint.
     /// </summary>

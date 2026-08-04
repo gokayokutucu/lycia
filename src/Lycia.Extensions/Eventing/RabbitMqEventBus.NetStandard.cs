@@ -127,9 +127,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         where TRequest : IMessage
         where TResponse : IResponse<TRequest>
     {
-        var endpoint = response.ResponseEndpoint
-                       ?? (request as IRequestRoutingMetadata)?.ResponseEndpoint
-                       ?? ApplicationId;
+        var endpoint = RequestRouting.RequireResponseEndpoint(request, response);
         response.PrepareResponse(request, sagaId ?? request.SagaId ?? Guid.Empty, endpoint);
         return PublishMessageAsync(response, response.GetType(), sagaId, cancellationToken);
     }

@@ -37,9 +37,7 @@ public class InMemoryEventBus(Lazy<ISagaDispatcher> sagaDispatcherLazy, string? 
         where TRequest : IMessage
         where TResponse : IResponse<TRequest>
     {
-        var endpoint = response.ResponseEndpoint
-                       ?? (request as IRequestRoutingMetadata)?.ResponseEndpoint
-                       ?? ApplicationId;
+        var endpoint = RequestRouting.RequireResponseEndpoint(request, response);
         response.PrepareResponse(request, sagaId ?? request.SagaId ?? Guid.Empty, endpoint);
         return sagaDispatcherLazy.Value.DispatchAsync<TRequest, TResponse>(response, handlerType, sagaId, cancellationToken);
     }
