@@ -139,6 +139,43 @@ Transport packages are `Lycia.Extensions` (RabbitMQ), `Lycia.Extensions.Nats`, a
 
 ---
 
+## Durable message scheduling
+
+Register Redis-backed scheduling once and schedule commands, events, or targeted responses from any saga context:
+
+```csharp
+services.AddLyciaScheduling(options =>
+{
+    options.AllowDynamicDelays = false;
+    options.Worker.LeaseDuration = TimeSpan.FromSeconds(30);
+    options.Worker.LeaseRenewInterval = TimeSpan.FromSeconds(10);
+    options.Vacuum.ApplicationTopology.Mode = VacuumMode.ReportOnly;
+});
+
+var scheduleId = await Context.Schedule(
+    new CancelOrderCommand { OrderId = orderId },
+    ScheduleDelay.ThirtySeconds,
+    cancellationToken);
+```
+
+`ScheduleId` identifies the scheduling operation and is deliberately different from `MessageId`. Pass a stable
+`ScheduleId` when retrying schedule creation. `ScheduleAt` accepts an absolute UTC instant; enum months are fixed
+30-day durations and `OneYear` is 365 days, so calendar-aware rules should calculate an instant and use `ScheduleAt`.
+Pending schedules can be cancelled idempotently or rescheduled before dispatch.
+
+RabbitMQ predefined buckets use one fixed-TTL queue per destination and bucket, then dead-letter to the final
+exchange without a plugin. Arbitrary RabbitMQ buckets are opt-in because they create dynamic queues. Kafka always
+uses the durable `SchedulerWorker`; Kafka retention is not delayed delivery. The validated NATS 2.11 baseline also
+falls back to `SchedulerWorker`, and `NativeOnly` fails at startup. Dispatch is at least once around crash windows,
+so handlers must be idempotent.
+
+Dynamic resource cleanup requires exact registry provenance, retention, no active manifest or schedule, an empty and
+unused broker resource, a fenced lease, and conditional deletion. Predefined buckets are retained. Ordinary topology
+defaults to `ReportOnly`, requires quarantine, and needs a second destructive opt-in. Scheduling exposes the
+`Lycia.Scheduling` activity source and meter plus the `LyciaScheduling` health check.
+
+---
+
 ## Quick Start
 
 **Coordinated Saga**: Uses a central orchestrator to manage the full lifecycle of a saga. This handler starts a saga, executes the business logic step-by-step, and coordinates the flow by publishing commands/events. Ideal when you need deterministic, centralized control.

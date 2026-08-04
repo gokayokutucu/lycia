@@ -9,6 +9,7 @@ using Lycia.Extensions.Serialization;
 
 using Lycia.Helpers;
 using Lycia.Saga.Abstractions.Messaging;
+using Lycia.Saga.Abstractions.Scheduling;
 using Lycia.Saga.Messaging;
 using Lycia.Saga.Messaging.Handlers;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -19,16 +20,22 @@ namespace Lycia.IntegrationTests;
 
 public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
 {
-    // Use the official RabbitMqContainer builder
-    private readonly RabbitMqContainer _rabbitMqContainer =
-        new RabbitMqBuilder()
-            .WithImage("rabbitmq:3.13-management-alpine")
-            .WithCleanUp(true)
-            .Build();
+    private readonly RabbitMqContainer? _rabbitMqContainer;
+    private readonly string? _externalConnectionString;
+
+    public RabbitMqEventBusIntegrationTests()
+    {
+        _externalConnectionString = Environment.GetEnvironmentVariable("LYCIA_RABBITMQ_CONNECTION_STRING");
+        if (string.IsNullOrWhiteSpace(_externalConnectionString))
+            _rabbitMqContainer = new RabbitMqBuilder()
+                .WithImage("rabbitmq:3-management")
+                .WithCleanUp(true)
+                .Build();
+    }
     
     private string RabbitMqConnectionString =>
-        //"amqp://guest:guest@127.0.0.1:5672/"; 
-        _rabbitMqContainer.GetConnectionString();
+        _externalConnectionString ?? _rabbitMqContainer?.GetConnectionString()
+        ?? throw new InvalidOperationException("RabbitMQ test fixture is not configured.");
 
     private static async Task CleanupQueuesAsync(string connectionString, string queueName)
     {
@@ -40,10 +47,16 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
     }
 
     public async Task InitializeAsync()
-        => await _rabbitMqContainer.StartAsync().ConfigureAwait(false);
+    {
+        if (_rabbitMqContainer != null)
+            await _rabbitMqContainer.StartAsync().ConfigureAwait(false);
+    }
 
     public async Task DisposeAsync()
-        => await _rabbitMqContainer.DisposeAsync().ConfigureAwait(false);
+    {
+        if (_rabbitMqContainer != null)
+            await _rabbitMqContainer.DisposeAsync().ConfigureAwait(false);
+    }
     
     
     [Fact]
@@ -607,6 +620,61 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         received.CausationId.Should().Be(request.MessageId);
         received.ParentMessageId.Should().Be(request.MessageId);
         received.ResponseEndpoint.Should().Be("testapp");
+    }
+
+    [Fact]
+    public async Task Native_predefined_schedule_uses_fixed_ttl_and_dead_letters_to_the_final_exchange()
+    {
+        var applicationId = "ScheduleTest" + Guid.NewGuid().ToString("N");
+        var options = new EventBusOptions
+        {
+            ApplicationId = applicationId,
+            ConnectionString = RabbitMqConnectionString
+        };
+        var serializer = new NewtonsoftJsonMessageSerializer();
+        await using var bus = await RabbitMqEventBus.CreateAsync(
+            NullLogger<RabbitMqEventBus>.Instance, new Dictionary<string, (Type, Type)>(), options, serializer);
+        var finalExchange = MessagingNamingHelper.GetExchangeName(typeof(TestEvent));
+        var finalQueue = "lycia.schedule.integration." + Guid.NewGuid().ToString("N");
+        var factory = new ConnectionFactory { Uri = new Uri(RabbitMqConnectionString) };
+        await using var connection = await factory.CreateConnectionAsync(CancellationToken.None);
+        await using var channel = await connection.CreateChannelAsync(cancellationToken: CancellationToken.None);
+        await channel.ExchangeDeclareAsync(finalExchange, ExchangeType.Fanout, durable: true, autoDelete: false);
+        await channel.QueueDeclareAsync(finalQueue, durable: false, exclusive: false, autoDelete: true);
+        await channel.QueueBindAsync(finalQueue, finalExchange, string.Empty);
+        var record = new ScheduleRecord
+        {
+            ScheduleId = Guid.NewGuid(),
+            MessageId = Guid.NewGuid(),
+            MessageType = typeof(TestEvent).AssemblyQualifiedName!,
+            MessageKind = ScheduledMessageKind.Event,
+            Destination = applicationId,
+            DueAtUtc = DateTimeOffset.UtcNow.AddSeconds(5),
+            ScheduledAtUtc = DateTimeOffset.UtcNow,
+            Status = ScheduleStatus.Pending,
+            Payload = [1, 2, 3],
+            IsPredefined = true,
+            DelaySuffix = "5s",
+            IdempotencyKey = "delay:5s"
+        };
+
+        var resource = await bus.ScheduleNativeAsync(new NativeScheduleEnvelope
+        {
+            Record = record,
+            Delay = TimeSpan.FromSeconds(5)
+        });
+
+        resource.Should().NotBeNullOrWhiteSpace();
+        _ = await channel.QueueDeclarePassiveAsync(resource!, CancellationToken.None);
+        BasicGetResult? delivered = null;
+        var deliveryDeadline = DateTimeOffset.UtcNow.AddSeconds(15);
+        while (delivered == null && DateTimeOffset.UtcNow < deliveryDeadline)
+        {
+            delivered = await channel.BasicGetAsync(finalQueue, autoAck: true, cancellationToken: CancellationToken.None);
+            if (delivered == null) await Task.Delay(250);
+        }
+        delivered.Should().NotBeNull();
+        delivered!.Body.ToArray().Should().Equal(1, 2, 3);
     }
 
 // Dummy command handler for test

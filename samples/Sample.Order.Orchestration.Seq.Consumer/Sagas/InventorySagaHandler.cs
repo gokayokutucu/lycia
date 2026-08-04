@@ -3,6 +3,7 @@
 // https://www.apache.org/licenses/LICENSE-2.0
 
 using Lycia.Saga.Messaging.Handlers;
+using Lycia.Saga.Abstractions.Scheduling;
 using Sample.Shared.Messages.Commands;
 using Sample.Shared.SagaStates;
 
@@ -22,12 +23,12 @@ public class InventorySagaHandler :
             return;
         }
         
-        // Inventory reserved, proceed to payment
-        await Context.Send(new ProcessPaymentCommand
+        // Inventory reserved; demonstrate durable, transport-independent deferred command delivery.
+        await Context.Schedule(new ProcessPaymentCommand
         {
             OrderId = message.OrderId,
             ParentMessageId = message.MessageId
-        }, cancellationToken);
+        }, ScheduleDelay.FiveSeconds, cancellationToken);
         await Context.MarkAsComplete<ReserveInventoryCommand>();
     }
 

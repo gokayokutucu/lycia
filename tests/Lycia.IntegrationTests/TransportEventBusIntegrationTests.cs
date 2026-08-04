@@ -7,23 +7,38 @@ using Lycia.Extensions.Nats;
 using Lycia.Extensions.Serialization;
 using Lycia.Helpers;
 using Lycia.Saga.Abstractions.Messaging;
+using Lycia.Saga.Abstractions.Scheduling;
 using Lycia.Saga.Messaging;
+using Lycia.Scheduling;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Testcontainers.Kafka;
 
 namespace Lycia.IntegrationTests;
 
 public sealed class NatsEventBusIntegrationTests : IAsyncLifetime
 {
-    private readonly IContainer _container = new ContainerBuilder()
-        .WithImage("nats:2.11-alpine")
-        .WithCommand("-js")
-        .WithPortBinding(4222, true)
-        .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("Server is ready"))
-        .WithCleanUp(true)
-        .Build();
+    private readonly IContainer? _container;
+    private readonly string? _externalUrl;
 
-    public Task InitializeAsync() => _container.StartAsync();
-    public Task DisposeAsync() => _container.DisposeAsync().AsTask();
+    public NatsEventBusIntegrationTests()
+    {
+        _externalUrl = Environment.GetEnvironmentVariable("LYCIA_NATS_URL");
+        if (string.IsNullOrWhiteSpace(_externalUrl))
+            _container = new ContainerBuilder()
+                .WithImage("nats:2.11-alpine")
+                .WithCommand("-js")
+                .WithPortBinding(4222, true)
+                .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("Server is ready"))
+                .WithCleanUp(true)
+                .Build();
+    }
+
+    private string NatsUrl => _externalUrl ??
+        $"nats://{_container!.Hostname}:{_container.GetMappedPublicPort(4222)}";
+
+    public Task InitializeAsync() => _container?.StartAsync() ?? Task.CompletedTask;
+    public Task DisposeAsync() => _container?.DisposeAsync().AsTask() ?? Task.CompletedTask;
 
     [Fact]
     public async Task JetStream_preserves_command_ownership_and_independent_event_subscriptions()
@@ -31,7 +46,7 @@ public sealed class NatsEventBusIntegrationTests : IAsyncLifetime
         var stream = $"LYCIA_{Guid.NewGuid():N}";
         var ownerOptions = new NatsEventBusOptions
         {
-            Url = $"nats://{_container.Hostname}:{_container.GetMappedPublicPort(4222)}",
+            Url = NatsUrl,
             ApplicationId = "OwnerService",
             StreamName = stream
         };
@@ -87,6 +102,53 @@ public sealed class NatsEventBusIntegrationTests : IAsyncLifetime
         eventHandlers.Should().Contain(typeof(OwnedEventHandlerB));
     }
 
+    [Fact]
+    public async Task Nats_uses_durable_worker_when_native_delay_is_unavailable()
+    {
+        var stream = $"LYCIA_{Guid.NewGuid():N}";
+        var ownerOptions = new NatsEventBusOptions
+        {
+            Url = NatsUrl,
+            ApplicationId = "OwnerService",
+            StreamName = stream
+        };
+        var senderOptions = new NatsEventBusOptions
+        {
+            Url = ownerOptions.Url,
+            ApplicationId = "RequesterService",
+            StreamName = stream,
+            SchedulingMode = NatsSchedulingMode.FallbackToWorker
+        };
+        var map = new Dictionary<string, (Type, Type)>
+        {
+            [MessagingNamingHelper.GetQueueName(typeof(OwnedCommand), typeof(OwnedCommandHandler), ownerOptions.ApplicationId)] =
+                (typeof(OwnedCommand), typeof(OwnedCommandHandler))
+        };
+        var serializer = new NewtonsoftJsonMessageSerializer();
+        await using var consumer = new NatsEventBus(map, ownerOptions, serializer);
+        await using var publisher = new NatsEventBus(new Dictionary<string, (Type, Type)>(), senderOptions, serializer);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(40));
+        var receive = ReceiveOneAsync(consumer, timeout.Token);
+        await Task.Delay(500, timeout.Token);
+        var clock = new ManualSchedulingClock(DateTimeOffset.UtcNow);
+        var store = new InMemoryScheduleStore();
+        var scheduler = new MessageScheduler(store, serializer, publisher, clock, Options.Create(new SchedulingOptions()),
+            new InMemorySchedulingResourceRegistry(), NullLogger<MessageScheduler>.Instance);
+        var command = new OwnedCommand { Value = "nats-scheduled" };
+        var scheduleId = await scheduler.ScheduleAsync(command, new OwnedCommand(), typeof(OwnedCommandHandler),
+            Guid.NewGuid(), ScheduleDelay.FiveSeconds, cancellationToken: timeout.Token);
+        (await store.GetAsync(scheduleId))!.Strategy.Should().Be(SchedulingStrategy.DurableWorker);
+
+        clock.Advance(TimeSpan.FromSeconds(5));
+        var worker = new SchedulerWorker(store, new EventBusSchedulingDispatcher(publisher, serializer), clock,
+            Options.Create(new SchedulingOptions()), NullLogger<SchedulerWorker>.Instance);
+        (await worker.RunOnceAsync(timeout.Token)).Should().Be(1);
+
+        var incoming = await receive;
+        incoming.MessageType.Should().Be(typeof(OwnedCommand));
+        (await store.GetAsync(scheduleId))!.Status.Should().Be(ScheduleStatus.Completed);
+    }
+
     private static async Task<IncomingMessage> ReceiveOneAsync(
         NatsEventBus bus, CancellationToken cancellationToken)
     {
@@ -122,13 +184,23 @@ public sealed class NatsEventBusIntegrationTests : IAsyncLifetime
 
 public sealed class KafkaEventBusIntegrationTests : IAsyncLifetime
 {
-    private readonly KafkaContainer _container = new KafkaBuilder()
-        .WithImage("confluentinc/cp-kafka:7.7.1")
-        .WithCleanUp(true)
-        .Build();
+    private readonly KafkaContainer? _container;
+    private readonly string? _externalBootstrapServers;
 
-    public Task InitializeAsync() => _container.StartAsync();
-    public Task DisposeAsync() => _container.DisposeAsync().AsTask();
+    public KafkaEventBusIntegrationTests()
+    {
+        _externalBootstrapServers = Environment.GetEnvironmentVariable("LYCIA_KAFKA_BOOTSTRAP_SERVERS");
+        if (string.IsNullOrWhiteSpace(_externalBootstrapServers))
+            _container = new KafkaBuilder()
+                .WithImage("confluentinc/cp-kafka:7.7.1")
+                .WithCleanUp(true)
+                .Build();
+    }
+
+    private string KafkaBootstrapServers => _externalBootstrapServers ?? _container!.GetBootstrapAddress();
+
+    public Task InitializeAsync() => _container?.StartAsync() ?? Task.CompletedTask;
+    public Task DisposeAsync() => _container?.DisposeAsync().AsTask() ?? Task.CompletedTask;
 
     [Fact]
     public async Task Kafka_preserves_command_ownership_and_independent_event_groups()
@@ -136,7 +208,7 @@ public sealed class KafkaEventBusIntegrationTests : IAsyncLifetime
         var prefix = $"lycia-{Guid.NewGuid():N}";
         var ownerOptions = new KafkaEventBusOptions
         {
-            BootstrapServers = _container.GetBootstrapAddress(),
+            BootstrapServers = KafkaBootstrapServers,
             ApplicationId = "OwnerService",
             TopicPrefix = prefix
         };
@@ -196,6 +268,60 @@ public sealed class KafkaEventBusIntegrationTests : IAsyncLifetime
         timeout.Cancel();
         try { await pump; }
         catch (OperationCanceledException) { }
+    }
+
+    [Fact]
+    public async Task Kafka_scheduling_uses_durable_worker_and_the_final_command_topic()
+    {
+        var prefix = $"lycia-{Guid.NewGuid():N}";
+        var ownerOptions = new KafkaEventBusOptions
+        {
+            BootstrapServers = KafkaBootstrapServers,
+            ApplicationId = "OwnerService",
+            TopicPrefix = prefix
+        };
+        var senderOptions = new KafkaEventBusOptions
+        {
+            BootstrapServers = ownerOptions.BootstrapServers,
+            ApplicationId = "RequesterService",
+            TopicPrefix = prefix,
+            EnsureTopics = false
+        };
+        var map = new Dictionary<string, (Type, Type)>
+        {
+            [MessagingNamingHelper.GetQueueName(typeof(OwnedCommand), typeof(OwnedCommandHandler), ownerOptions.ApplicationId)] =
+                (typeof(OwnedCommand), typeof(OwnedCommandHandler))
+        };
+        var serializer = new NewtonsoftJsonMessageSerializer();
+        await using var consumer = new KafkaEventBus(map, ownerOptions, serializer);
+        await using var publisher = new KafkaEventBus(new Dictionary<string, (Type, Type)>(), senderOptions, serializer);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var received = new TaskCompletionSource<IncomingMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pump = Task.Run(async () =>
+        {
+            await foreach (var incoming in consumer.ConsumeWithAckAsync(timeout.Token))
+            {
+                await incoming.Ack();
+                received.TrySetResult(incoming);
+                return;
+            }
+        }, timeout.Token);
+        await Task.Delay(3000, timeout.Token);
+        var clock = new ManualSchedulingClock(DateTimeOffset.UtcNow);
+        var store = new InMemoryScheduleStore();
+        var scheduler = new MessageScheduler(store, serializer, publisher, clock, Options.Create(new SchedulingOptions()),
+            new InMemorySchedulingResourceRegistry(), NullLogger<MessageScheduler>.Instance);
+        var command = new OwnedCommand { Value = "kafka-scheduled" };
+        var scheduleId = await scheduler.ScheduleAsync(command, new OwnedCommand(), typeof(OwnedCommandHandler),
+            Guid.NewGuid(), ScheduleDelay.FiveSeconds, cancellationToken: timeout.Token);
+        clock.Advance(TimeSpan.FromSeconds(5));
+        var worker = new SchedulerWorker(store, new EventBusSchedulingDispatcher(publisher, serializer), clock,
+            Options.Create(new SchedulingOptions()), NullLogger<SchedulerWorker>.Instance);
+
+        (await worker.RunOnceAsync(timeout.Token)).Should().Be(1);
+        (await received.Task.WaitAsync(timeout.Token)).MessageType.Should().Be(typeof(OwnedCommand));
+        (await store.GetAsync(scheduleId))!.Status.Should().Be(ScheduleStatus.Completed);
+        await pump;
     }
 
     private static async Task PumpAsync(

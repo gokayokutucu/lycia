@@ -15,4 +15,17 @@ public sealed class NatsEventBusOptions
     public TimeSpan AckWait { get; set; } = TimeSpan.FromSeconds(30);
     /// <summary>Gets or sets the maximum JetStream delivery attempts.</summary>
     public long MaxDeliver { get; set; } = 5;
+    /// <summary>Gets or sets native scheduling behavior. The supported NATS 2.11 baseline falls back to SchedulerWorker.</summary>
+    public NatsSchedulingMode SchedulingMode { get; set; } = NatsSchedulingMode.FallbackToWorker;
+}
+
+/// <summary>NATS delayed-delivery capability policy.</summary>
+public enum NatsSchedulingMode
+{
+    /// <summary>Always use the durable SchedulerWorker.</summary>
+    Disabled,
+    /// <summary>Use native delayed delivery only after capability validation; otherwise use SchedulerWorker.</summary>
+    FallbackToWorker,
+    /// <summary>Require native delayed delivery and fail clearly when the server/client baseline cannot provide it.</summary>
+    NativeOnly
 }

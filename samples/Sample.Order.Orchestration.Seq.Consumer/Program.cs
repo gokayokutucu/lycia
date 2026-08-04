@@ -5,6 +5,7 @@
 using Lycia.Extensions;
 using Lycia.Extensions.Logging;
 using Lycia.Extensions.OpenTelemetry;
+using Lycia.Extensions.Scheduling;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Serilog;
@@ -80,6 +81,13 @@ builder.Services
     // })
     .AddSagasFromCurrentAssembly()
     .Build();
+
+builder.Services.AddLyciaScheduling(options =>
+{
+    options.PreferNativeTransportScheduling = true;
+    options.AllowDynamicDelays = false;
+    options.Vacuum.ApplicationTopology.Mode = Lycia.Scheduling.VacuumMode.ReportOnly;
+});
 
 var host = builder.Build();
 await host.RunAsync();

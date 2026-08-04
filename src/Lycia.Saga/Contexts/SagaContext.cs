@@ -8,6 +8,7 @@ using Lycia.Common.SagaSteps;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Contexts;
 using Lycia.Saga.Abstractions.Messaging;
+using Lycia.Saga.Abstractions.Scheduling;
 using Lycia.Saga.Extensions;
 
 namespace Lycia.Saga.Contexts;
@@ -19,13 +20,41 @@ public class SagaContext<TInitialMessage>(
     IEventBus eventBus,
     ISagaStore sagaStore,
     ISagaIdGenerator sagaIdGenerator,
-    ISagaCompensationCoordinator compensationCoordinator) : ISagaContext<TInitialMessage>
+    ISagaCompensationCoordinator compensationCoordinator,
+    IMessageScheduler? messageScheduler = null) : ISagaContext<TInitialMessage>, ISchedulingSagaContext
     where TInitialMessage : IMessage
 {
     public ISagaStore SagaStore { get; } = sagaStore;
     protected TInitialMessage CurrentStep { get; } = currentStep;
     public Guid SagaId { get; } = sagaId == Guid.Empty ? sagaIdGenerator.Generate() : sagaId;
     public Type HandlerTypeOfCurrentStep { get; } = handlerTypeOfCurrentStep;
+    protected IMessageScheduler? MessageScheduler { get; } = messageScheduler;
+
+    /// <inheritdoc />
+    public Task<Guid> ScheduleMessageAsync(IMessage message, ScheduleDelay delay, Guid? scheduleId,
+        CancellationToken cancellationToken) => RequireScheduler().ScheduleAsync(message, CurrentStep,
+        HandlerTypeOfCurrentStep, SagaId, delay, scheduleId, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<Guid> ScheduleMessageAsync(IMessage message, TimeSpan delay, Guid? scheduleId,
+        CancellationToken cancellationToken) => RequireScheduler().ScheduleAsync(message, CurrentStep,
+        HandlerTypeOfCurrentStep, SagaId, delay, scheduleId, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<Guid> ScheduleMessageAtAsync(IMessage message, DateTimeOffset dueAtUtc, Guid? scheduleId,
+        CancellationToken cancellationToken) => RequireScheduler().ScheduleAtAsync(message, CurrentStep,
+        HandlerTypeOfCurrentStep, SagaId, dueAtUtc, scheduleId, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> CancelScheduleAsync(Guid scheduleId, CancellationToken cancellationToken) =>
+        RequireScheduler().CancelAsync(scheduleId, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> RescheduleAsync(Guid scheduleId, DateTimeOffset dueAtUtc,
+        CancellationToken cancellationToken) => RequireScheduler().RescheduleAsync(scheduleId, dueAtUtc, cancellationToken);
+
+    private IMessageScheduler RequireScheduler() => MessageScheduler
+        ?? throw new InvalidOperationException("Scheduling services are not registered. Call AddLyciaScheduling during startup.");
     
 
     public Task Send<T>(T command, CancellationToken cancellationToken = default) where T : ICommand
@@ -66,7 +95,7 @@ public class SagaContext<TInitialMessage>(
 
         var adapterContext =
             new StepSpecificSagaContextAdapter<TInitialMessage>(SagaId, CurrentStep, HandlerTypeOfCurrentStep, eventBus,
-                SagaStore, compensationCoordinator);
+                SagaStore, compensationCoordinator, MessageScheduler);
 
         return (ISagaStepFluent)ReactiveSagaStepFluent<TInitialMessage>.Create(
             CurrentStep.GetType(),
@@ -84,7 +113,7 @@ public class SagaContext<TInitialMessage>(
 
         var adapterContext =
             new StepSpecificSagaContextAdapter<TInitialMessage>(SagaId, CurrentStep, HandlerTypeOfCurrentStep, eventBus,
-                SagaStore, compensationCoordinator);
+                SagaStore, compensationCoordinator, MessageScheduler);
 
         return (ISagaStepFluent)ReactiveSagaStepFluent<TInitialMessage>.Create(
             CurrentStep.GetType(),
@@ -169,26 +198,28 @@ public class SagaContext<TInitialMessage>(
     }
 }
 
-public class SagaContext<TInitialMessage, TSagaData>(
-    Guid sagaId,
-    TInitialMessage currentStep,
-    Type handlerTypeOfCurrentStep,
-    TSagaData data,
-    IEventBus eventBus,
-    ISagaStore sagaStore,
-    ISagaIdGenerator sagaIdGenerator,
-    ISagaCompensationCoordinator compensationCoordinator)
-    : SagaContext<TInitialMessage>(sagaId, currentStep, handlerTypeOfCurrentStep, eventBus, sagaStore, sagaIdGenerator,
-            compensationCoordinator),
-        ISagaContext<TInitialMessage, TSagaData>
+public class SagaContext<TInitialMessage, TSagaData> : SagaContext<TInitialMessage>,
+    ISagaContext<TInitialMessage, TSagaData>
     where TSagaData : SagaData
     where TInitialMessage : IMessage
 {
-    private readonly IEventBus _eventBus = eventBus;
-    private readonly ISagaStore _sagaStore = sagaStore;
-    private readonly ISagaCompensationCoordinator _compensationCoordinator = compensationCoordinator;
+    private readonly IEventBus _eventBus;
+    private readonly ISagaStore _sagaStore;
+    private readonly ISagaCompensationCoordinator _compensationCoordinator;
 
-    public TSagaData Data { get; } = data;
+    public SagaContext(Guid sagaId, TInitialMessage currentStep, Type handlerTypeOfCurrentStep, TSagaData data,
+        IEventBus eventBus, ISagaStore sagaStore, ISagaIdGenerator sagaIdGenerator,
+        ISagaCompensationCoordinator compensationCoordinator, IMessageScheduler? messageScheduler = null)
+        : base(sagaId, currentStep, handlerTypeOfCurrentStep, eventBus, sagaStore, sagaIdGenerator,
+            compensationCoordinator, messageScheduler)
+    {
+        Data = data;
+        _eventBus = eventBus;
+        _sagaStore = sagaStore;
+        _compensationCoordinator = compensationCoordinator;
+    }
+
+    public TSagaData Data { get; }
 
     public new ISagaStepFluent PublishWithTracking<TStep>(TStep nextEvent,
         CancellationToken cancellationToken = default)
@@ -204,7 +235,7 @@ public class SagaContext<TInitialMessage, TSagaData>(
                 Data.GetType(),
                 SagaId, CurrentStep,
                 HandlerTypeOfCurrentStep, Data, _eventBus,
-                _sagaStore, _compensationCoordinator);
+                _sagaStore, _compensationCoordinator, MessageScheduler);
 
         return (ISagaStepFluent)CoordinatedSagaStepFluent<TInitialMessage, TSagaData>.Create(
             CurrentStep.GetType(),
@@ -229,7 +260,7 @@ public class SagaContext<TInitialMessage, TSagaData>(
                 Data.GetType(),
                 SagaId, CurrentStep,
                 HandlerTypeOfCurrentStep, Data, _eventBus,
-                _sagaStore, _compensationCoordinator);
+                _sagaStore, _compensationCoordinator, MessageScheduler);
 
         return (ISagaStepFluent)CoordinatedSagaStepFluent<TInitialMessage, TSagaData>.Create(
             CurrentStep.GetType(),
@@ -314,14 +345,31 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
     Type handlerTypeOfCurrentStep,
     IEventBus eventBus,
     ISagaStore sagaStore,
-    ISagaCompensationCoordinator compensationCoordinator)
-    : ISagaContext<TCurrentStepAdapter>
+    ISagaCompensationCoordinator compensationCoordinator,
+    IMessageScheduler? messageScheduler = null)
+    : ISagaContext<TCurrentStepAdapter>, ISchedulingSagaContext
     where TCurrentStepAdapter : IMessage
 {
     public Guid SagaId => sagaId;
     private TCurrentStepAdapter CurrentStep { get; } = currentStep;
     public ISagaStore SagaStore => sagaStore;
     public Type HandlerTypeOfCurrentStep { get; } = handlerTypeOfCurrentStep;
+
+    public Task<Guid> ScheduleMessageAsync(IMessage message, ScheduleDelay delay, Guid? scheduleId,
+        CancellationToken cancellationToken) => RequireScheduler().ScheduleAsync(message, CurrentStep,
+        HandlerTypeOfCurrentStep, SagaId, delay, scheduleId, cancellationToken);
+    public Task<Guid> ScheduleMessageAsync(IMessage message, TimeSpan delay, Guid? scheduleId,
+        CancellationToken cancellationToken) => RequireScheduler().ScheduleAsync(message, CurrentStep,
+        HandlerTypeOfCurrentStep, SagaId, delay, scheduleId, cancellationToken);
+    public Task<Guid> ScheduleMessageAtAsync(IMessage message, DateTimeOffset dueAtUtc, Guid? scheduleId,
+        CancellationToken cancellationToken) => RequireScheduler().ScheduleAtAsync(message, CurrentStep,
+        HandlerTypeOfCurrentStep, SagaId, dueAtUtc, scheduleId, cancellationToken);
+    public Task<bool> CancelScheduleAsync(Guid scheduleId, CancellationToken cancellationToken) =>
+        RequireScheduler().CancelAsync(scheduleId, cancellationToken);
+    public Task<bool> RescheduleAsync(Guid scheduleId, DateTimeOffset dueAtUtc, CancellationToken cancellationToken) =>
+        RequireScheduler().RescheduleAsync(scheduleId, dueAtUtc, cancellationToken);
+    private IMessageScheduler RequireScheduler() => messageScheduler
+        ?? throw new InvalidOperationException("Scheduling services are not registered. Call AddLyciaScheduling during startup.");
 
     public Task Send<T>(T command, CancellationToken cancellationToken = default) where T : ICommand
     {
@@ -367,7 +415,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
         var nextStepContext =
             new StepSpecificSagaContextAdapter<TCurrentStepAdapter>(sagaId, CurrentStep, HandlerTypeOfCurrentStep,
                 eventBus,
-                SagaStore, compensationCoordinator);
+                SagaStore, compensationCoordinator, messageScheduler);
 
         return (ISagaStepFluent)ReactiveSagaStepFluent<TCurrentStepAdapter>.Create(
             CurrentStep.GetType(),
@@ -396,7 +444,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
             CurrentStep.GetType(),
             sagaId, CurrentStep,
             HandlerTypeOfCurrentStep, eventBus,
-            SagaStore, compensationCoordinator);
+            SagaStore, compensationCoordinator, messageScheduler);
 
         return (ISagaStepFluent)ReactiveSagaStepFluent<TCurrentStepAdapter>.Create(
             CurrentStep.GetType(),
@@ -486,7 +534,8 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
         Type handlerType,
         IEventBus eventBus,
         ISagaStore sagaStore,
-        ISagaCompensationCoordinator compensationCoordinator)
+        ISagaCompensationCoordinator compensationCoordinator,
+        IMessageScheduler? messageScheduler = null)
     {
         var adapterOpen = typeof(StepSpecificSagaContextAdapter<>);
         var adapterClosed = adapterOpen.MakeGenericType(messageType);
@@ -498,7 +547,8 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
             handlerType,
             eventBus,
             sagaStore,
-            compensationCoordinator
+            compensationCoordinator,
+            messageScheduler
         )!;
     }
 }
@@ -510,8 +560,9 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
     TSagaDataAdapter data,
     IEventBus eventBus,
     ISagaStore sagaStore,
-    ISagaCompensationCoordinator compensationCoordinator)
-    : ISagaContext<TCurrentStepAdapter, TSagaDataAdapter>
+    ISagaCompensationCoordinator compensationCoordinator,
+    IMessageScheduler? messageScheduler = null)
+    : ISagaContext<TCurrentStepAdapter, TSagaDataAdapter>, ISchedulingSagaContext
     where TCurrentStepAdapter : IMessage
     where TSagaDataAdapter : SagaData
 {
@@ -522,6 +573,22 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
     public ISagaStore SagaStore => sagaStore;
     public Type HandlerTypeOfCurrentStep { get; } = handlerTypeOfCurrentStep;
     public TSagaDataAdapter Data => data;
+
+    public Task<Guid> ScheduleMessageAsync(IMessage message, ScheduleDelay delay, Guid? scheduleId,
+        CancellationToken cancellationToken) => RequireScheduler().ScheduleAsync(message, StepAdapter,
+        HandlerTypeOfCurrentStep, SagaId, delay, scheduleId, cancellationToken);
+    public Task<Guid> ScheduleMessageAsync(IMessage message, TimeSpan delay, Guid? scheduleId,
+        CancellationToken cancellationToken) => RequireScheduler().ScheduleAsync(message, StepAdapter,
+        HandlerTypeOfCurrentStep, SagaId, delay, scheduleId, cancellationToken);
+    public Task<Guid> ScheduleMessageAtAsync(IMessage message, DateTimeOffset dueAtUtc, Guid? scheduleId,
+        CancellationToken cancellationToken) => RequireScheduler().ScheduleAtAsync(message, StepAdapter,
+        HandlerTypeOfCurrentStep, SagaId, dueAtUtc, scheduleId, cancellationToken);
+    public Task<bool> CancelScheduleAsync(Guid scheduleId, CancellationToken cancellationToken) =>
+        RequireScheduler().CancelAsync(scheduleId, cancellationToken);
+    public Task<bool> RescheduleAsync(Guid scheduleId, DateTimeOffset dueAtUtc, CancellationToken cancellationToken) =>
+        RequireScheduler().RescheduleAsync(scheduleId, dueAtUtc, cancellationToken);
+    private IMessageScheduler RequireScheduler() => messageScheduler
+        ?? throw new InvalidOperationException("Scheduling services are not registered. Call AddLyciaScheduling during startup.");
 
     public Task Send<T>(T command, CancellationToken cancellationToken = default) where T : ICommand
     {
@@ -561,7 +628,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
             StepAdapter.GetType(),
             sagaId, StepAdapter,
             HandlerTypeOfCurrentStep, eventBus,
-            SagaStore, compensationCoordinator);
+            SagaStore, compensationCoordinator, messageScheduler);
 
         return (ISagaStepFluent)ReactiveSagaStepFluent<TCurrentStepAdapter>.Create(
             StepAdapter.GetType(),
@@ -581,7 +648,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
             StepAdapter.GetType(),
             sagaId, StepAdapter,
             HandlerTypeOfCurrentStep, eventBus,
-            SagaStore, compensationCoordinator);
+            SagaStore, compensationCoordinator, messageScheduler);
 
         return (ISagaStepFluent)ReactiveSagaStepFluent<TCurrentStepAdapter>.Create(
             StepAdapter.GetType(),
@@ -604,7 +671,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
             Data.GetType(),
             sagaId, StepAdapter,
             HandlerTypeOfCurrentStep, Data, eventBus,
-            SagaStore, compensationCoordinator);
+            SagaStore, compensationCoordinator, messageScheduler);
 
         return (ISagaStepFluent)CoordinatedSagaStepFluent<TCurrentStepAdapter, TSagaDataAdapter>.Create(
             StepAdapter.GetType(),
@@ -626,7 +693,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
             Data.GetType(),
             sagaId, StepAdapter,
             HandlerTypeOfCurrentStep, Data, eventBus,
-            SagaStore, compensationCoordinator);
+            SagaStore, compensationCoordinator, messageScheduler);
 
         return (ISagaStepFluent)CoordinatedSagaStepFluent<TCurrentStepAdapter, TSagaDataAdapter>.Create(
             StepAdapter.GetType(),
@@ -736,7 +803,8 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
         object data,
         IEventBus eventBus,
         ISagaStore sagaStore,
-        ISagaCompensationCoordinator compensationCoordinator)
+        ISagaCompensationCoordinator compensationCoordinator,
+        IMessageScheduler? messageScheduler = null)
     {
         var adapterOpen = typeof(StepSpecificSagaContextAdapter<,>);
         var adapterClosed = adapterOpen.MakeGenericType(messageType, sagaDataType);
@@ -749,7 +817,8 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
             data,
             eventBus,
             sagaStore,
-            compensationCoordinator
+            compensationCoordinator,
+            messageScheduler
         )!;
     }
 }
