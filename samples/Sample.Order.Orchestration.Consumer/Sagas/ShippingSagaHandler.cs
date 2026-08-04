@@ -15,7 +15,7 @@ public class ShippingSagaHandler :
 {
     public override async Task HandleAsync(ShipOrderCommand message, CancellationToken cancellationToken = default)
     {
-        if (!ShippingService.TryShip(message.OrderId, !SampleScenario.FailShipping))
+        if (!ShippingService.TryShip(message.OrderId, SampleScenario.FailShipping))
         {
             await Context.MarkAsFailed<ShipOrderCommand>(cancellationToken);
             return;
