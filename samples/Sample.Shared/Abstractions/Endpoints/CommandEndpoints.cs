@@ -4,7 +4,7 @@
 
 using Lycia.Saga.Abstractions.Messaging;
 
-namespace Sample.Shared.Messages.Commands;
+namespace Sample.Shared.Abstractions.Endpoints;
 
 /// <summary>Logical owner for commands handled by the orchestration sample.</summary>
 public interface ISampleOrderConsumerCommand : ICommand, ICommandEndpoint { }

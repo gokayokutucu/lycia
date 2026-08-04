@@ -3,6 +3,7 @@
 // https://www.apache.org/licenses/LICENSE-2.0
 
 using Lycia.Saga.Messaging;
+using Sample.Shared.Abstractions.Endpoints;
 
 namespace Sample.Shared.Messages.Commands;
 
