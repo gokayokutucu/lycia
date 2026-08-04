@@ -2,7 +2,6 @@
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 
-using Lycia.Extensions;
 using Lycia.Saga.Abstractions.Messaging;
 
 namespace Lycia.Messaging;
@@ -27,7 +26,7 @@ public static class MessageKindResolver
     public static MessageKind Resolve(Type messageType)
     {
         if (messageType == null) throw new ArgumentNullException(nameof(messageType));
-        if (messageType.IsSubclassOfResponseBase()) return MessageKind.Response;
+        if (typeof(IResponse).IsAssignableFrom(messageType)) return MessageKind.Response;
         if (typeof(ICommand).IsAssignableFrom(messageType)) return MessageKind.Command;
         if (typeof(IEvent).IsAssignableFrom(messageType)) return MessageKind.Event;
         return MessageKind.Message;

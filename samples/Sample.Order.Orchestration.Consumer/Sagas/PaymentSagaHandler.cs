@@ -16,7 +16,7 @@ public class PaymentSagaHandler :
     public override async Task HandleAsync(ProcessPaymentCommand message, CancellationToken cancellationToken = default)
     {
         // Simulate payment process
-        var paymentSucceeded = PaymentService.SimulatePayment(false);
+        var paymentSucceeded = PaymentService.SimulatePayment(!SampleScenario.FailPayment);
 
         if (!paymentSucceeded)
         {
@@ -29,10 +29,9 @@ public class PaymentSagaHandler :
         Context.Data.PaymentIrreversible = true;
 
         // Continue
-        await Context.Publish(new PaymentSucceededResponse
+        await Context.Respond(message, new PaymentSucceededResponse
         {
-            OrderId = message.OrderId,
-            ParentMessageId = message.MessageId
+            OrderId = message.OrderId
         }, cancellationToken);
         await Context.MarkAsComplete<ProcessPaymentCommand>();
     }

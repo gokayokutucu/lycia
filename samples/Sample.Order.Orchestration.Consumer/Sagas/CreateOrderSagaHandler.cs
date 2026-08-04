@@ -21,10 +21,9 @@ public class CreateOrderSagaHandler :
     public override async Task HandleStartAsync(CreateOrderCommand message, CancellationToken cancellationToken = default)
     {
         // Persist order in the database, perform initial business logic
-        await Context.Publish(new OrderCreatedResponse
+        await Context.Respond(message, new OrderCreatedResponse
         {
-            OrderId = message.OrderId,
-            ParentMessageId = message.MessageId
+            OrderId = message.OrderId
         }, cancellationToken);
         await Context.MarkAsComplete<CreateOrderCommand>();
     }
@@ -34,8 +33,7 @@ public class CreateOrderSagaHandler :
         // Order created, reserve inventory
         await Context.Send(new ReserveInventoryCommand
         {
-            OrderId = response.OrderId,
-            ParentMessageId = response.MessageId
+            OrderId = response.OrderId
         }, cancellationToken);
         await Context.MarkAsComplete<OrderCreatedResponse>();
     }
@@ -51,8 +49,7 @@ public class CreateOrderSagaHandler :
         // Inventory reserved, start payment process
         await Context.Send(new ProcessPaymentCommand
         {
-            OrderId = response.OrderId,
-            ParentMessageId = response.MessageId
+            OrderId = response.OrderId
         }, cancellationToken);
         await Context.MarkAsComplete<InventoryReservedResponse>();
     }
@@ -68,8 +65,7 @@ public class CreateOrderSagaHandler :
         // Payment complete, start shipping process
         await Context.Send(new ShipOrderCommand
         {
-            OrderId = response.OrderId,
-            ParentMessageId = response.MessageId
+            OrderId = response.OrderId
         }, cancellationToken);
         await Context.MarkAsComplete<PaymentSucceededResponse>();
     }

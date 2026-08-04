@@ -210,8 +210,7 @@ public class CreateOrderSagaHandler :
         // Order created, reserve inventory
         await Context.Send(new ReserveInventoryCommand
         {
-            OrderId = response.OrderId,
-            ParentMessageId = response.MessageId
+            OrderId = response.OrderId
         }, cancellationToken);
         await Context.MarkAsComplete<OrderCreatedResponse>();
     }
@@ -266,6 +265,48 @@ This produces a full cross-service trace chain in Grafana Tempo or Jaeger.
   - Avro/Protobuf registry integration (including the built‑in `AvroSchemaConverter`)
   - Backward/forward compatibility detection
   - Contract-driven saga evolution
+
+## Durable request-response identity
+
+Responses are targeted saga continuations, never broadcast events. Use
+`Context.Respond(request, response, cancellationToken)` to send through the broker to the canonical
+`ResponseEndpoint` owned by the waiting saga application. `ReplyTo` is an obsolete alias for the same
+value. `Context.Publish(response)` fails explicitly.
+
+| Field | Meaning |
+| --- | --- |
+| `MessageId` | Identity and idempotency key of this concrete message |
+| `RequestId` | Request answered by a response; a new request uses its own `MessageId` |
+| `CorrelationId` | Complete business workflow |
+| `CausationId` | Direct causing message |
+| `ParentMessageId` | Saga-step and compensation parent |
+| `SagaId` | Durable saga instance |
+| `ResponseEndpoint` | Logical application waiting for the response |
+
+In the M1–M5 flow, request M1 has `RequestId=M1`; response M2 has a distinct identity and
+`RequestId=CausationId=ParentMessageId=M1`; child request M3 has `RequestId=M3` and is caused by M2;
+response M4 answers M3; request M5 is caused by M4. Correlation and saga IDs remain stable.
+Compensation walks only `ParentMessageId`.
+
+`OrderCreatedResponse` intentionally crosses the broker even when order creation is local. The durable,
+observable transition lets another replica reload Redis state and continue, tolerates failure between
+steps, and preserves idempotent redelivery.
+
+### Canonical application identities and migration
+
+Topology keys use invariant lowercase and ignore `-`, `_`, `.`, and whitespace. `StockService`,
+`stock-service`, `stock_service`, and `STOCK.SERVICE` all become `stockservice`; other characters and
+values without an alphanumeric character are rejected. Equivalent replicas share one queue/group.
+
+Canonicalization can rename broker resources. Drain old RabbitMQ queues and stop old consumers; validate
+NATS stream retention before replacing old durables/groups; choose Kafka starting offsets deliberately
+for the new canonical group. Remove old resources only after validation. Lycia never deletes production
+resources or dual-binds old and new names automatically.
+
+Typed endpoints, discovery, startup validation, and canonical matching enforce ownership inside Lycia,
+not globally at the broker. Another RabbitMQ queue, NATS group/durable, or Kafka group can receive the
+same logical message. Delivery follows at-least-once patterns, not exactly once; handlers must be
+idempotent.
 
 ## License
 

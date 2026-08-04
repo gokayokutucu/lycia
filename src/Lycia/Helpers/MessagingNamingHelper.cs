@@ -15,28 +15,25 @@ public static class MessagingNamingHelper
 
     /// <summary>Returns the logical command owner derived from its endpoint marker.</summary>
     public static string GetCommandRoutingKey(Type commandType) =>
-        CommandEndpointResolver.Default.Resolve(commandType);
+        EndpointIdentityNormalizer.Default.Normalize(CommandEndpointResolver.Default.Resolve(commandType));
 
     /// <summary>Returns <c>command.{MessageType}.{ApplicationId}</c>.</summary>
     public static string GetCommandQueueName(Type commandType, string? applicationId)
     {
-        ValidateApplicationId(applicationId);
-        return $"command.{commandType.Name}.{applicationId}";
+        return $"command.{commandType.Name}.{NormalizeApplicationId(applicationId)}";
     }
 
     /// <summary>Returns <c>event.{MessageType}.{HandlerType}.{ApplicationId}</c>.</summary>
     public static string GetEventSubscriptionQueueName(Type eventType, Type handlerType, string? applicationId)
     {
         if (handlerType == null) throw new ArgumentNullException(nameof(handlerType));
-        ValidateApplicationId(applicationId);
-        return $"event.{eventType.Name}.{handlerType.Name}.{applicationId}";
+        return $"event.{eventType.Name}.{handlerType.Name}.{NormalizeApplicationId(applicationId)}";
     }
 
     /// <summary>Returns <c>response.{MessageType}.{ApplicationId}</c>.</summary>
     public static string GetResponseQueueName(Type responseType, string? applicationId)
     {
-        ValidateApplicationId(applicationId);
-        return $"response.{responseType.Name}.{applicationId}";
+        return $"response.{responseType.Name}.{NormalizeApplicationId(applicationId)}";
     }
 
     /// <summary>Returns the logical queue name appropriate for the message kind.</summary>
@@ -51,8 +48,7 @@ public static class MessagingNamingHelper
             case MessageKind.Response:
                 return GetResponseQueueName(messageType, applicationId);
             default:
-                ValidateApplicationId(applicationId);
-                return $"message.{messageType.Name}.{handlerType.Name}.{applicationId}";
+                return $"message.{messageType.Name}.{handlerType.Name}.{NormalizeApplicationId(applicationId)}";
         }
     }
 
@@ -68,9 +64,6 @@ public static class MessagingNamingHelper
             ? GetCommandRoutingKey(messageType)
             : string.Empty;
 
-    private static void ValidateApplicationId(string? applicationId)
-    {
-        if (string.IsNullOrWhiteSpace(applicationId))
-            throw new ArgumentException("ApplicationId cannot be null or empty.", nameof(applicationId));
-    }
+    private static string NormalizeApplicationId(string? applicationId) =>
+        EndpointIdentityNormalizer.Default.Normalize(applicationId!);
 }

@@ -137,6 +137,7 @@ public class ActivityTracingMiddlewareTests
     {
         public Guid MessageId { get; set; }
         public Guid ParentMessageId { get; set; }
+        public Guid? CausationId { get; set; }
         public Guid CorrelationId { get; set; }
         public DateTime Timestamp { get; set; }
         public string ApplicationId { get; set; }

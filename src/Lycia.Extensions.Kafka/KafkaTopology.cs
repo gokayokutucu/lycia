@@ -15,7 +15,7 @@ public static class KafkaTopology
             case MessageKind.Command:
                 return $"{prefix}.command.{MessagingNamingHelper.GetCommandRoutingKey(messageType)}.{messageType.Name}";
             case MessageKind.Response:
-                return $"{prefix}.response.{GetReplyTo(message, messageType)}.{messageType.Name}";
+                return $"{prefix}.response.{GetResponseEndpoint(message, messageType)}.{messageType.Name}";
             default:
                 return $"{prefix}.event.{messageType.Name}";
         }
@@ -29,7 +29,7 @@ public static class KafkaTopology
             case MessageKind.Command:
                 return $"{prefix}.command.{MessagingNamingHelper.GetCommandRoutingKey(messageType)}.{messageType.Name}";
             case MessageKind.Response:
-                return $"{prefix}.response.{applicationId}.{messageType.Name}";
+                return $"{prefix}.response.{EndpointIdentityNormalizer.Default.Normalize(applicationId)}.{messageType.Name}";
             default:
                 return $"{prefix}.event.{messageType.Name}";
         }
@@ -47,12 +47,12 @@ public static class KafkaTopology
         return message.MessageId.ToString("N");
     }
 
-    private static string GetReplyTo(object message, Type messageType)
+    private static string GetResponseEndpoint(object message, Type messageType)
     {
         var metadata = message as IRequestRoutingMetadata;
-        if (string.IsNullOrWhiteSpace(metadata?.ReplyTo))
-            throw new InvalidOperationException($"Response '{messageType.FullName}' does not contain ReplyTo metadata.");
-        return metadata!.ReplyTo!;
+        if (string.IsNullOrWhiteSpace(metadata?.ResponseEndpoint))
+            throw new InvalidOperationException($"Response '{messageType.FullName}' does not contain ResponseEndpoint metadata.");
+        return EndpointIdentityNormalizer.Default.Normalize(metadata!.ResponseEndpoint!);
     }
 
     private static string Sanitize(string value) => new(value.Select(character =>

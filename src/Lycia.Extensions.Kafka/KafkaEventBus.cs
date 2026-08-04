@@ -8,6 +8,7 @@ using Lycia.Messaging;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Abstractions.Serializers;
+using Lycia.Saga.Extensions;
 
 namespace Lycia.Extensions.Kafka;
 
@@ -25,6 +26,9 @@ public sealed class KafkaEventBus : IEventBus, IAsyncDisposable
     private readonly ConcurrentDictionary<string, Task> _topicTasks = new(StringComparer.Ordinal);
     private readonly List<IConsumer<string, byte[]>> _consumers = new();
 
+    /// <inheritdoc />
+    public string ApplicationId { get; }
+
     /// <summary>Creates a Kafka transport for the discovered logical subscriptions.</summary>
     public KafkaEventBus(
         IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap,
@@ -36,6 +40,7 @@ public sealed class KafkaEventBus : IEventBus, IAsyncDisposable
         _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         if (string.IsNullOrWhiteSpace(options.ApplicationId))
             throw new ArgumentException("ApplicationId is required.", nameof(options));
+        ApplicationId = EndpointIdentityNormalizer.Default.Normalize(options.ApplicationId);
 
         _producer = new ProducerBuilder<string, byte[]>(new ProducerConfig
         {
@@ -50,14 +55,32 @@ public sealed class KafkaEventBus : IEventBus, IAsyncDisposable
     public async Task Send<TCommand>(TCommand command, Type? handlerType = null, Guid? sagaId = null,
         CancellationToken cancellationToken = default) where TCommand : ICommand
     {
-        RequestRouting.Prepare(command, _options.ApplicationId);
+        RequestRouting.Prepare(command);
         await PublishMessageAsync(command, sagaId, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
+    public Task Respond<TRequest, TResponse>(TRequest request, TResponse response, Type? handlerType = null,
+        Guid? sagaId = null, CancellationToken cancellationToken = default)
+        where TRequest : IMessage
+        where TResponse : IResponse<TRequest>
+    {
+        var endpoint = response.ResponseEndpoint
+                       ?? (request as IRequestRoutingMetadata)?.ResponseEndpoint
+                       ?? ApplicationId;
+        response.PrepareResponse(request, sagaId ?? request.SagaId ?? Guid.Empty, endpoint);
+        return PublishMessageAsync(response, sagaId, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public Task Publish<TEvent>(TEvent @event, Type? handlerType = null, Guid? sagaId = null,
-        CancellationToken cancellationToken = default) where TEvent : IEvent =>
-        PublishMessageAsync(@event, sagaId, cancellationToken);
+        CancellationToken cancellationToken = default) where TEvent : IEvent
+    {
+        if (@event is IResponse)
+            throw new InvalidOperationException(
+                $"Response '{@event.GetType().FullName}' cannot be published. Use Respond(request, response)." );
+        return PublishMessageAsync(@event, sagaId, cancellationToken);
+    }
 
     /// <inheritdoc />
     public IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType, IReadOnlyDictionary<string, object?> Headers)>
@@ -74,7 +97,7 @@ public sealed class KafkaEventBus : IEventBus, IAsyncDisposable
         foreach (var pair in _queueTypeMap)
         {
             var topic = KafkaTopology.GetSubscriptionTopic(
-                _options.TopicPrefix, pair.Value.MessageType, _options.ApplicationId);
+                _options.TopicPrefix, pair.Value.MessageType, ApplicationId);
             await EnsureTopicAsync(topic, consumerToken).ConfigureAwait(false);
         }
 
@@ -121,7 +144,7 @@ public sealed class KafkaEventBus : IEventBus, IAsyncDisposable
         // start every logical subscription instead of blocking on the first registration.
         await Task.Yield();
         var topic = KafkaTopology.GetSubscriptionTopic(
-            _options.TopicPrefix, registration.MessageType, _options.ApplicationId);
+            _options.TopicPrefix, registration.MessageType, ApplicationId);
         var config = new ConsumerConfig
         {
             BootstrapServers = _options.BootstrapServers,
@@ -220,12 +243,14 @@ public sealed class KafkaEventBus : IEventBus, IAsyncDisposable
         AddHeader(headers, "MessageId", message.MessageId.ToString());
         AddHeader(headers, "CorrelationId", message.CorrelationId.ToString());
         AddHeader(headers, "ParentMessageId", message.ParentMessageId.ToString());
+        AddHeader(headers, "CausationId", message.CausationId?.ToString());
         AddHeader(headers, "SagaId", (message.SagaId ?? sagaId)?.ToString());
         AddHeader(headers, "ApplicationId", message.ApplicationId);
         if (message is IRequestRoutingMetadata routing)
         {
             AddHeader(headers, "RequestId", routing.RequestId.ToString());
-            AddHeader(headers, "ReplyTo", routing.ReplyTo);
+            AddHeader(headers, "ResponseEndpoint", routing.ResponseEndpoint);
+            AddHeader(headers, "ReplyTo", routing.ResponseEndpoint);
         }
         foreach (var pair in serializerHeaders) AddHeader(headers, pair.Key, pair.Value?.ToString());
         return (body, headers);

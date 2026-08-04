@@ -45,7 +45,9 @@ public sealed class NatsEventBusIntegrationTests : IAsyncLifetime
             typeof(OwnedCommand), typeof(OwnedCommandHandler), ownerOptions.ApplicationId);
         var map = new Dictionary<string, (Type, Type)>
         {
-            [queue] = (typeof(OwnedCommand), typeof(OwnedCommandHandler))
+            [queue] = (typeof(OwnedCommand), typeof(OwnedCommandHandler)),
+            [MessagingNamingHelper.GetQueueName(typeof(OwnedResponse), typeof(OwnedResponseHandler), ownerOptions.ApplicationId)] =
+                (typeof(OwnedResponse), typeof(OwnedResponseHandler))
         };
         var serializer = new NewtonsoftJsonMessageSerializer();
 
@@ -61,7 +63,19 @@ public sealed class NatsEventBusIntegrationTests : IAsyncLifetime
 
         var incoming = await receive;
         incoming.MessageType.Should().Be(typeof(OwnedCommand));
-        incoming.Headers["ReplyTo"].Should().Be("RequesterService");
+        incoming.Headers["ResponseEndpoint"].Should().Be("ownerservice");
+        incoming.Headers["ReplyTo"].Should().Be("ownerservice");
+
+        var responseReceive = ReceiveOneAsync(consumer, timeout.Token);
+        await Task.Delay(500, timeout.Token);
+        var response = new OwnedResponse { Value = "nats-response" };
+        await publisher.Respond(command, response, cancellationToken: timeout.Token);
+        var responseIncoming = await responseReceive;
+        responseIncoming.MessageType.Should().Be(typeof(OwnedResponse));
+        responseIncoming.Headers["RequestId"].Should().Be(command.MessageId.ToString());
+        responseIncoming.Headers["CausationId"].Should().Be(command.MessageId.ToString());
+        responseIncoming.Headers["ResponseEndpoint"].Should().Be("ownerservice");
+        response.MessageId.Should().NotBe(command.MessageId);
 
         var eventMap = CreateEventMap(ownerOptions.ApplicationId);
         await using var eventConsumer = new NatsEventBus(eventMap, ownerOptions, serializer);
@@ -137,7 +151,9 @@ public sealed class KafkaEventBusIntegrationTests : IAsyncLifetime
             typeof(OwnedCommand), typeof(OwnedCommandHandler), ownerOptions.ApplicationId);
         var map = new Dictionary<string, (Type, Type)>
         {
-            [queue] = (typeof(OwnedCommand), typeof(OwnedCommandHandler))
+            [queue] = (typeof(OwnedCommand), typeof(OwnedCommandHandler)),
+            [MessagingNamingHelper.GetQueueName(typeof(OwnedResponse), typeof(OwnedResponseHandler), ownerOptions.ApplicationId)] =
+                (typeof(OwnedResponse), typeof(OwnedResponseHandler))
         };
         foreach (var registration in CreateEventMap(ownerOptions.ApplicationId))
             map.Add(registration.Key, registration.Value);
@@ -152,14 +168,25 @@ public sealed class KafkaEventBusIntegrationTests : IAsyncLifetime
             TaskCreationOptions.RunContinuationsAsynchronously);
         var eventsReceived = new TaskCompletionSource<IReadOnlyList<IncomingMessage>>(
             TaskCreationOptions.RunContinuationsAsynchronously);
-        var pump = PumpAsync(consumer, commandReceived, eventsReceived, timeout.Token);
+        var responseReceived = new TaskCompletionSource<IncomingMessage>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var pump = PumpAsync(consumer, commandReceived, responseReceived, eventsReceived, timeout.Token);
         await Task.Delay(3000, timeout.Token);
         var command = new OwnedCommand { Value = "kafka" };
         await publisher.Send(command, cancellationToken: timeout.Token);
 
         var incoming = await commandReceived.Task.WaitAsync(timeout.Token);
         incoming.MessageType.Should().Be(typeof(OwnedCommand));
-        incoming.Headers["ReplyTo"].Should().Be("RequesterService");
+        incoming.Headers["ResponseEndpoint"].Should().Be("ownerservice");
+        incoming.Headers["ReplyTo"].Should().Be("ownerservice");
+
+        var response = new OwnedResponse { Value = "kafka-response" };
+        await publisher.Respond(command, response, cancellationToken: timeout.Token);
+        var responseIncoming = await responseReceived.Task.WaitAsync(timeout.Token);
+        responseIncoming.Headers["RequestId"].Should().Be(command.MessageId.ToString());
+        responseIncoming.Headers["CausationId"].Should().Be(command.MessageId.ToString());
+        responseIncoming.Headers["ResponseEndpoint"].Should().Be("ownerservice");
+        response.MessageId.Should().NotBe(command.MessageId);
 
         await publisher.Publish(new OwnedEvent { Value = "kafka-event" }, cancellationToken: timeout.Token);
         var eventHandlers = (await eventsReceived.Task.WaitAsync(timeout.Token))
@@ -174,6 +201,7 @@ public sealed class KafkaEventBusIntegrationTests : IAsyncLifetime
     private static async Task PumpAsync(
         KafkaEventBus bus,
         TaskCompletionSource<IncomingMessage> commandReceived,
+        TaskCompletionSource<IncomingMessage> responseReceived,
         TaskCompletionSource<IReadOnlyList<IncomingMessage>> eventsReceived,
         CancellationToken cancellationToken)
     {
@@ -183,6 +211,8 @@ public sealed class KafkaEventBusIntegrationTests : IAsyncLifetime
             await message.Ack();
             if (message.MessageType == typeof(OwnedCommand))
                 commandReceived.TrySetResult(message);
+            else if (message.MessageType == typeof(OwnedResponse))
+                responseReceived.TrySetResult(message);
             else if (message.MessageType == typeof(OwnedEvent))
             {
                 events.Add(message);
@@ -208,6 +238,11 @@ public sealed class OwnedCommand : CommandBase, IOwnerServiceCommand
 }
 
 public sealed class OwnedCommandHandler;
+public sealed class OwnedResponse : ResponseBase<OwnedCommand>
+{
+    public string Value { get; set; } = string.Empty;
+}
+public sealed class OwnedResponseHandler;
 public sealed class OwnedEvent : EventBase
 {
     public string Value { get; set; } = string.Empty;

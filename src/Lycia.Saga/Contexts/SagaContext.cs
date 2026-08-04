@@ -30,21 +30,28 @@ public class SagaContext<TInitialMessage>(
 
     public Task Send<T>(T command, CancellationToken cancellationToken = default) where T : ICommand
     {
-        command.SetSagaId(SagaId);
+        command.PrepareCommand(CurrentStep, SagaId, eventBus.ApplicationId);
         return eventBus.Send(command, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
+    }
+
+    public Task Respond<TRequest, TResponse>(TRequest request, TResponse response,
+        CancellationToken cancellationToken = default)
+        where TRequest : IMessage
+        where TResponse : IResponse<TRequest>
+    {
+        response.PrepareResponse(request, SagaId, eventBus.ApplicationId);
+        return eventBus.Respond(request, response, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 
     public Task Publish<T>(T @event, CancellationToken cancellationToken = default) where T : IEvent
     {
-        @event.SetSagaId(SagaId);
-        @event.PropagateResponseRouting(CurrentStep);
+        @event.PrepareEvent(CurrentStep, SagaId);
         return eventBus.Publish(@event, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 
     public Task Publish<T>(T @event, Type? handlerType, CancellationToken cancellationToken = default) where T : IEvent
     {
-        @event.SetSagaId(SagaId);
-        @event.PropagateResponseRouting(CurrentStep);
+        @event.PrepareEvent(CurrentStep, SagaId);
         return eventBus.Publish(@event, handlerType, SagaId, cancellationToken);
     }
 
@@ -88,7 +95,7 @@ public class SagaContext<TInitialMessage>(
 
     public Task Compensate<T>(T @event, CancellationToken cancellationToken = default) where T : IFailedEventBase
     {
-        @event.SetSagaId(SagaId);
+        @event.PrepareEvent(CurrentStep, SagaId);
         return eventBus.Publish(@event, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 
@@ -318,21 +325,28 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
 
     public Task Send<T>(T command, CancellationToken cancellationToken = default) where T : ICommand
     {
-        command.SetSagaId(SagaId);
+        command.PrepareCommand(CurrentStep, SagaId, eventBus.ApplicationId);
         return eventBus.Send(command, HandlerTypeOfCurrentStep, sagaId, cancellationToken);
+    }
+
+    public Task Respond<TRequest, TResponse>(TRequest request, TResponse response,
+        CancellationToken cancellationToken = default)
+        where TRequest : IMessage
+        where TResponse : IResponse<TRequest>
+    {
+        response.PrepareResponse(request, SagaId, eventBus.ApplicationId);
+        return eventBus.Respond(request, response, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 
     public Task Publish<T>(T @event, CancellationToken cancellationToken = default) where T : IEvent
     {
-        @event.SetSagaId(SagaId);
-        @event.PropagateResponseRouting(CurrentStep);
+        @event.PrepareEvent(CurrentStep, SagaId);
         return eventBus.Publish(@event, HandlerTypeOfCurrentStep, sagaId, cancellationToken);
     }
 
     public Task Publish<T>(T @event, Type? handlerType, CancellationToken cancellationToken = default) where T : IEvent
     {
-        @event.SetSagaId(SagaId);
-        @event.PropagateResponseRouting(CurrentStep);
+        @event.PrepareEvent(CurrentStep, SagaId);
         return eventBus.Publish(@event, handlerType, SagaId, cancellationToken);
     }
 
@@ -394,7 +408,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
 
     public Task Compensate<T>(T @event, CancellationToken cancellationToken = default) where T : IFailedEventBase
     {
-        @event.SetSagaId(SagaId);
+        @event.PrepareEvent(CurrentStep, SagaId);
         return eventBus.Publish(@event, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 
@@ -511,18 +525,28 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
 
     public Task Send<T>(T command, CancellationToken cancellationToken = default) where T : ICommand
     {
+        command.PrepareCommand(StepAdapter, SagaId, eventBus.ApplicationId);
         return eventBus.Send(command, HandlerTypeOfCurrentStep, sagaId, cancellationToken);
+    }
+
+    public Task Respond<TRequest, TResponse>(TRequest request, TResponse response,
+        CancellationToken cancellationToken = default)
+        where TRequest : IMessage
+        where TResponse : IResponse<TRequest>
+    {
+        response.PrepareResponse(request, SagaId, eventBus.ApplicationId);
+        return eventBus.Respond(request, response, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 
     public Task Publish<T>(T @event, CancellationToken cancellationToken = default) where T : IEvent
     {
-        @event.PropagateResponseRouting(StepAdapter);
+        @event.PrepareEvent(StepAdapter, SagaId);
         return eventBus.Publish(@event, HandlerTypeOfCurrentStep, sagaId, cancellationToken);
     }
 
     public Task Publish<T>(T @event, Type? handlerType, CancellationToken cancellationToken = default) where T : IEvent
     {
-        @event.PropagateResponseRouting(StepAdapter);
+        @event.PrepareEvent(StepAdapter, SagaId);
         return eventBus.Publish(@event, handlerType, sagaId, cancellationToken);
     }
 
@@ -616,7 +640,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
     // Assuming FailedEventBase is accessible here or defined appropriately
     public Task Compensate<T>(T @event, CancellationToken cancellationToken = default) where T : IFailedEventBase
     {
-        @event.SetSagaId(SagaId);
+        @event.PrepareEvent(StepAdapter, SagaId);
         return eventBus.Publish(@event, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 

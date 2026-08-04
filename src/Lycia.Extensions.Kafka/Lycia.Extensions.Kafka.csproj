@@ -26,6 +26,7 @@
     <ProjectReference Include="..\Lycia\Lycia.csproj" PrivateAssets="All" />
     <ProjectReference Include="..\Lycia.Common\Lycia.Common.csproj" PrivateAssets="All" />
     <ProjectReference Include="..\Lycia.Saga.Abstractions\Lycia.Saga.Abstractions.csproj" PrivateAssets="All" />
+    <ProjectReference Include="..\Lycia.Saga\Lycia.Saga.csproj" PrivateAssets="All" />
   </ItemGroup>
   <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' == 'true'">
     <PackageReference Include="Lycia" Version="[$(LyciaMinVersion),)" />

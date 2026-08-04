@@ -19,8 +19,7 @@ public class InventorySagaHandler :
         // Reserve inventory
         await Context.Publish(new InventoryReservedEvent
         {
-            OrderId = evt.OrderId,
-            ParentMessageId = evt.MessageId
+            OrderId = evt.OrderId
         }, cancellationToken);
         await Context.MarkAsComplete<OrderCreatedEvent>();
     }

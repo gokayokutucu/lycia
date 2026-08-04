@@ -33,6 +33,9 @@ public static class RabbitMqEventBusHelper
         if (parentMessageId != Guid.Empty)
             headers[Constants.ParentMessageIdHeader] = parentMessageId.ToString();
 
+        if (message is IMessage typedMessage && typedMessage.CausationId is { } causationId && causationId != Guid.Empty)
+            headers[Constants.CausationIdHeader] = causationId.ToString();
+
         // Timestamp
         var timestamp = RabbitMqEventBusHelper.GetDateTimeProperty("Timestamp", msg);
         headers[Constants.TimestampHeader] = timestamp.ToString("o");
@@ -45,13 +48,12 @@ public static class RabbitMqEventBusHelper
         {
             if (requestMetadata.RequestId != Guid.Empty)
                 headers[Constants.RequestIdHeader] = requestMetadata.RequestId.ToString();
-            if (!string.IsNullOrWhiteSpace(requestMetadata.ReplyTo))
-                headers[Constants.ReplyToHeader] = requestMetadata.ReplyTo;
+            if (!string.IsNullOrWhiteSpace(requestMetadata.ResponseEndpoint))
+            {
+                headers[Constants.ResponseEndpointHeader] = requestMetadata.ResponseEndpoint;
+                headers[Constants.ReplyToHeader] = requestMetadata.ResponseEndpoint;
+            }
         }
-
-        // ParentMessageId (again, fallback/generation)
-        var parentMsgIdForFallback = RabbitMqEventBusHelper.GetGuidProperty("ParentMessageId", msg);
-        headers[Constants.ParentMessageIdHeader] = (parentMsgIdForFallback != Guid.Empty ? parentMsgIdForFallback : Guid.NewGuid()).ToString();
 
         headers[typeLabel] = messageType.FullName;
         headers[Constants.PublishedAtHeader] = DateTime.UtcNow.ToString("o");

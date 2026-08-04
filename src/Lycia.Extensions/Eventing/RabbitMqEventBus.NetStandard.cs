@@ -18,6 +18,7 @@ using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Abstractions.Serializers;
 using Lycia.Saga.Messaging;
+using Lycia.Saga.Extensions;
 using Constants = Lycia.Extensions.Configurations.Constants;
 
 namespace Lycia.Extensions.Eventing;
@@ -36,6 +37,9 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
     private readonly EventBusOptions _options;
     private readonly IMessageSerializer _serializer;
 
+    /// <inheritdoc />
+    public string ApplicationId { get; }
+
     private RabbitMqEventBus(
         ILogger<RabbitMqEventBus> logger,
         IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap,
@@ -49,6 +53,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
 
         if (options.ConnectionString == null)
             throw new InvalidOperationException("RabbitMqEventBus connection is null");
+        ApplicationId = EndpointIdentityNormalizer.Default.Normalize(options.ApplicationId!);
 
         _factory = new ConnectionFactory
         {
@@ -110,13 +115,38 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         CancellationToken cancellationToken = default)
         where TEvent : IEvent
     {
+        if (@event is IResponse)
+            throw new InvalidOperationException(
+                $"Response '{@event.GetType().FullName}' cannot be published. Use Respond(request, response)." );
+        await PublishMessageAsync(@event, typeof(TEvent), sagaId, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public Task Respond<TRequest, TResponse>(TRequest request, TResponse response, Type? handlerType = null,
+        Guid? sagaId = null, CancellationToken cancellationToken = default)
+        where TRequest : IMessage
+        where TResponse : IResponse<TRequest>
+    {
+        var endpoint = response.ResponseEndpoint
+                       ?? (request as IRequestRoutingMetadata)?.ResponseEndpoint
+                       ?? ApplicationId;
+        response.PrepareResponse(request, sagaId ?? request.SagaId ?? Guid.Empty, endpoint);
+        return PublishMessageAsync(response, response.GetType(), sagaId, cancellationToken);
+    }
+
+    private async Task PublishMessageAsync(
+        IMessage message,
+        Type messageType,
+        Guid? sagaId,
+        CancellationToken cancellationToken)
+    {
         await EnsureChannelAsync(cancellationToken).ConfigureAwait(false);
         // routingKey equivalent to the exchange name in RabbitMQ terminology
         var exchangeName =
             MessagingNamingHelper
-                .GetExchangeName(typeof(TEvent)); // event.OrderCreatedEvent or response.OrderCreatedResponse
-        var exchangeType = RabbitMqTopology.GetExchangeType(typeof(TEvent));
-        var routingKey = RabbitMqTopology.GetPublishKey(@event, typeof(TEvent));
+                .GetExchangeName(messageType);
+        var exchangeType = RabbitMqTopology.GetExchangeType(messageType);
+        var routingKey = RabbitMqTopology.GetPublishKey(message, messageType);
 
         if (_channel == null)
         {
@@ -134,14 +164,14 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
 
         // Build base headers (Lycia metadata)
         var headers =
-            RabbitMqEventBusHelper.BuildMessageHeaders(@event, sagaId, typeof(TEvent), Constants.EventTypeHeader);
+            RabbitMqEventBusHelper.BuildMessageHeaders(message, sagaId, messageType, Constants.EventTypeHeader);
 
         // Inject current Activity context into headers for downstream consumers
         Observability.LyciaTracePropagation.Inject(headers);
 
         // Ask serializer to produce a body and its own headers (content-type, lycia-type, schema metadata, etc.)
-        var (_, serCtx) = _serializer.CreateContextFor(typeof(TEvent));
-        var (body, serializerHeaders) = _serializer.Serialize(@event, serCtx);
+        var (_, serCtx) = _serializer.CreateContextFor(messageType);
+        var (body, serializerHeaders) = _serializer.Serialize(message, serCtx);
 
         // Merge serializer headers into base headers (serializer wins on conflicts)
         foreach (var kv in serializerHeaders)
@@ -150,7 +180,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         var properties = _channel.CreateBasicProperties();
         properties.Persistent = true;
         properties.Headers = headers;
-        ApplyRequestProperties(properties, @event);
+        ApplyRequestProperties(properties, message);
 
         // Set AMQP ContentType from headers (if provided by the serializer)
         if (serializerHeaders.TryGetValue(_serializer.ContentTypeHeaderKey, out var ctObj)
@@ -175,7 +205,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         CancellationToken cancellationToken = default) where TCommand : ICommand
     {
         await EnsureChannelAsync(cancellationToken).ConfigureAwait(false);
-        RequestRouting.Prepare(command, _options.ApplicationId);
+        RequestRouting.Prepare(command);
 
         var exchangeName = MessagingNamingHelper.GetExchangeName(typeof(TCommand)); // command.CreateOrderCommand
         var routingKey = MessagingNamingHelper.GetCommandRoutingKey(typeof(TCommand));
@@ -570,7 +600,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
     {
         if (!(message is IRequestRoutingMetadata metadata)) return;
         properties.CorrelationId = metadata.RequestId == Guid.Empty ? null : metadata.RequestId.ToString();
-        properties.ReplyTo = metadata.ReplyTo;
+        properties.ReplyTo = metadata.ResponseEndpoint;
     }
 
     /// <summary>

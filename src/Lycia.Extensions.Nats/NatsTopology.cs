@@ -15,7 +15,7 @@ public static class NatsTopology
             case MessageKind.Command:
                 return $"command.{MessagingNamingHelper.GetCommandRoutingKey(messageType)}.{messageType.Name}";
             case MessageKind.Response:
-                return $"response.{GetReplyTo(message, messageType)}.{messageType.Name}";
+                return $"response.{GetResponseEndpoint(message, messageType)}.{messageType.Name}";
             default:
                 return $"event.{messageType.Name}";
         }
@@ -29,7 +29,7 @@ public static class NatsTopology
             case MessageKind.Command:
                 return $"command.{MessagingNamingHelper.GetCommandRoutingKey(messageType)}.{messageType.Name}";
             case MessageKind.Response:
-                return $"response.{applicationId}.{messageType.Name}";
+                return $"response.{EndpointIdentityNormalizer.Default.Normalize(applicationId)}.{messageType.Name}";
             default:
                 return $"event.{messageType.Name}";
         }
@@ -41,12 +41,12 @@ public static class NatsTopology
     /// <summary>Returns a Core NATS queue group for an ephemeral logical subscription.</summary>
     public static string GetQueueGroup(string logicalQueueName) => $"lycia_{Sanitize(logicalQueueName)}";
 
-    private static string GetReplyTo(object message, Type messageType)
+    private static string GetResponseEndpoint(object message, Type messageType)
     {
         var metadata = message as IRequestRoutingMetadata;
-        if (string.IsNullOrWhiteSpace(metadata?.ReplyTo))
-            throw new InvalidOperationException($"Response '{messageType.FullName}' does not contain ReplyTo metadata.");
-        return metadata!.ReplyTo!;
+        if (string.IsNullOrWhiteSpace(metadata?.ResponseEndpoint))
+            throw new InvalidOperationException($"Response '{messageType.FullName}' does not contain ResponseEndpoint metadata.");
+        return EndpointIdentityNormalizer.Default.Normalize(metadata!.ResponseEndpoint!);
     }
 
     private static string Sanitize(string value)

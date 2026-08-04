@@ -4,6 +4,26 @@ This document provides an in-depth look into the architecture, components, confi
 
 ---
 
+## Request-response implementation contract
+
+Use `Context.Send` for owned commands, `Context.Respond` for targeted replies, and `Context.Publish` only
+for facts. The context centralizes identity propagation. Commands get a fresh `MessageId`, self
+`RequestId`, and current correlation, saga, causation, parent and response endpoint. Responses get a
+fresh identity, the request `MessageId` as request, causation and parent, and the waiting application's
+canonical endpoint. Events get workflow and lineage metadata but no request metadata. Redelivery
+preserves all identities.
+
+`ParentMessageId` alone drives compensation and bubble-up; `RequestId` matches a pair and `CausationId`
+traces the direct cause. Responses are not events and every transport rejects response publication.
+
+`EndpointIdentityNormalizer` produces invariant lowercase ASCII-alphanumeric keys, ignoring dash,
+underscore, dot and whitespace. RabbitMQ, NATS, Kafka and in-memory topology use this one key. A change
+from raw resource names is operator-managed: never auto-delete or silently bind both forms.
+
+Lycia ownership is not global broker exclusivity. Independent RabbitMQ queues, NATS groups/durables, or
+Kafka groups can consume the same logical stream. Processing is at least once, business effects must be
+idempotent, and Kafka ordering is partition-scoped.
+
 ## 🚀 Architecture Overview
 
 ### Core Components

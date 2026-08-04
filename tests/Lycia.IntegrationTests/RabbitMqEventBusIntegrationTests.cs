@@ -484,6 +484,61 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         await eventBus.DisposeAsync();
     }
 
+    [Fact]
+    public async Task Respond_TargetsCanonicalEndpoint_AndPreservesIdentityMetadata()
+    {
+        var applicationId = "Test-App";
+        var queueName = MessagingNamingHelper.GetResponseQueueName(typeof(TestResponse), applicationId);
+        var queueTypeMap = new Dictionary<string, (Type, Type)>
+        {
+            [queueName] = (typeof(TestResponse), typeof(TestCommandHandlerA))
+        };
+        var consumerOptions = new EventBusOptions
+        {
+            ApplicationId = applicationId,
+            MessageTTL = TimeSpan.FromMinutes(1),
+            ConnectionString = RabbitMqConnectionString
+        };
+        var serializer = new NewtonsoftJsonMessageSerializer();
+        await using var consumerBus = await RabbitMqEventBus.CreateAsync(
+            NullLogger<RabbitMqEventBus>.Instance, queueTypeMap, consumerOptions, serializer);
+        var producerOptions = new EventBusOptions
+        {
+            ApplicationId = "test_app",
+            MessageTTL = TimeSpan.FromMinutes(1),
+            ConnectionString = RabbitMqConnectionString
+        };
+        await using var producerBus = await RabbitMqEventBus.CreateAsync(
+            NullLogger<RabbitMqEventBus>.Instance,
+            new Dictionary<string, (Type, Type)>(), producerOptions, serializer);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        var receive = Task.Run(async () =>
+        {
+            await foreach (var incoming in consumerBus.ConsumeWithAckAsync(timeout.Token))
+            {
+                await incoming.Ack();
+                var normalized = serializer.NormalizeTransportHeaders(incoming.Headers);
+                var (_, context) = serializer.CreateContextFor(typeof(TestResponse));
+                return (TestResponse)serializer.Deserialize(incoming.Body, normalized, context);
+            }
+            throw new InvalidOperationException("RabbitMQ response consumer completed early.");
+        }, timeout.Token);
+
+        await Task.Delay(300, timeout.Token);
+        var request = new TestCommand { SagaId = Guid.NewGuid(), Message = "request" };
+        await producerBus.Send(request, cancellationToken: timeout.Token);
+        var response = new TestResponse { Message = "response" };
+        await producerBus.Respond(request, response, cancellationToken: timeout.Token);
+
+        var received = await receive.WaitAsync(timeout.Token);
+        received.RequestId.Should().Be(request.MessageId);
+        received.MessageId.Should().NotBe(request.MessageId);
+        received.CausationId.Should().Be(request.MessageId);
+        received.ParentMessageId.Should().Be(request.MessageId);
+        received.ResponseEndpoint.Should().Be("testapp");
+    }
+
 // Dummy command handler for test
     private class TestCommandHandlerA : StartReactiveSagaHandler<TestCommand>
     {
@@ -495,6 +550,11 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
     private interface ITestAppCommand : ICommand, ICommandEndpoint { }
 
     private class TestCommand : CommandBase, ITestAppCommand
+    {
+        public string Message { get; set; } = string.Empty;
+    }
+
+    private sealed class TestResponse : ResponseBase<TestCommand>
     {
         public string Message { get; set; } = string.Empty;
     }

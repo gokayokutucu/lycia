@@ -18,8 +18,7 @@ public static class CommandTopologyValidator
         IEnumerable<(Type MessageType, Type HandlerType)> registrations,
         ICommandEndpointResolver? endpointResolver = null)
     {
-        if (string.IsNullOrWhiteSpace(applicationId))
-            throw new ArgumentException("ApplicationId cannot be null or empty.", nameof(applicationId));
+        var applicationKey = EndpointIdentityNormalizer.Default.Normalize(applicationId);
         if (registrations == null) throw new ArgumentNullException(nameof(registrations));
 
         var resolver = endpointResolver ?? CommandEndpointResolver.Default;
@@ -29,24 +28,26 @@ public static class CommandTopologyValidator
             .OrderBy(group => group.Key.FullName, StringComparer.Ordinal);
 
         foreach (var command in commands)
-            ValidateCommand(applicationId, command.Key, command.Select(item => item.HandlerType), resolver);
+            ValidateCommand(applicationId, applicationKey, command.Key, command.Select(item => item.HandlerType), resolver);
     }
 
     private static void ValidateCommand(
         string applicationId,
+        string applicationKey,
         Type commandType,
         IEnumerable<Type> handlerTypes,
         ICommandEndpointResolver resolver)
     {
         var handlers = handlerTypes.Distinct().OrderBy(type => type.FullName, StringComparer.Ordinal).ToArray();
         var expectedOwner = resolver.Resolve(commandType);
+        var expectedKey = EndpointIdentityNormalizer.Default.Normalize(expectedOwner);
 
-        if (!string.Equals(expectedOwner, applicationId, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(expectedKey, applicationKey, StringComparison.Ordinal))
         {
             throw new InvalidOperationException(
                 $"Command '{commandType.FullName}' is registered to handler(s) [{FormatHandlers(handlers)}] " +
                 $"owned by '{expectedOwner}', but the actual ApplicationId is '{applicationId}'. " +
-                "ApplicationId comparison is ordinal and case-insensitive.");
+                $"Canonical owner '{expectedKey}' does not match canonical ApplicationId '{applicationKey}'.");
         }
 
         if (handlers.Length != 1)

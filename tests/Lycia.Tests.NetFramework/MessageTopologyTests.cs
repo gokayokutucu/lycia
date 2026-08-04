@@ -12,11 +12,18 @@ public class MessageTopologyTests
     public void OwnershipAndNaming_AreNetFrameworkCompatible()
     {
         Assert.Equal("StockService", CommandEndpointResolver.Default.Resolve(typeof(ReserveStockCommand)));
-        Assert.Equal("command.ReserveStockCommand.StockService",
+        Assert.Equal("command.ReserveStockCommand.stockservice",
             MessagingNamingHelper.GetCommandQueueName(typeof(ReserveStockCommand), "StockService"));
         Assert.Equal("direct", RabbitMqTopology.GetExchangeType(typeof(ReserveStockCommand)));
         Assert.Equal("fanout", RabbitMqTopology.GetExchangeType(typeof(StockReservedEvent)));
     }
+
+    [Theory]
+    [InlineData("StockService")]
+    [InlineData("stock-service")]
+    [InlineData("STOCK.SERVICE")]
+    public void EndpointIdentity_IsCanonicalOnNetFramework(string value) =>
+        Assert.Equal("stockservice", EndpointIdentityNormalizer.Default.Normalize(value));
 
     [Fact]
     public void StartupValidation_RejectsWrongOwnerAndDuplicateHandlers()

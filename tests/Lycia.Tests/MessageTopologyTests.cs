@@ -46,14 +46,14 @@ public class MessageTopologyTests
         var commandA = MessagingNamingHelper.GetCommandQueueName(typeof(ReserveStockCommand), "StockService");
         var commandB = MessagingNamingHelper.GetQueueName(typeof(ReserveStockCommand), typeof(RenamedHandler), "StockService");
 
-        Assert.Equal("command.ReserveStockCommand.StockService", commandA);
+        Assert.Equal("command.ReserveStockCommand.stockservice", commandA);
         Assert.Equal(commandA, commandB);
         Assert.DoesNotContain(nameof(StockHandler), commandA);
-        Assert.Equal("event.StockReservedEvent.StockHandler.StockService",
+        Assert.Equal("event.StockReservedEvent.StockHandler.stockservice",
             MessagingNamingHelper.GetEventSubscriptionQueueName(typeof(StockReservedEvent), typeof(StockHandler), "StockService"));
-        Assert.Equal("response.StockResponse.StockService",
+        Assert.Equal("response.StockResponse.stockservice",
             MessagingNamingHelper.GetResponseQueueName(typeof(StockResponse), "StockService"));
-        Assert.Equal("StockService", MessagingNamingHelper.GetCommandRoutingKey(typeof(ReserveStockCommand)));
+        Assert.Equal("stockservice", MessagingNamingHelper.GetCommandRoutingKey(typeof(ReserveStockCommand)));
         Assert.DoesNotContain("#", MessagingNamingHelper.GetCommandRoutingKey(typeof(ReserveStockCommand)));
     }
 
@@ -64,9 +64,9 @@ public class MessageTopologyTests
         Assert.Equal("fanout", RabbitMqTopology.GetExchangeType(typeof(StockReservedEvent)));
         Assert.Equal(string.Empty, RabbitMqTopology.GetBindingKey(typeof(StockReservedEvent), "StockService"));
 
-        var response = new StockResponse { ReplyTo = "OrderService" };
-        Assert.Equal("OrderService", RabbitMqTopology.GetPublishKey(response, typeof(StockResponse)));
-        Assert.Equal("OrderService", RabbitMqTopology.GetBindingKey(typeof(StockResponse), "OrderService"));
+        var response = new StockResponse { ResponseEndpoint = "Order-Service" };
+        Assert.Equal("orderservice", RabbitMqTopology.GetPublishKey(response, typeof(StockResponse)));
+        Assert.Equal("orderservice", RabbitMqTopology.GetBindingKey(typeof(StockResponse), "OrderService"));
     }
 
     [Fact]
@@ -112,28 +112,79 @@ public class MessageTopologyTests
         });
 
     [Fact]
-    public void ResponseRouting_PropagatesRequestMetadata()
+    public void MessageIdentity_PropagatesRequestResponseAndCausationMetadata()
     {
-        var command = new ReserveStockCommand { ReplyTo = "OrderService", RequestId = Guid.NewGuid() };
+        var sagaId = Guid.NewGuid();
+        var current = new StockReservedEvent { SagaId = sagaId };
+        var command = new ReserveStockCommand();
+        command.PrepareCommand(current, sagaId, "orderservice");
         var response = new StockResponse();
 
-        response.PropagateResponseRouting(command);
+        response.PrepareResponse(command, sagaId, "orderservice");
 
-        Assert.Equal(command.ReplyTo, response.ReplyTo);
-        Assert.Equal(command.RequestId, response.RequestId);
+        Assert.Equal(command.MessageId, command.RequestId);
+        Assert.Equal(current.MessageId, command.CausationId);
+        Assert.Equal(current.MessageId, command.ParentMessageId);
+        Assert.Equal(command.MessageId, response.RequestId);
+        Assert.NotEqual(response.RequestId, response.MessageId);
+        Assert.Equal(command.MessageId, response.CausationId);
+        Assert.Equal(command.MessageId, response.ParentMessageId);
+        Assert.Equal(current.CorrelationId, response.CorrelationId);
+        Assert.Equal(sagaId, response.SagaId);
+        Assert.Equal("orderservice", response.ResponseEndpoint);
+    }
+
+    [Fact]
+    public void ResponseBase_DoesNotInferRequestIdFromParentMessageId()
+    {
+        var parent = Guid.NewGuid();
+        var response = new StockResponse(parent);
+
+        Assert.Equal(parent, response.ParentMessageId);
+        Assert.Equal(Guid.Empty, response.RequestId);
+        Assert.NotEqual(response.MessageId, response.RequestId);
+    }
+
+    [Theory]
+    [InlineData("StockService")]
+    [InlineData("stockservice")]
+    [InlineData("stock-service")]
+    [InlineData("stock_service")]
+    [InlineData("STOCK.SERVICE")]
+    [InlineData("stock service")]
+    public void EndpointIdentityNormalizer_EquivalentSpellingsShareCanonicalKey(string value) =>
+        Assert.Equal("stockservice", EndpointIdentityNormalizer.Default.Normalize(value));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("-_.")]
+    [InlineData("@@")]
+    public void EndpointIdentityNormalizer_RejectsInvalidValues(string value) =>
+        Assert.Throws<ArgumentException>(() => EndpointIdentityNormalizer.Default.Normalize(value));
+
+    [Fact]
+    public void PublishingAResponse_IsRejectedEvenForDualContractTypes()
+    {
+        var response = new InvalidBroadcastResponse();
+        var current = new StockReservedEvent();
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => response.PrepareEvent(current, Guid.NewGuid()));
+        Assert.Contains("Context.Respond", exception.Message);
     }
 
     [Fact]
     public void NatsTopology_UsesOwnerSubscriptionAndRequesterResponseSubjects()
     {
         var command = new ReserveStockCommand();
-        var response = new StockResponse { ReplyTo = "OrderService" };
+        var response = new StockResponse { ResponseEndpoint = "Order-Service" };
 
-        Assert.Equal("command.StockService.ReserveStockCommand",
+        Assert.Equal("command.stockservice.ReserveStockCommand",
             NatsTopology.GetPublishSubject(command, command.GetType()));
         Assert.Equal("event.StockReservedEvent",
             NatsTopology.GetSubscriptionSubject(typeof(StockReservedEvent), "StockService"));
-        Assert.Equal("response.OrderService.StockResponse",
+        Assert.Equal("response.orderservice.StockResponse",
             NatsTopology.GetPublishSubject(response, response.GetType()));
         Assert.Equal("lycia_event_StockReservedEvent_StockHandler_StockService",
             NatsTopology.GetQueueGroup("event.StockReservedEvent.StockHandler.StockService"));
@@ -146,7 +197,7 @@ public class MessageTopologyTests
         var groupA = KafkaTopology.GetConsumerGroup("lycia", "event.StockReservedEvent.StockHandler.StockService");
         var groupB = KafkaTopology.GetConsumerGroup("lycia", "event.StockReservedEvent.RenamedHandler.StockService");
 
-        Assert.Equal("lycia.command.StockService.ReserveStockCommand",
+        Assert.Equal("lycia.command.stockservice.ReserveStockCommand",
             KafkaTopology.GetPublishTopic("lycia", command, command.GetType()));
         Assert.NotEqual(groupA, groupB);
         Assert.Equal(command.CorrelationId.ToString("N"), KafkaTopology.GetPartitionKey(command));
@@ -160,7 +211,11 @@ public class MessageTopologyTests
     private sealed class AmbiguousCommand : CommandBase, IStockServiceCommand, IWarehouseCommand { }
     private sealed class InvalidMarkerCommand : CommandBase, IStockEndpoint { }
     private sealed class StockReservedEvent : EventBase { }
-    private sealed class StockResponse : ResponseBase<ReserveStockCommand> { }
+    private sealed class StockResponse : ResponseBase<ReserveStockCommand>
+    {
+        public StockResponse(Guid? parentMessageId = null) : base(parentMessageId) { }
+    }
+    private sealed class InvalidBroadcastResponse : ResponseBase<ReserveStockCommand>, IEvent { }
     private sealed class StockHandler { }
     private sealed class RenamedHandler { }
 }

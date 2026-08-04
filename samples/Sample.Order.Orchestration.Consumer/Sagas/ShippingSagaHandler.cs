@@ -6,6 +6,7 @@ using Lycia.Saga.Messaging.Handlers;
 using Sample.Shared.Messages.Commands;
 using Sample.Shared.Messages.Responses;
 using Sample.Shared.SagaStates;
+using Sample.Shared.Services;
 
 namespace Sample.Order.Orchestration.Consumer.Sagas;
 
@@ -14,11 +15,15 @@ public class ShippingSagaHandler :
 {
     public override async Task HandleAsync(ShipOrderCommand message, CancellationToken cancellationToken = default)
     {
-        // Shipping logic
-        await Context.Publish(new OrderShippedResponse
+        if (!ShippingService.TryShip(message.OrderId, !SampleScenario.FailShipping))
         {
-            OrderId = message.OrderId,
-            ParentMessageId = message.MessageId
+            await Context.MarkAsFailed<ShipOrderCommand>(cancellationToken);
+            return;
+        }
+
+        await Context.Respond(message, new OrderShippedResponse
+        {
+            OrderId = message.OrderId
         }, cancellationToken);
         await Context.MarkAsComplete<ShipOrderCommand>();
     }

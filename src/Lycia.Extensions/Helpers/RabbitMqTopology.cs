@@ -28,7 +28,7 @@ public static class RabbitMqTopology
             case MessageKind.Command:
                 return MessagingNamingHelper.GetCommandRoutingKey(messageType);
             case MessageKind.Response:
-                return applicationId;
+                return EndpointIdentityNormalizer.Default.Normalize(applicationId);
             default:
                 return string.Empty;
         }
@@ -51,9 +51,9 @@ public static class RabbitMqTopology
     private static string GetResponseDestination(object message, Type messageType)
     {
         var metadata = message as IRequestRoutingMetadata;
-        if (string.IsNullOrWhiteSpace(metadata?.ReplyTo))
+        if (string.IsNullOrWhiteSpace(metadata?.ResponseEndpoint))
             throw new InvalidOperationException(
-                $"Response '{messageType.FullName}' does not contain a ReplyTo logical application endpoint.");
-        return metadata!.ReplyTo!;
+                $"Response '{messageType.FullName}' does not contain a ResponseEndpoint logical application endpoint.");
+        return EndpointIdentityNormalizer.Default.Normalize(metadata!.ResponseEndpoint!);
     }
 }

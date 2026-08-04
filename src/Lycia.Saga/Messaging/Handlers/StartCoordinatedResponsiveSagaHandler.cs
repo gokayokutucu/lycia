@@ -177,6 +177,9 @@ public abstract class StartCoordinatedResponsiveSagaHandler<TMessage, TResponse,
         // IMessage-common fields: SagaId, ParentMessageId, MessageId
         TrySetProperty(resp, "SagaId", GetProperty(failedCommand, "SagaId", true) ?? sagaId, true);
         TrySetProperty(resp, "ParentMessageId", GetProperty(failedCommand, "MessageId", true), true);
+        TrySetProperty(resp, "CausationId", GetProperty(failedCommand, "MessageId", true), true);
+        TrySetProperty(resp, "RequestId", GetProperty(failedCommand, "MessageId", true), true);
+        TryCopyProperty(resp, failedCommand, "ResponseEndpoint", true);
         TryCopyProperty(resp, failedCommand, "CorrelationId", true);
         TrySetProperty(resp, "MessageId", Guid.NewGuid(), true); 
         TrySetProperty(resp, "Timestamp", DateTime.UtcNow, true);

@@ -10,15 +10,21 @@ namespace Lycia.Messaging;
 public static class RequestRouting
 {
     /// <summary>
-    /// Ensures a command has a request identifier and the sending logical application as its reply endpoint.
+    /// Ensures a command has a request identifier and a canonical logical response endpoint.
     /// </summary>
-    public static void Prepare(ICommand command, string? applicationId)
+    public static void Prepare(ICommand command, string? responseEndpoint = null)
     {
-        if (!(command is IRequestRoutingMetadata request)) return;
-        if (string.IsNullOrWhiteSpace(applicationId))
-            throw new InvalidOperationException("ApplicationId is required to create a command reply endpoint.");
+        if (!(command is IRequestRoutingMetadata request))
+            throw new InvalidOperationException(
+                $"Command '{command.GetType().FullName}' must implement IRequestRoutingMetadata. Derive it from CommandBase.");
 
-        if (request.RequestId == Guid.Empty) request.RequestId = command.MessageId;
-        if (string.IsNullOrWhiteSpace(request.ReplyTo)) request.ReplyTo = applicationId;
+        if (command.MessageId == Guid.Empty)
+            throw new InvalidOperationException($"Command '{command.GetType().FullName}' must have a MessageId before sending.");
+
+        request.RequestId = command.MessageId;
+        var endpoint = string.IsNullOrWhiteSpace(request.ResponseEndpoint)
+            ? responseEndpoint ?? CommandEndpointResolver.Default.Resolve(command.GetType())
+            : request.ResponseEndpoint!;
+        request.ResponseEndpoint = EndpointIdentityNormalizer.Default.Normalize(endpoint);
     }
 }

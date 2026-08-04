@@ -12,10 +12,12 @@ public static class Constants
     public const string CorrelationIdHeader = "CorrelationId";
     public const string MessageIdHeader = "MessageId";
     public const string ParentMessageIdHeader = "ParentMessageId";
+    public const string CausationIdHeader = "CausationId";
     public const string TimestampHeader = "Timestamp";
     public const string ApplicationIdHeader = "ApplicationId";
     public const string RequestIdHeader = "RequestId";
     public const string ReplyToHeader = "ReplyTo";
+    public const string ResponseEndpointHeader = "ResponseEndpoint";
     public const string EventTypeHeader = "EventType";
     public const string CommandTypeHeader = "CommandType";
     public const string PublishedAtHeader = "PublishedAt";

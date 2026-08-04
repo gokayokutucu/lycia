@@ -13,7 +13,8 @@ public abstract class CommandBase: ICommand, IRequestRoutingMetadata
     {
         SagaId = Guid.Empty;
         MessageId = GuidV7.NewGuidV7();
-        ParentMessageId = Guid.Empty; // CausationId
+        ParentMessageId = Guid.Empty;
+        CausationId = null;
         CorrelationId = MessageId;
         RequestId = MessageId;
         Timestamp = DateTime.UtcNow;
@@ -24,7 +25,8 @@ public abstract class CommandBase: ICommand, IRequestRoutingMetadata
     {
         SagaId = sagaId;
         MessageId = GuidV7.NewGuidV7();
-        ParentMessageId = Guid.Empty; // CausationId
+        ParentMessageId = Guid.Empty;
+        CausationId = null;
         CorrelationId = MessageId;
         RequestId = MessageId;
         Timestamp = DateTime.UtcNow;
@@ -36,7 +38,8 @@ public abstract class CommandBase: ICommand, IRequestRoutingMetadata
     {
         SagaId = sagaId;
         MessageId = GuidV7.NewGuidV7();
-        ParentMessageId = parentMessageId ?? Guid.Empty; // CausationId
+        ParentMessageId = parentMessageId ?? Guid.Empty;
+        CausationId = null;
         CorrelationId = correlationId ?? MessageId;
         RequestId = MessageId;
         Timestamp = DateTime.UtcNow;
@@ -44,7 +47,8 @@ public abstract class CommandBase: ICommand, IRequestRoutingMetadata
     }
 
     public Guid MessageId { get; set; }
-    public Guid ParentMessageId { get; set; } // CausationId
+    public Guid ParentMessageId { get; set; }
+    public Guid? CausationId { get; set; }
     public Guid CorrelationId { get; set; }
     public DateTime Timestamp { get; set; }
     public string ApplicationId { get; set; }
@@ -52,5 +56,12 @@ public abstract class CommandBase: ICommand, IRequestRoutingMetadata
     /// <inheritdoc />
     public Guid RequestId { get; set; }
     /// <inheritdoc />
-    public string? ReplyTo { get; set; }
+    public string? ResponseEndpoint { get; set; }
+    /// <inheritdoc />
+    [Obsolete("Use ResponseEndpoint.")]
+    public string? ReplyTo
+    {
+        get => ResponseEndpoint;
+        set => ResponseEndpoint = value;
+    }
 }

@@ -9,6 +9,9 @@ namespace Lycia.Saga.Abstractions;
 
 public interface IEventBus
 {
+    /// <summary>Gets the canonical logical application endpoint shared by all replicas of this bus.</summary>
+    string ApplicationId { get; }
+
     /// <summary>
     /// Sends a command to the one logical owner declared by its <see cref="ICommandEndpoint"/> marker.
     /// </summary>
@@ -30,8 +33,18 @@ public interface IEventBus
     /// </returns>
     Task Send<TCommand>(TCommand command, Type? handlerType = null, Guid? sagaId = null, CancellationToken cancellationToken = default) where TCommand : ICommand;
 
+    /// <summary>Sends a response only to the logical endpoint waiting for the request.</summary>
+    Task Respond<TRequest, TResponse>(
+        TRequest request,
+        TResponse response,
+        Type? handlerType = null,
+        Guid? sagaId = null,
+        CancellationToken cancellationToken = default)
+        where TRequest : IMessage
+        where TResponse : IResponse<TRequest>;
+
     /// <summary>
-    /// Publishes an event to all interested subscribers for broadcasting state changes or domain events in the system.
+    /// Publishes an event to all interested subscribers. Response contracts are not valid broadcast events.
     /// </summary>
     /// <typeparam name="TEvent">
     ///     The type of the event to publish. Must implement <see cref="IEvent"/>.

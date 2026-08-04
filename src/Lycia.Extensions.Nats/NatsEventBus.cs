@@ -5,6 +5,7 @@ using Lycia.Messaging;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Abstractions.Serializers;
+using Lycia.Saga.Extensions;
 using NATS.Client.Core;
 using NATS.Client.JetStream;
 using NATS.Client.JetStream.Models;
@@ -26,6 +27,9 @@ public sealed class NatsEventBus : IEventBus, IAsyncDisposable
     private readonly SemaphoreSlim _streamLock = new(1, 1);
     private bool _streamReady;
 
+    /// <inheritdoc />
+    public string ApplicationId { get; }
+
     /// <summary>Creates a NATS transport for the discovered logical subscriptions.</summary>
     public NatsEventBus(
         IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap,
@@ -37,6 +41,7 @@ public sealed class NatsEventBus : IEventBus, IAsyncDisposable
         _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         if (string.IsNullOrWhiteSpace(options.ApplicationId))
             throw new ArgumentException("ApplicationId is required.", nameof(options));
+        ApplicationId = EndpointIdentityNormalizer.Default.Normalize(options.ApplicationId);
 
         _client = new NatsClient(options.Url, $"Lycia.{options.ApplicationId}");
         _jetStream = _client.CreateJetStreamContext();
@@ -46,14 +51,32 @@ public sealed class NatsEventBus : IEventBus, IAsyncDisposable
     public async Task Send<TCommand>(TCommand command, Type? handlerType = null, Guid? sagaId = null,
         CancellationToken cancellationToken = default) where TCommand : ICommand
     {
-        RequestRouting.Prepare(command, _options.ApplicationId);
+        RequestRouting.Prepare(command);
         await PublishMessageAsync(command, sagaId, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
+    public Task Respond<TRequest, TResponse>(TRequest request, TResponse response, Type? handlerType = null,
+        Guid? sagaId = null, CancellationToken cancellationToken = default)
+        where TRequest : IMessage
+        where TResponse : IResponse<TRequest>
+    {
+        var endpoint = response.ResponseEndpoint
+                       ?? (request as IRequestRoutingMetadata)?.ResponseEndpoint
+                       ?? ApplicationId;
+        response.PrepareResponse(request, sagaId ?? request.SagaId ?? Guid.Empty, endpoint);
+        return PublishMessageAsync(response, sagaId, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public Task Publish<TEvent>(TEvent @event, Type? handlerType = null, Guid? sagaId = null,
-        CancellationToken cancellationToken = default) where TEvent : IEvent =>
-        PublishMessageAsync(@event, sagaId, cancellationToken);
+        CancellationToken cancellationToken = default) where TEvent : IEvent
+    {
+        if (@event is IResponse)
+            throw new InvalidOperationException(
+                $"Response '{@event.GetType().FullName}' cannot be published. Use Respond(request, response)." );
+        return PublishMessageAsync(@event, sagaId, cancellationToken);
+    }
 
     /// <inheritdoc />
     public IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType, IReadOnlyDictionary<string, object?> Headers)>
@@ -113,7 +136,7 @@ public sealed class NatsEventBus : IEventBus, IAsyncDisposable
         ConcurrentQueue<IncomingMessage> output,
         CancellationToken cancellationToken)
     {
-        var subject = NatsTopology.GetSubscriptionSubject(registration.MessageType, _options.ApplicationId);
+        var subject = NatsTopology.GetSubscriptionSubject(registration.MessageType, ApplicationId);
         var config = new ConsumerConfig(NatsTopology.GetConsumerName(queueName))
         {
             FilterSubject = subject,
@@ -148,7 +171,7 @@ public sealed class NatsEventBus : IEventBus, IAsyncDisposable
         ConcurrentQueue<IncomingMessage> output,
         CancellationToken cancellationToken)
     {
-        var subject = NatsTopology.GetSubscriptionSubject(registration.MessageType, _options.ApplicationId);
+        var subject = NatsTopology.GetSubscriptionSubject(registration.MessageType, ApplicationId);
         await foreach (var message in _client.SubscribeAsync<byte[]>(subject,
                            NatsTopology.GetQueueGroup(queueName), NatsRawSerializer<byte[]>.Default,
                            cancellationToken: cancellationToken).WithCancellation(cancellationToken))
@@ -202,12 +225,14 @@ public sealed class NatsEventBus : IEventBus, IAsyncDisposable
         headers["MessageId"] = message.MessageId.ToString();
         headers["CorrelationId"] = message.CorrelationId.ToString();
         headers["ParentMessageId"] = message.ParentMessageId.ToString();
+        headers["CausationId"] = message.CausationId?.ToString() ?? string.Empty;
         headers["SagaId"] = (message.SagaId ?? sagaId)?.ToString() ?? string.Empty;
         headers["ApplicationId"] = message.ApplicationId;
         if (message is IRequestRoutingMetadata routing)
         {
             headers["RequestId"] = routing.RequestId.ToString();
-            headers["ReplyTo"] = routing.ReplyTo ?? string.Empty;
+            headers["ResponseEndpoint"] = routing.ResponseEndpoint ?? string.Empty;
+            headers["ReplyTo"] = routing.ResponseEndpoint ?? string.Empty;
         }
     }
 
