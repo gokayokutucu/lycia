@@ -10,7 +10,7 @@ namespace Lycia.Saga.Abstractions;
 public interface IEventBus
 {
     /// <summary>
-    /// Sends a command to a specific consumer (queue) for point-to-point communication in sagas or workflows.
+    /// Sends a command to the one logical owner declared by its <see cref="ICommandEndpoint"/> marker.
     /// </summary>
     /// <typeparam name="TCommand">
     ///     The type of the command to send. Must implement <see cref="ICommand"/>.
@@ -19,7 +19,7 @@ public interface IEventBus
     ///     The command object to send to the target consumer.
     /// </param>
     /// <param name="handlerType">
-    ///     (Optional) The type of the handler that will process this command, if known. Used for correlation or tracing.
+    ///     Optional handler context for correlation or tracing. It does not select the transport destination.
     /// </param>
     /// <param name="sagaId">
     ///     (Optional) The saga identifier associated with this command, if part of a saga. Used for correlation or tracing.
@@ -40,7 +40,7 @@ public interface IEventBus
     ///     The event object to broadcast to all subscribers.
     /// </param>
     /// <param name="handlerType">
-    ///     (Optional) The type of the handler that will process this event, if known. Used for routing or filtering.
+    ///     Optional handler context for correlation or tracing. Event subscriptions are derived during discovery.
     /// </param>
     /// <param name="sagaId">
     ///     (Optional) The saga identifier associated with this event, if part of a saga. Used for correlation or tracing.
@@ -78,5 +78,5 @@ public interface IEventBus
     /// the message data, metadata, and acknowledgment methods for handling consumed messages.
     /// </returns>
     IAsyncEnumerable<IncomingMessage> ConsumeWithAckAsync(
-        [EnumeratorCancellation] CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default);
 }

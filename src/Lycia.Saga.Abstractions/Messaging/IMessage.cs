@@ -39,3 +39,35 @@ public interface IMessage
 
 public interface ICommand : IMessage {}
 public interface IEvent : IMessage {}
+
+/// <summary>
+/// Identifies a transport-independent logical owner for a command contract.
+/// Application command endpoint interfaces inherit this marker and <see cref="ICommand"/>.
+/// </summary>
+/// <example>
+/// <code>
+/// public interface IStockServiceCommand : ICommand, ICommandEndpoint { }
+/// </code>
+/// </example>
+public interface ICommandEndpoint { }
+
+/// <summary>
+/// Resolves the single logical command owner declared by a command contract.
+/// </summary>
+public interface ICommandEndpointResolver
+{
+    /// <summary>Returns the stable logical endpoint name for <paramref name="commandType"/>.</summary>
+    string Resolve(Type commandType);
+}
+
+/// <summary>
+/// Request metadata used by transports to target a response without creating a destination per saga instance.
+/// </summary>
+public interface IRequestRoutingMetadata
+{
+    /// <summary>Identifies the original request across its response flow.</summary>
+    Guid RequestId { get; set; }
+
+    /// <summary>Gets or sets the logical application to which a response must return.</summary>
+    string? ReplyTo { get; set; }
+}

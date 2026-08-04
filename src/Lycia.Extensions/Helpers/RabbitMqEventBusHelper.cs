@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 using Lycia.Extensions.Configurations;
+using Lycia.Saga.Abstractions.Messaging;
 
 namespace Lycia.Extensions.Helpers;
 
@@ -39,6 +40,14 @@ public static class RabbitMqEventBusHelper
         // ApplicationId
         var applicationId = RabbitMqEventBusHelper.GetStringProperty("ApplicationId", msg);
         if (!string.IsNullOrWhiteSpace(applicationId)) headers[Constants.ApplicationIdHeader] = applicationId;
+
+        if (message is IRequestRoutingMetadata requestMetadata)
+        {
+            if (requestMetadata.RequestId != Guid.Empty)
+                headers[Constants.RequestIdHeader] = requestMetadata.RequestId.ToString();
+            if (!string.IsNullOrWhiteSpace(requestMetadata.ReplyTo))
+                headers[Constants.ReplyToHeader] = requestMetadata.ReplyTo;
+        }
 
         // ParentMessageId (again, fallback/generation)
         var parentMsgIdForFallback = RabbitMqEventBusHelper.GetGuidProperty("ParentMessageId", msg);

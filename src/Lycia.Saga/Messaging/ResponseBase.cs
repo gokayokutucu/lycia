@@ -10,7 +10,8 @@ namespace Lycia.Saga.Messaging;
 public abstract class ResponseBase<TPrevious> :
     ISuccessResponse<TPrevious>,
     IFailResponse<TPrevious>,
-    IEvent
+    IEvent,
+    IRequestRoutingMetadata
     where TPrevious : IMessage
 {
     protected ResponseBase(Guid? parentMessageId = null, Guid? correlationId = null)
@@ -18,6 +19,7 @@ public abstract class ResponseBase<TPrevious> :
         MessageId = GuidV7.NewGuidV7();
         ParentMessageId = parentMessageId ?? Guid.Empty;
         CorrelationId = correlationId ?? MessageId;
+        RequestId = parentMessageId ?? MessageId;
         Timestamp = DateTime.UtcNow;
         ApplicationId  = EventMetadata.ApplicationId;
     }
@@ -28,4 +30,8 @@ public abstract class ResponseBase<TPrevious> :
     public string ApplicationId { get; set; }
     public Guid CorrelationId { get; set; }
     public Guid? SagaId { get; set; }
+    /// <inheritdoc />
+    public Guid RequestId { get; set; }
+    /// <inheritdoc />
+    public string? ReplyTo { get; set; }
 }

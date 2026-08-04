@@ -8,7 +8,7 @@ namespace Sample.Shared.Messages.Commands;
 /// <summary>
 /// Command to initiate an order creation saga.
 /// </summary>
-public class CreateOrderCommand : CommandBase
+public class CreateOrderCommand : CommandBase, ISampleOrderConsumerCommand
 {
     public Guid OrderId { get; set; } = Guid.NewGuid();
     public Guid UserId { get; set; }

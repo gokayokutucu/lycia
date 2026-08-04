@@ -37,12 +37,14 @@ public class SagaContext<TInitialMessage>(
     public Task Publish<T>(T @event, CancellationToken cancellationToken = default) where T : IEvent
     {
         @event.SetSagaId(SagaId);
+        @event.PropagateResponseRouting(CurrentStep);
         return eventBus.Publish(@event, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 
     public Task Publish<T>(T @event, Type? handlerType, CancellationToken cancellationToken = default) where T : IEvent
     {
         @event.SetSagaId(SagaId);
+        @event.PropagateResponseRouting(CurrentStep);
         return eventBus.Publish(@event, handlerType, SagaId, cancellationToken);
     }
 
@@ -323,12 +325,14 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
     public Task Publish<T>(T @event, CancellationToken cancellationToken = default) where T : IEvent
     {
         @event.SetSagaId(SagaId);
+        @event.PropagateResponseRouting(CurrentStep);
         return eventBus.Publish(@event, HandlerTypeOfCurrentStep, sagaId, cancellationToken);
     }
 
     public Task Publish<T>(T @event, Type? handlerType, CancellationToken cancellationToken = default) where T : IEvent
     {
         @event.SetSagaId(SagaId);
+        @event.PropagateResponseRouting(CurrentStep);
         return eventBus.Publish(@event, handlerType, SagaId, cancellationToken);
     }
 
@@ -512,11 +516,13 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
 
     public Task Publish<T>(T @event, CancellationToken cancellationToken = default) where T : IEvent
     {
+        @event.PropagateResponseRouting(StepAdapter);
         return eventBus.Publish(@event, HandlerTypeOfCurrentStep, sagaId, cancellationToken);
     }
 
     public Task Publish<T>(T @event, Type? handlerType, CancellationToken cancellationToken = default) where T : IEvent
     {
+        @event.PropagateResponseRouting(StepAdapter);
         return eventBus.Publish(@event, handlerType, sagaId, cancellationToken);
     }
 

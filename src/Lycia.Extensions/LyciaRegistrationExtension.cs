@@ -14,6 +14,7 @@ using Lycia.Dispatching;
 using Lycia.Eventing;
 using Lycia.Helpers;
 using Lycia.Middleware;
+using Lycia.Messaging;
 using Lycia.Observability;
 using Lycia.Retry;
 using Lycia.Saga.Abstractions;
@@ -39,12 +40,8 @@ namespace Lycia.Extensions
 {
     /// <summary>
     /// Registration entrypoints + fluent builder for Lycia.
-    /// Consumers call services.AddLycia(configuration)
-    ///   .UseMessageSerializer<...>()
-    ///   .UseEventBus<...>()
-    ///   .UseSagaStore<...>()
-    ///   .AddSagasFromAssemblies(typeof(SomeHandler).Assembly)
-    ///   .Build();
+    /// Consumers call <c>services.AddLycia(configuration)</c> and use the fluent builder to select
+    /// serializers, transports, stores, and assemblies before calling <c>Build()</c>.
     /// </summary>
     public static class LyciaRegistrationExtensions
     {
@@ -331,7 +328,9 @@ namespace Lycia.Extensions
             // In-memory transports/stores
             services.RemoveAll(typeof(IEventBus));
             services.AddScoped<IEventBus>(sp =>
-                new InMemoryEventBus(new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>)));
+                new InMemoryEventBus(
+                    new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>),
+                    configuration["ApplicationId"]));
 
             services.RemoveAll(typeof(ISagaStore));
             services.AddScoped<ISagaStore, InMemorySagaStore>();
@@ -357,6 +356,7 @@ namespace Lycia.Extensions
         private readonly IConfiguration _configuration;
         private readonly List<Assembly> _assemblies = new();
         private readonly HashSet<Type> _explicitHandlerTypes = new();
+        private readonly List<(Type MessageType, Type HandlerType)> _explicitRegistrations = new();
         private readonly Dictionary<string, (Type MessageType, Type HandlerType)> _manualMap = new(StringComparer.OrdinalIgnoreCase);
         private readonly string _appIdCache;
 
@@ -578,12 +578,12 @@ namespace Lycia.Extensions
             // register handler concrete type for DI
             _services.AddScoped(handlerType);
             _explicitHandlerTypes.Add(handlerType);
-            AddHandlersFrom(handlerType.Assembly);
 
             foreach (var messageType in _LyciaHandlerDiscovery.GetMessageTypesFromHandler(handlerType))
             {
-                var routingKey = MessagingNamingHelper.GetRoutingKey(messageType, handlerType, _appIdCache);
+                var routingKey = MessagingNamingHelper.GetQueueName(messageType, handlerType, _appIdCache);
                 _manualMap[routingKey] = (messageType, handlerType);
+                _explicitRegistrations.Add((messageType, handlerType));
             }
             return this;
         }
@@ -646,7 +646,7 @@ namespace Lycia.Extensions
                     _services.AddScoped(handlerType);
                     foreach (var messageType in _LyciaHandlerDiscovery.GetMessageTypesFromHandler(handlerType))
                     {
-                        var routingKey = MessagingNamingHelper.GetRoutingKey(messageType, handlerType, _appIdCache);
+                        var routingKey = MessagingNamingHelper.GetQueueName(messageType, handlerType, _appIdCache);
                         _manualMap[routingKey] = (messageType, handlerType);
                     }
                 }
@@ -759,6 +759,8 @@ namespace Lycia.Extensions
             // merge: explicit/manual overrides discovery
             foreach (var kv in _manualMap)
                 discovered[kv.Key] = kv.Value;
+
+            CommandTopologyValidator.Validate(_appIdCache, discovered.Values.Concat(_explicitRegistrations));
 
             _services.AddSingleton<IDictionary<string,(Type MessageType, Type HandlerType)>>(sp =>
             {
@@ -893,12 +895,13 @@ namespace Lycia.Extensions
                     GetMessageTypesFromHandler(handlerType)
                         .Select(messageType => new
                         {
-                            Key = MessagingNamingHelper.GetRoutingKey(messageType, handlerType, applicationId),
+                            Key = MessagingNamingHelper.GetQueueName(messageType, handlerType, applicationId),
                             Value = (MessageType: messageType, HandlerType: handlerType)
                         }));
 
             var map = new Dictionary<string, (Type MessageType, Type HandlerType)>(StringComparer.OrdinalIgnoreCase);
-            // Preserve current semantics: last one wins on duplicate keys
+            CommandTopologyValidator.Validate(applicationId!, pairs.Select(pair => pair.Value));
+
             foreach (var p in pairs)
                 map[p.Key] = p.Value;
 

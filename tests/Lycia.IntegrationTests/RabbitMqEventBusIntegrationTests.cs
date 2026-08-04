@@ -8,6 +8,7 @@ using Lycia.Extensions.Eventing;
 using Lycia.Extensions.Serialization;
 
 using Lycia.Helpers;
+using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Messaging;
 using Lycia.Saga.Messaging.Handlers;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -51,7 +52,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
 
         var applicationId = "TestApp";
         var handlerType = typeof(TestEventHandlerA);
-        var queueName = MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType, applicationId);
+        var queueName = MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType, applicationId);
 
         // Clean up before test (best practice for integration tests)
         var factory = new ConnectionFactory { Uri = new Uri(RabbitMqConnectionString) };
@@ -159,7 +160,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
     {
         var applicationId = "TestApp";
         var handlerType = typeof(TestEventHandlerA);
-        var queueName = MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType, applicationId);
+        var queueName = MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType, applicationId);
 
         await CleanupQueuesAsync(RabbitMqConnectionString, queueName);
 
@@ -226,7 +227,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
     {
         var applicationId = "TestApp";
         var handlerType = typeof(TestEventHandlerA);
-        var queueName = MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType, applicationId);
+        var queueName = MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType, applicationId);
 
         await CleanupQueuesAsync(RabbitMqConnectionString, queueName);
 
@@ -293,7 +294,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
             {
-                MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType, applicationId),
+                MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType, applicationId),
                 (typeof(TestEvent), typeof(TestEventHandlerA))
             }
         };
@@ -358,11 +359,11 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
             {
-                MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType1, applicationId),
+                MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType1, applicationId),
                 (typeof(TestEvent), typeof(TestEventHandlerA))
             },
             {
-                MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType2, applicationId),
+                MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType2, applicationId),
                 (typeof(TestEvent), typeof(TestEventHandlerB))
             }
         };
@@ -429,7 +430,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
             {
-                MessagingNamingHelper.GetRoutingKey(typeof(TestCommand), handlerType, applicationId),
+                MessagingNamingHelper.GetQueueName(typeof(TestCommand), handlerType, applicationId),
                 (typeof(TestCommand), typeof(TestCommandHandlerA))
             }
         };
@@ -491,7 +492,9 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
     }
 
 // Test command for Send
-    private class TestCommand : CommandBase
+    private interface ITestAppCommand : ICommand, ICommandEndpoint { }
+
+    private class TestCommand : CommandBase, ITestAppCommand
     {
         public string Message { get; set; } = string.Empty;
     }

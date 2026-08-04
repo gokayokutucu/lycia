@@ -58,6 +58,28 @@ jobs:
       rabbitmq:
         image: rabbitmq:3.13-management
         ports: ['5672:5672', '15672:15672']
+      nats:
+        image: nats:2.11-alpine
+        ports: ['4222:4222', '8222:8222']
+        options: >-
+          --health-cmd "wget -q -O - http://localhost:8222/healthz | grep -q ok"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+      kafka:
+        image: confluentinc/cp-kafka:7.7.1
+        ports: ['9092:9092']
+        env:
+          KAFKA_NODE_ID: 1
+          KAFKA_PROCESS_ROLES: broker,controller
+          KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+          KAFKA_LISTENERS: PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092
+          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+          KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+          KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+          KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+          CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
 
     steps:
       - name: Checkout (full history + tags for NBGV)
@@ -299,6 +321,42 @@ jobs:
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: dotnet nuget push "artifacts/nupkgs/Lycia.Extensions.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
+
+      - name: Restore NATS and Kafka transports with Lycia floor
+        run: |
+          for PROJECT in Lycia.Extensions.Nats Lycia.Extensions.Kafka; do
+            dotnet restore "src/$PROJECT/$PROJECT.csproj" \
+              -p:UsePackageRefForLyciaOnPack=true \
+              -p:LyciaMinVersion='${{ steps.floor.outputs.floor }}' \
+              --source "./artifacts/nupkgs" --source "https://api.nuget.org/v3/index.json"
+          done
+
+      - name: Pack NATS and Kafka transports
+        run: |
+          for PROJECT in Lycia.Extensions.Nats Lycia.Extensions.Kafka; do
+            dotnet pack "src/$PROJECT/$PROJECT.csproj" -c Release \
+              -o artifacts/nupkgs \
+              -p:ContinuousIntegrationBuild=true \
+              -p:UsePackageRefForLyciaOnPack=true \
+              -p:LyciaMinVersion='${{ steps.floor.outputs.floor }}' \
+              --no-restore
+          done
+
+      - name: Validate transport packages
+        run: |
+          for PROJECT in Lycia.Extensions.Nats Lycia.Extensions.Kafka; do
+            PKG=$(ls "artifacts/nupkgs/$PROJECT".*.nupkg | sort -V | tail -n1)
+            echo "$PROJECT nupkg: $PKG"
+            unzip -l "$PKG" | sed -n '1,120p'
+            unzip -p "$PKG" '*.nuspec' | sed -n '1,160p'
+          done
+
+      - name: Push NATS and Kafka transports (nuget.org)
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          dotnet nuget push "artifacts/nupkgs/Lycia.Extensions.Nats.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
+          dotnet nuget push "artifacts/nupkgs/Lycia.Extensions.Kafka.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
 
       - name: Restore OpenTelemetry Extensions with floor (pack mode)
         run: |

@@ -121,13 +121,13 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
             { SagaId = sagaId, MessageId = childId, ParentMessageId = parentId, Message = "trigger-failure" };
 
         // EventBus and Redis-backed SagaStore setup
-        var grandParentQueueName = Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyGrandparentEvent),
+        var grandParentQueueName = Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyGrandparentEvent),
             handlerTypeGrandparent, applicationId);
         var parentQueueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyParentEvent), handlerTypeParent,
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyParentEvent), handlerTypeParent,
                 applicationId);
         var childQueueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyChildEvent), handlerTypeChild, applicationId);
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyChildEvent), handlerTypeChild, applicationId);
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
             { grandParentQueueName, (typeof(DummyGrandparentEvent), typeof(GrandparentCompensationSagaHandler)) },
@@ -257,13 +257,13 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
         };
 
         // EventBus and Redis-backed SagaStore setup
-        var grandParentQueueName = Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyGrandparentEvent),
+        var grandParentQueueName = Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyGrandparentEvent),
             handlerTypeGrandparent, applicationId);
         var parentQueueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyParentEvent), handlerTypeParent,
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyParentEvent), handlerTypeParent,
                 applicationId);
         var childQueueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyChildEvent), handlerTypeChild, applicationId);
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyChildEvent), handlerTypeChild, applicationId);
         
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
@@ -384,13 +384,13 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
         };
 
         // EventBus and Redis-backed SagaStore setup
-        var grandParentQueueName = Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyGrandparentEvent),
+        var grandParentQueueName = Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyGrandparentEvent),
             handlerTypeGrandparent, applicationId);
         var parentQueueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyParentEvent), handlerTypeParent,
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyParentEvent), handlerTypeParent,
                 applicationId);
         var childQueueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyChildEvent), handlerTypeChild, applicationId);
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyChildEvent), handlerTypeChild, applicationId);
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
             { grandParentQueueName, (typeof(DummyGrandparentEvent), typeof(GrandparentCompensationSagaHandler)) },
@@ -508,7 +508,7 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
 
         // Configure EventBus (RabbitMQ) and SagaStore (Redis).
         var queueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(DummyEvent), handlerTypeChild, applicationId);
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(DummyEvent), handlerTypeChild, applicationId);
         var queueTypeMap = new Dictionary<string, (Type, Type)> { { queueName, (typeof(DummyEvent), typeof(ChildCompensationHandler)) } };
         var serializer = new NewtonsoftJsonMessageSerializer();
         var eventBusOptions = new EventBusOptions
@@ -586,7 +586,7 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
         var handlerType = typeof(FailingSagaHandler);
 
         var queueName =
-            Lycia.Helpers.MessagingNamingHelper.GetRoutingKey(typeof(TestSagaCommand), handlerType, applicationId);
+            Lycia.Helpers.MessagingNamingHelper.GetQueueName(typeof(TestSagaCommand), handlerType, applicationId);
         var queueTypeMap = new Dictionary<string, (Type, Type)> { { queueName, (typeof(TestSagaCommand), typeof(FailingSagaHandler)) } };
         var eventBusOptions = new EventBusOptions
         {
@@ -691,7 +691,9 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
     }
 
     // Dummy saga command
-    private class TestSagaCommand : CommandBase
+    private interface ITestAppCommand : ICommand, ICommandEndpoint { }
+
+    private class TestSagaCommand : CommandBase, ITestAppCommand
     {
         public string Message { get; set; } = string.Empty;
     }

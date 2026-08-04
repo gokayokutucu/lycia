@@ -6,6 +6,7 @@
 using Lycia.Common.Messaging;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Messaging;
+using Lycia.Messaging;
 
 // ISagaDispatcher is likely here or in Lycia.Infrastructure.Abstractions
 
@@ -15,11 +16,13 @@ namespace Lycia.Eventing;
 /// Simple in-memory event bus that directly dispatches messages to registered handlers.
 /// Suitable for development and testing only.
 /// </summary>
-public class InMemoryEventBus(Lazy<ISagaDispatcher> sagaDispatcherLazy) : IEventBus
+public class InMemoryEventBus(Lazy<ISagaDispatcher> sagaDispatcherLazy, string? applicationId = null) : IEventBus
 {
     public Task Send<TCommand>(TCommand command, Type? handlerType = null, Guid? sagaId = null,
         CancellationToken cancellationToken = default) where TCommand : ICommand
     {
+        CommandEndpointResolver.Default.Resolve(command.GetType());
+        if (!string.IsNullOrWhiteSpace(applicationId)) RequestRouting.Prepare(command, applicationId);
         // The sagaId parameter passed to Send/Publish is not directly used by DispatchAsync,
         // as DispatchAsync typically resolves SagaId from the message properties or generates it.
         // The original implementation also didn't use the sagaId parameter in its call to DispatchAsync.

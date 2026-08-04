@@ -7,7 +7,7 @@ using Lycia.Saga.Utility;
 
 namespace Lycia.Saga.Messaging;
 
-public abstract class CommandBase: ICommand
+public abstract class CommandBase: ICommand, IRequestRoutingMetadata
 {
     protected CommandBase()
     {
@@ -15,6 +15,7 @@ public abstract class CommandBase: ICommand
         MessageId = GuidV7.NewGuidV7();
         ParentMessageId = Guid.Empty; // CausationId
         CorrelationId = MessageId;
+        RequestId = MessageId;
         Timestamp = DateTime.UtcNow;
         ApplicationId  = EventMetadata.ApplicationId;
     }
@@ -25,6 +26,7 @@ public abstract class CommandBase: ICommand
         MessageId = GuidV7.NewGuidV7();
         ParentMessageId = Guid.Empty; // CausationId
         CorrelationId = MessageId;
+        RequestId = MessageId;
         Timestamp = DateTime.UtcNow;
         ApplicationId  = EventMetadata.ApplicationId;
     }
@@ -36,6 +38,7 @@ public abstract class CommandBase: ICommand
         MessageId = GuidV7.NewGuidV7();
         ParentMessageId = parentMessageId ?? Guid.Empty; // CausationId
         CorrelationId = correlationId ?? MessageId;
+        RequestId = MessageId;
         Timestamp = DateTime.UtcNow;
         ApplicationId  = EventMetadata.ApplicationId;
     }
@@ -46,4 +49,8 @@ public abstract class CommandBase: ICommand
     public DateTime Timestamp { get; set; }
     public string ApplicationId { get; set; }
     public Guid? SagaId { get; set; }
+    /// <inheritdoc />
+    public Guid RequestId { get; set; }
+    /// <inheritdoc />
+    public string? ReplyTo { get; set; }
 }

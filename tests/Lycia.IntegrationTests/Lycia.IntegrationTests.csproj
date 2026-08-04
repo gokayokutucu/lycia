@@ -13,6 +13,7 @@
         <PackageReference Include="FluentAssertions" Version="8.4.0" />
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.9" />
         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+        <PackageReference Include="Testcontainers.Kafka" Version="4.6.0" />
         <PackageReference Include="Testcontainers.RabbitMq" Version="4.6.0" />
         <PackageReference Include="Testcontainers.Redis" Version="4.6.0" />
         <PackageReference Include="xunit" Version="2.9.2" />
@@ -25,6 +26,8 @@
 
     <ItemGroup>
       <ProjectReference Include="..\..\src\Lycia\Lycia.csproj" />
+      <ProjectReference Include="..\..\src\Lycia.Extensions.Kafka\Lycia.Extensions.Kafka.csproj" />
+      <ProjectReference Include="..\..\src\Lycia.Extensions.Nats\Lycia.Extensions.Nats.csproj" />
       <ProjectReference Include="..\Lycia.Tests.Helpers\Lycia.Tests.Helpers.csproj" />
       <ProjectReference Include="..\Lycia.Tests\Lycia.Tests.csproj" />
     </ItemGroup>

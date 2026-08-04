@@ -59,6 +59,83 @@ services.AddLycia(Configuration)
 - **Default Middleware Pipeline (Logging + Tracing + Retry, replaceable via UseSagaMiddleware)**  
 - **Extensibility**: Easily plug in custom implementations of `IMessageSerializer`, `IEventBus`, or `ISagaStore`.
 
+## Strongly Typed Command Ownership
+
+Commands declare their one logical owner in the contract. No destination string or handler name is
+passed to `Send`:
+
+```csharp
+public interface IStockServiceCommand : ICommandEndpoint { }
+
+public sealed class ReserveStockCommand : CommandBase, IStockServiceCommand
+{
+    public Guid OrderId { get; init; }
+}
+
+public sealed class ReserveStockHandler
+    : CoordinatedSagaHandler<ReserveStockCommand, StockSagaData>
+{
+    public override Task HandleAsync(
+        ReserveStockCommand command,
+        CancellationToken cancellationToken = default)
+    {
+        // The handler contains business logic only; transport routing stays unchanged.
+        return Context.MarkAsComplete<ReserveStockCommand>(cancellationToken);
+    }
+}
+
+await sagaContext.Send(new ReserveStockCommand { OrderId = orderId }, cancellationToken);
+```
+
+`IStockServiceCommand` deterministically resolves to the owner `StockService`. The owning host must use
+`ApplicationId = StockService` (comparison is ordinal and case-insensitive). Startup fails when a command
+has no owner marker, more than one owner marker, a handler in the wrong application, or more than one
+handler type in that application.
+
+The generated topology is transport-specific but semantically equivalent:
+
+| Kind | RabbitMQ | NATS | Kafka |
+|---|---|---|---|
+| Command | direct `command.ReserveStockCommand`, queue `command.ReserveStockCommand.StockService`, key `StockService` | subject `command.StockService.ReserveStockCommand`, one durable consumer | topic `lycia.command.StockService.ReserveStockCommand`, one owner consumer group |
+| Event | fanout `event.StockReservedEvent`, one queue per handler/application | subject `event.StockReservedEvent`, one durable consumer per subscription | topic `lycia.event.StockReservedEvent`, one group per subscription |
+| Response | direct requester key and shared requester queue | `response.{Requester}.{Type}` | `lycia.response.{Requester}.{Type}` |
+
+Responses carry `RequestId` and `ReplyTo`; `CorrelationId` and `SagaId` correlate workflow state inside
+the requester’s shared response queue. Lycia never creates a queue or topic per saga instance.
+
+### Replicas are competing consumers
+
+A replica is another running copy of the same logical application: another Kubernetes pod, Docker
+container, process, or host. Every replica of a service must use the same `ApplicationId`:
+
+```text
+Correct:
+StockService replica 1 -> ApplicationId = StockService
+StockService replica 2 -> ApplicationId = StockService
+StockService replica 3 -> ApplicationId = StockService
+
+Incorrect:
+StockService replica 1 -> ApplicationId = StockService-1
+StockService replica 2 -> ApplicationId = StockService-2
+StockService replica 3 -> ApplicationId = StockService-3
+```
+
+Correctly configured replicas share one queue, durable consumer, or consumer group, and compete for
+work. Under normal broker operation one delivery is handled by one replica. The incorrect form creates
+independent logical consumers and can create extra queues or duplicate event processing.
+
+The invariant is **one handler type, many runtime handler instances**. One command owner and one command
+handler keep bounded-context ownership clear, prevent accidental command broadcasts, and keep command
+addresses stable when implementation classes are renamed. Commands are intentions; publish an event when
+multiple independent components must react to a fact.
+
+RabbitMQ, JetStream, and Kafka use at-least-once delivery patterns in failure scenarios. Lycia does not
+claim exactly-once application processing; handlers must remain idempotent. Kafka ordering is scoped to a
+partition, and replicas beyond the partition count cannot consume concurrently.
+
+Transport packages are `Lycia.Extensions` (RabbitMQ), `Lycia.Extensions.Nats`, and
+`Lycia.Extensions.Kafka`. JetStream is the durable NATS default; Core NATS is an explicit ephemeral mode.
+
 ---
 
 ## Quick Start

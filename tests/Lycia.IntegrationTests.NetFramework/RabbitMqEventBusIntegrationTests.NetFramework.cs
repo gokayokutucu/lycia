@@ -7,6 +7,7 @@ using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Eventing;
 using Lycia.Extensions.Serialization;
 using Lycia.Helpers;
+using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Messaging;
 using Lycia.Saga.Messaging.Handlers;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -70,7 +71,7 @@ public class RabbitMqEventBusIntegrationTestsNetFramework : IAsyncLifetime
     {
         var applicationId = "TestApp";
         var handlerType = typeof(TestEventHandlerA);
-        var queueName = MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType, applicationId);
+        var queueName = MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType, applicationId);
 
         // Clean up before test (best practice for integration tests)
         var factory = new ConnectionFactory { Uri = new Uri(RabbitMqConnectionString) };
@@ -178,7 +179,7 @@ public class RabbitMqEventBusIntegrationTestsNetFramework : IAsyncLifetime
     {
         var applicationId = "TestApp";
         var handlerType = typeof(TestEventHandlerA);
-        var queueName = MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType, applicationId);
+        var queueName = MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType, applicationId);
 
         await CleanupQueuesAsync(RabbitMqConnectionString, queueName);
 
@@ -245,7 +246,7 @@ public class RabbitMqEventBusIntegrationTestsNetFramework : IAsyncLifetime
     {
         var applicationId = "TestApp";
         var handlerType = typeof(TestEventHandlerA);
-        var queueName = MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType, applicationId);
+        var queueName = MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType, applicationId);
 
         await CleanupQueuesAsync(RabbitMqConnectionString, queueName);
 
@@ -312,7 +313,7 @@ public class RabbitMqEventBusIntegrationTestsNetFramework : IAsyncLifetime
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
             {
-                MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType, applicationId),
+                MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType, applicationId),
                 (typeof(TestEvent), typeof(TestEventHandlerA))
             }
         };
@@ -374,8 +375,8 @@ public class RabbitMqEventBusIntegrationTestsNetFramework : IAsyncLifetime
         var handlerType2 = typeof(TestEventHandlerB);
 
         // Clean up queues before test to avoid parameter conflicts
-        var queueName1 = MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType1, applicationId);
-        var queueName2 = MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType2, applicationId);
+        var queueName1 = MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType1, applicationId);
+        var queueName2 = MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType2, applicationId);
         await CleanupQueuesAsync(RabbitMqConnectionString, queueName1);
         await CleanupQueuesAsync(RabbitMqConnectionString, queueName2);
 
@@ -383,11 +384,11 @@ public class RabbitMqEventBusIntegrationTestsNetFramework : IAsyncLifetime
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
             {
-                MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType1, applicationId),
+                MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType1, applicationId),
                 (typeof(TestEvent), typeof(TestEventHandlerA))
             },
             {
-                MessagingNamingHelper.GetRoutingKey(typeof(TestEvent), handlerType2, applicationId),
+                MessagingNamingHelper.GetQueueName(typeof(TestEvent), handlerType2, applicationId),
                 (typeof(TestEvent), typeof(TestEventHandlerB))
             }
         };
@@ -454,7 +455,7 @@ public class RabbitMqEventBusIntegrationTestsNetFramework : IAsyncLifetime
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
             {
-                MessagingNamingHelper.GetRoutingKey(typeof(TestCommand), handlerType, applicationId),
+                MessagingNamingHelper.GetQueueName(typeof(TestCommand), handlerType, applicationId),
                 (typeof(TestCommand), typeof(TestCommandHandlerA))
             }
         };
@@ -516,7 +517,9 @@ public class RabbitMqEventBusIntegrationTestsNetFramework : IAsyncLifetime
     }
 
 // Test command for Send
-    private class TestCommand : CommandBase
+    private interface ITestAppCommand : ICommand, ICommandEndpoint { }
+
+    private class TestCommand : CommandBase, ITestAppCommand
     {
         public string Message { get; set; } = string.Empty;
     }

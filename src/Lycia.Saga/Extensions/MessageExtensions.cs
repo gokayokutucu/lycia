@@ -18,4 +18,16 @@ public static class MessageExtensions
         };
         return next;
     }
+
+    /// <summary>Copies requester routing metadata from the current saga step to a response.</summary>
+    public static void PropagateResponseRouting(this IMessage outgoing, IMessage current)
+    {
+        if (!(outgoing is IRequestRoutingMetadata response) ||
+            !(current is IRequestRoutingMetadata request))
+            return;
+
+        response.RequestId = request.RequestId == Guid.Empty ? current.MessageId : request.RequestId;
+        if (string.IsNullOrWhiteSpace(response.ReplyTo))
+            response.ReplyTo = request.ReplyTo;
+    }
 }

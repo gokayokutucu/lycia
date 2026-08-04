@@ -5,7 +5,7 @@ using Lycia.Saga.Messaging;
 
 namespace Sample.Shared.Messages.Commands;
 
-public class ShipOrderCommand : CommandBase
+public class ShipOrderCommand : CommandBase, ISampleOrderConsumerCommand
 {
     public Guid OrderId { get; set; }
 }

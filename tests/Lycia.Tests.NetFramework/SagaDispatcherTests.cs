@@ -624,7 +624,7 @@ public class SagaDispatcherTests
         Assert.True(TestStartReactiveCompensateHandler.CompensateCalled);
     }
 
-    public class InitialCommand : CommandBase
+    public class InitialCommand : CommandBase, ITestAppCommand
     {
     }
 
