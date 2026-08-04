@@ -41,6 +41,7 @@ public class CreateOrderSagaHandler :
     public override Task HandleFailResponseAsync(OrderCreatedResponse response, FailResponse fail, CancellationToken cancellationToken = default)
     {
         // Order could not be created, mark the saga as failed, log, or start compensation
+        Console.WriteLine($"Order creation failed for order {response.OrderId}. Reason: {fail.Reason}");
         return Task.CompletedTask;
     }
 
@@ -57,6 +58,7 @@ public class CreateOrderSagaHandler :
     public Task HandleFailResponseAsync(InventoryReservedResponse response, FailResponse fail, CancellationToken cancellationToken = default)
     {
         // Inventory reservation failed, cancel the order or log
+        Console.WriteLine($"Inventory reservation failed for order {response.OrderId}. Reason: {fail.Reason}");
         return Task.CompletedTask;
     }
 
@@ -97,6 +99,7 @@ public class CreateOrderSagaHandler :
     public Task HandleFailResponseAsync(OrderShippedResponse response, FailResponse fail, CancellationToken cancellationToken = default)
     {
         // Shipping failed, notify the customer or start compensation
+        Console.WriteLine($"Order shipping failed for order {response.OrderId}. Reason: {fail.Reason}");
         return Task.CompletedTask;
     }
 }
