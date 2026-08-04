@@ -35,4 +35,11 @@ public class PaymentSagaHandler :
         }, cancellationToken);
         await Context.MarkAsComplete<ProcessPaymentCommand>();
     }
+
+    public override Task CompensateAsync(ProcessPaymentCommand message, CancellationToken cancellationToken = default)
+    {
+        // No business compensation required, but need to bubble up
+        Context.Data.PaymentCompensated = true;
+        return Context.CompensateAndBubbleUp<ProcessPaymentCommand>(cancellationToken);
+    }
 }
