@@ -124,11 +124,11 @@ public class ActivityTracingMiddlewareTests
 
     private sealed class FakeInvocationContext : IInvocationContext
     {
-        public IMessage Message { get; set; }
+        public IMessage Message { get; set; } = new FakeInvocationMessage();
         public ISagaContext? SagaContext { get; set; }
-        public Type HandlerType { get; set; }
+        public Type HandlerType { get; set; } = typeof(FakeSagaHandler);
         public Guid? SagaId { get; set; }
-        public string ApplicationId { get; set; }
+        public string ApplicationId { get; set; } = string.Empty;
         public CancellationToken CancellationToken { get; set; }
         public Exception? LastException { get; set; }
     }
@@ -140,7 +140,7 @@ public class ActivityTracingMiddlewareTests
         public Guid? CausationId { get; set; }
         public Guid CorrelationId { get; set; }
         public DateTime Timestamp { get; set; }
-        public string ApplicationId { get; set; }
+        public string ApplicationId { get; set; } = string.Empty;
         public Guid? SagaId { get; set; }
     }
 

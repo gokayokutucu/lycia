@@ -32,7 +32,7 @@ public class InventorySagaHandler :
             InventoryService.ReleaseStock(message.OrderId);
             await Context.MarkAsCompensated<OrderCreatedEvent>();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             await Context.MarkAsCompensationFailed<OrderCreatedEvent>();
 

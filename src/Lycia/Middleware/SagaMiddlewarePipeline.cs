@@ -4,11 +4,12 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Lycia.Middleware;
 
+/// <summary>Composes registered saga middleware into an ordered invocation delegate.</summary>
 public sealed class SagaMiddlewarePipeline
 {
     private readonly List<ISagaMiddleware> _middlewares;
 
-    // Constructor used by dispatcher: pass resolved middlewares and optional ordered types
+    /// <summary>Creates a pipeline from resolved middleware and an optional explicit type order.</summary>
     public SagaMiddlewarePipeline(
         IEnumerable<ISagaMiddleware> middlewares,
         IServiceProvider serviceProvider,
@@ -24,7 +25,7 @@ public sealed class SagaMiddlewarePipeline
         _middlewares = OrderByTypes(all, orderedTypes);
     }
 
-    // Back-compat constructor used by some tests: pass only ordered types and service provider
+    /// <summary>Creates a pipeline by resolving middleware from the service provider in the supplied type order.</summary>
     public SagaMiddlewarePipeline(
         IEnumerable<Type> orderedTypes,
         IServiceProvider serviceProvider)
@@ -49,6 +50,7 @@ public sealed class SagaMiddlewarePipeline
         return list;
     }
 
+    /// <summary>Invokes each middleware in order and then executes the terminal handler delegate.</summary>
     public Task InvokeAsync(IInvocationContext context, Func<Task> terminal)
     {
         var next = terminal;

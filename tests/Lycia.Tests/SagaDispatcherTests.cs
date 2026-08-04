@@ -572,7 +572,7 @@ public class SagaDispatcherTests
         {
             await dispatcher.DispatchAsync(command, handlerType: typeof(CreateOrderSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
         }
-        catch (Exception e)
+        catch (Exception)
         {
             throw;
         }

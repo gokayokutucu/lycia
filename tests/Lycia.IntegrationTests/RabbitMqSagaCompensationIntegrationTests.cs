@@ -713,7 +713,10 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
                     // Log step as Failed on exception
                     if (msg.Message == "trigger-failure")
                     {
-                        await sagaStore.LogStepAsync(msg.SagaId.Value, starterMessageId, null, typeof(TestSagaCommand),
+                        if (msg.SagaId is not { } sagaId)
+                            throw new InvalidOperationException("A saga identifier is required for compensation.");
+
+                        await sagaStore.LogStepAsync(sagaId, starterMessageId, null, typeof(TestSagaCommand),
                             StepStatus.Failed, handlerType, msg, (SagaStepFailureInfo?)null);
                         finished.TrySetResult(true);
                         throw new InvalidOperationException("Intentional failure for compensation.");
@@ -748,7 +751,7 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
         // Assert: Message should have been received
         receivedMessages.Should().ContainSingle(x => x.Message == "trigger-failure");
 
-        // Assert: Redis log should contain Failed adım
+        // Assert: the Redis log should contain a failed step.
         var sagaSteps = await sagaStore.GetSagaHandlerStepsAsync(testCommand.SagaId.Value);
         sagaSteps.Should().Contain(x => x.Value.Status == StepStatus.Failed);
 

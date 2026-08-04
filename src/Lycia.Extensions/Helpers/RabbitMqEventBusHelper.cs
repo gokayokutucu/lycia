@@ -6,8 +6,10 @@ using Lycia.Saga.Abstractions.Messaging;
 
 namespace Lycia.Extensions.Helpers;
 
+/// <summary>Creates RabbitMQ headers from Lycia message identity and routing metadata.</summary>
 public static class RabbitMqEventBusHelper
 {
+    /// <summary>Builds transport headers while preserving saga, correlation, causation, request, and targeted-response metadata.</summary>
     public static Dictionary<string, object?> BuildMessageHeaders(object message, Guid? sagaId, Type messageType, string typeLabel)
     {
         var headers = new Dictionary<string, object?>();

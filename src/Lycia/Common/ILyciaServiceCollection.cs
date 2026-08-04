@@ -6,13 +6,18 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Lycia.Common;
 
+/// <summary>Provides the services, configuration, and discovered message routing map used while configuring Lycia.</summary>
 public interface ILyciaServiceCollection
 {
+    /// <summary>Gets the application service collection being configured.</summary>
     IServiceCollection Services { get; }
+    /// <summary>Gets the application configuration when one was supplied.</summary>
     IConfiguration? Configuration { get; }
+    /// <summary>Gets the topology map from transport queue names to message and handler types.</summary>
     IDictionary<string, (Type MessageType, Type HandlerType)> QueueTypeMap { get; }
 }
 
+/// <summary>Default mutable configuration context returned by Lycia service-registration extensions.</summary>
 public class LyciaServiceCollection : ILyciaServiceCollection
 {
     /// <summary>
@@ -29,6 +34,7 @@ public class LyciaServiceCollection : ILyciaServiceCollection
     }
     
     
+    /// <inheritdoc />
     public IDictionary<string, (Type MessageType, Type HandlerType)> QueueTypeMap { get; }
     /// <summary>
     /// Service collection of the app

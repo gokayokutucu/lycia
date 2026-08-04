@@ -58,7 +58,8 @@ must never contain a pod, host, process, or container identity.
   handler are valid replicas and are not duplicate registrations.
 - An event may have any number of subscriptions. Each `MessageType + HandlerType + ApplicationId`
   combination is an independent logical subscription; replicas share it.
-- A response targets the requesting application from `ReplyTo`. `RequestId`, `CorrelationId`, and
+- A response targets the requesting application from canonical `ResponseEndpoint`; obsolete `ReplyTo`
+  remains a forwarding compatibility alias. `RequestId`, `CorrelationId`, and
   `SagaId` correlate it without creating per-saga transport resources.
 
 Startup validation rejects missing or multiple endpoint markers, wrong `ApplicationId`, and conflicting
@@ -73,7 +74,7 @@ the configured spelling. Errors include the command, handlers, expected owner, a
 | Command consumer | `command.{Type}.{ApplicationId}` | durable consumer from the logical command queue | one consumer group from the logical command queue |
 | Event address | fanout exchange `event.{Type}` | `event.{Type}` | `{prefix}.event.{Type}` |
 | Event consumer | `event.{Type}.{Handler}.{ApplicationId}` | one durable consumer per handler/application | one group per handler/application |
-| Response address | direct exchange `response.{Type}`; key `{ReplyTo}` | `response.{ReplyTo}.{Type}` | `{prefix}.response.{ReplyTo}.{Type}` |
+| Response address | direct exchange `response.{Type}`; key `{ResponseEndpoint}` | `response.{ResponseEndpoint}.{Type}` | `{prefix}.response.{ResponseEndpoint}.{Type}` |
 | Response consumer | `response.{Type}.{ApplicationId}` | requester durable consumer | requester consumer group |
 
 RabbitMQ queues are durable, non-exclusive, and non-auto-delete. Event routing keys are empty because a

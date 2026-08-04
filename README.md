@@ -100,7 +100,8 @@ The generated topology is transport-specific but semantically equivalent:
 | Event | fanout `event.StockReservedEvent`, one queue per handler/application | subject `event.StockReservedEvent`, one durable consumer per subscription | topic `lycia.event.StockReservedEvent`, one group per subscription |
 | Response | direct requester key and shared requester queue | `response.{Requester}.{Type}` | `lycia.response.{Requester}.{Type}` |
 
-Responses carry `RequestId` and `ReplyTo`; `CorrelationId` and `SagaId` correlate workflow state inside
+Responses carry `RequestId` and canonical `ResponseEndpoint` (`ReplyTo` remains an obsolete alias);
+`CorrelationId` and `SagaId` correlate workflow state inside
 the requester’s shared response queue. Lycia never creates a queue or topic per saga instance.
 
 ### Replicas are competing consumers
@@ -201,7 +202,7 @@ public class CreateOrderSagaHandler :
     public override async Task HandleAsync(CreateOrderCommand cmd, CancellationToken ct = default)
     {
         // Business logic
-        await Context.Publish(new OrderCreatedResponse { OrderId = cmd.OrderId }, ct);
+        await Context.Respond(cmd, new OrderCreatedResponse { OrderId = cmd.OrderId }, ct);
         await Context.MarkAsComplete<CreateOrderCommand>(ct);
     }
     

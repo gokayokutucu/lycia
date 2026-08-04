@@ -23,6 +23,7 @@ using Constants = Lycia.Extensions.Configurations.Constants;
 
 namespace Lycia.Extensions.Eventing;
 
+/// <summary>Implements Lycia's at-least-once command, event, and targeted-response transport over RabbitMQ.</summary>
 public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
 {
     private const string XMessageTtl = "x-message-ttl";
@@ -62,6 +63,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         };
     }
 
+    /// <summary>Creates, connects, and returns a RabbitMQ event-bus instance for the supplied topology map.</summary>
     public static async Task<RabbitMqEventBus> CreateAsync(
         ILogger<RabbitMqEventBus> logger,
         IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap,
@@ -109,6 +111,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         }
     }
 
+    /// <inheritdoc />
     public async Task Publish<TEvent>(
         TEvent @event,
         Type? handlerType = null, //Discard handlerType as it's not used in RabbitMQ
@@ -198,6 +201,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             cancellationToken: cancellationToken);
     }
 
+    /// <inheritdoc />
     public async Task Send<TCommand>(
         TCommand command,
         Type? handlerType = null, //Discard handlerType as it's not used in RabbitMQ
@@ -326,6 +330,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
     }
 
 
+    /// <inheritdoc />
     public IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType, IReadOnlyDictionary<string, object?>
             Headers)>
         ConsumeAsync(bool autoAck = true, CancellationToken cancellationToken = default)
@@ -363,7 +368,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
                 MessagingNamingHelper
                     .GetExchangeName(
                         messageType); // e.g., "event.OrderCreatedEvent" or "command.CreateOrderCommand" or "response.OrderCreatedResponse"
-            var routingKey = RabbitMqTopology.GetBindingKey(messageType, _options.ApplicationId!);
+            var routingKey = RabbitMqTopology.GetBindingKey(messageType, ApplicationId);
             var exchangeType = RabbitMqTopology.GetExchangeType(messageType);
 
             await _channel.ExchangeDeclareAsync(
@@ -437,6 +442,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
         }
     }
 
+    /// <inheritdoc />
     public async IAsyncEnumerable<IncomingMessage> ConsumeWithAckAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
@@ -456,7 +462,7 @@ public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
             var handlerType = kvp.Value.HandlerType;
 
             var exchangeName = MessagingNamingHelper.GetExchangeName(messageType);
-            var routingKey = RabbitMqTopology.GetBindingKey(messageType, _options.ApplicationId!);
+            var routingKey = RabbitMqTopology.GetBindingKey(messageType, ApplicationId);
             var exchangeType = RabbitMqTopology.GetExchangeType(messageType);
 
             await _channel.ExchangeDeclareAsync(

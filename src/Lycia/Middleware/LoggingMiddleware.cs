@@ -32,7 +32,7 @@ public sealed class LoggingMiddleware(
 
         if (retryPolicy != null)
             retryPolicy.OnRetry += OnRetryHandler;
-        var sagaId = context.SagaId;
+        var sagaId = context.SagaId ?? accessor?.Current?.SagaId;
         var msgId = context.Message.MessageId;
         logger.LogInformation("Handling {Message} by {Handler} [SagaId={SagaId}, MessageId={MessageId}]", context.Message.GetType().Name, context.HandlerType.Name, sagaId, msgId);
         try

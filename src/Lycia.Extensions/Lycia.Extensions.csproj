@@ -45,10 +45,6 @@
         <None Include="README.md" Pack="true" PackagePath="/" />
     </ItemGroup>
 
-    <PropertyGroup>
-        <LyciaMinVersion>1.17.0-beta</LyciaMinVersion> <!-- default -->
-    </PropertyGroup>
-
     <!-- Local development: project-to-project -->
     <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' != 'true'">
         <ProjectReference Include="..\Lycia\Lycia.csproj" PrivateAssets="All" />
@@ -57,11 +53,15 @@
 
     <!-- Pack/CI: depend only on Lycia package -->
     <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' == 'true'">
-        <!-- Range suggestion: even if release order fluctuates, allow restore -->
-        <PackageReference Include="Lycia" Version="[$(LyciaMinVersion),)" />
+        <PackageReference Include="Lycia" Version="[$(LyciaPackageVersion)]" />
         <ProjectReference Remove="..\Lycia\Lycia.csproj" />
         <ProjectReference Remove="..\Lycia.Saga\Lycia.Saga.csproj" />
     </ItemGroup>
+
+    <Target Name="ValidateLyciaPackageVersion" BeforeTargets="CollectPackageReferences"
+            Condition="'$(UsePackageRefForLyciaOnPack)' == 'true' and '$(LyciaPackageVersion)' == ''">
+        <Error Text="LyciaPackageVersion must be the exact version produced for Lycia when pack mode is enabled." />
+    </Target>
 
     <!-- Common packages for all target frameworks -->
     <ItemGroup>

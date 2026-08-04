@@ -283,21 +283,20 @@ jobs:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: dotnet nuget push "artifacts/nupkgs/Lycia.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
 
-      - name: Compute Lycia min floor (strip commit hash)
-        id: floor
+      - name: Compute exact Lycia package version
+        id: package-version
         run: |
           LATEST=$(ls artifacts/nupkgs/Lycia.*.nupkg | sort -V | tail -n1)
           VER=${LATEST##*/Lycia.}
           VER=${VER%.nupkg}
-          FLOOR=$(echo "$VER" | sed -E 's/-g[0-9a-f]+$//')
-          echo "Lycia floor: $FLOOR"
-          echo "floor=$FLOOR" >> $GITHUB_OUTPUT
+          echo "Lycia package version: $VER"
+          echo "version=$VER" >> $GITHUB_OUTPUT
 
-      - name: Restore Extensions with floor (pack mode)
+      - name: Restore Extensions with exact package version (pack mode)
         run: |
           dotnet restore src/Lycia.Extensions/Lycia.Extensions.csproj \
             -p:UsePackageRefForLyciaOnPack=true \
-            -p:LyciaMinVersion='${{ steps.floor.outputs.floor }}' \
+            -p:LyciaPackageVersion='${{ steps.package-version.outputs.version }}' \
             --source "./artifacts/nupkgs" --source "https://api.nuget.org/v3/index.json"
 
       - name: Pack Extensions (no restore)
@@ -306,7 +305,7 @@ jobs:
             -o artifacts/nupkgs \
             -p:ContinuousIntegrationBuild=true \
             -p:UsePackageRefForLyciaOnPack=true \
-            -p:LyciaMinVersion='${{ steps.floor.outputs.floor }}' \
+            -p:LyciaPackageVersion='${{ steps.package-version.outputs.version }}' \
             --no-restore
 
       - name: Validate Lycia.Extensions package contents
@@ -322,12 +321,12 @@ jobs:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: dotnet nuget push "artifacts/nupkgs/Lycia.Extensions.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
 
-      - name: Restore NATS and Kafka transports with Lycia floor
+      - name: Restore NATS and Kafka transports with exact Lycia version
         run: |
           for PROJECT in Lycia.Extensions.Nats Lycia.Extensions.Kafka; do
             dotnet restore "src/$PROJECT/$PROJECT.csproj" \
               -p:UsePackageRefForLyciaOnPack=true \
-              -p:LyciaMinVersion='${{ steps.floor.outputs.floor }}' \
+              -p:LyciaPackageVersion='${{ steps.package-version.outputs.version }}' \
               --source "./artifacts/nupkgs" --source "https://api.nuget.org/v3/index.json"
           done
 
@@ -338,7 +337,7 @@ jobs:
               -o artifacts/nupkgs \
               -p:ContinuousIntegrationBuild=true \
               -p:UsePackageRefForLyciaOnPack=true \
-              -p:LyciaMinVersion='${{ steps.floor.outputs.floor }}' \
+              -p:LyciaPackageVersion='${{ steps.package-version.outputs.version }}' \
               --no-restore
           done
 
@@ -358,11 +357,11 @@ jobs:
           dotnet nuget push "artifacts/nupkgs/Lycia.Extensions.Nats.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
           dotnet nuget push "artifacts/nupkgs/Lycia.Extensions.Kafka.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
 
-      - name: Restore OpenTelemetry Extensions with floor (pack mode)
+      - name: Restore OpenTelemetry Extensions with exact package version (pack mode)
         run: |
           dotnet restore src/Lycia.Extensions.OpenTelemetry/Lycia.Extensions.OpenTelemetry.csproj \
             -p:UsePackageRefForLyciaOnPack=true \
-            -p:LyciaMinVersion='${{ steps.floor.outputs.floor }}' \
+            -p:LyciaPackageVersion='${{ steps.package-version.outputs.version }}' \
             --source "./artifacts/nupkgs" --source "https://api.nuget.org/v3/index.json"
 
       - name: Pack Lycia.Extensions.OpenTelemetry (no restore)
@@ -371,7 +370,7 @@ jobs:
             -o artifacts/nupkgs \
             -p:ContinuousIntegrationBuild=true \
             -p:UsePackageRefForLyciaOnPack=true \
-            -p:LyciaMinVersion='${{ steps.floor.outputs.floor }}' \
+            -p:LyciaPackageVersion='${{ steps.package-version.outputs.version }}' \
             --no-restore
 
       - name: Validate Lycia.Extensions.OpenTelemetry package contents

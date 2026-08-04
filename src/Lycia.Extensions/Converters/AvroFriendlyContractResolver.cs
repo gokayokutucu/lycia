@@ -4,8 +4,10 @@ using Newtonsoft.Json.Serialization;
 
 namespace Lycia.Extensions.Converters;
 
+/// <summary>Uses camel-case JSON names while excluding generated Avro schema metadata from record payloads.</summary>
 public sealed class AvroFriendlyContractResolver : CamelCasePropertyNamesContractResolver
 {
+    /// <inheritdoc />
     protected override IList<JsonProperty> CreateProperties(Type type, MemberSerialization memberSerialization)
     {
         var props = base.CreateProperties(type, memberSerialization);

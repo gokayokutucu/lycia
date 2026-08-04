@@ -19,8 +19,10 @@ namespace Lycia.Eventing;
 /// </summary>
 public class InMemoryEventBus(Lazy<ISagaDispatcher> sagaDispatcherLazy, string? applicationId = null) : IEventBus
 {
+    /// <inheritdoc />
     public string ApplicationId { get; } = EndpointIdentityNormalizer.Default.Normalize(applicationId ?? "inmemory");
 
+    /// <inheritdoc />
     public Task Send<TCommand>(TCommand command, Type? handlerType = null, Guid? sagaId = null,
         CancellationToken cancellationToken = default) where TCommand : ICommand
     {
@@ -32,6 +34,7 @@ public class InMemoryEventBus(Lazy<ISagaDispatcher> sagaDispatcherLazy, string? 
         return sagaDispatcherLazy.Value.DispatchAsync(command, handlerType, sagaId, cancellationToken);
     }
 
+    /// <inheritdoc />
     public Task Respond<TRequest, TResponse>(TRequest request, TResponse response, Type? handlerType = null,
         Guid? sagaId = null, CancellationToken cancellationToken = default)
         where TRequest : IMessage
@@ -42,6 +45,7 @@ public class InMemoryEventBus(Lazy<ISagaDispatcher> sagaDispatcherLazy, string? 
         return sagaDispatcherLazy.Value.DispatchAsync<TRequest, TResponse>(response, handlerType, sagaId, cancellationToken);
     }
 
+    /// <inheritdoc />
     public Task Publish<TEvent>(TEvent @event, Type? handlerType = null, Guid? sagaId = null,
         CancellationToken cancellationToken = default) where TEvent : IEvent
     {
@@ -51,11 +55,13 @@ public class InMemoryEventBus(Lazy<ISagaDispatcher> sagaDispatcherLazy, string? 
         return sagaDispatcherLazy.Value.DispatchAsync(@event, handlerType, sagaId, cancellationToken);
     }
 
+    /// <inheritdoc />
     public IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType, IReadOnlyDictionary<string, object?> Headers)> ConsumeAsync(bool autoAck = true, CancellationToken cancellationToken = default)
     {
         throw new NotImplementedException();
     }
 
+    /// <inheritdoc />
     public IAsyncEnumerable<IncomingMessage> ConsumeWithAckAsync(CancellationToken cancellationToken = default)
     {
         throw new NotImplementedException();

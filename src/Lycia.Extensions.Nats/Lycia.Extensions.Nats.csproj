@@ -15,7 +15,6 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <SuppressProjectReferenceDependenciesWhenPacking>true</SuppressProjectReferenceDependenciesWhenPacking>
     <UsePackageRefForLyciaOnPack>false</UsePackageRefForLyciaOnPack>
-    <LyciaMinVersion>1.17.0-beta</LyciaMinVersion>
     <AllowedOutputExtensionsInPackageBuildOutputFolder>$(AllowedOutputExtensionsInPackageBuildOutputFolder);.xml</AllowedOutputExtensionsInPackageBuildOutputFolder>
   </PropertyGroup>
   <ItemGroup>
@@ -29,8 +28,12 @@
     <ProjectReference Include="..\Lycia.Saga\Lycia.Saga.csproj" PrivateAssets="All" />
   </ItemGroup>
   <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' == 'true'">
-    <PackageReference Include="Lycia" Version="[$(LyciaMinVersion),)" />
+    <PackageReference Include="Lycia" Version="[$(LyciaPackageVersion)]" />
   </ItemGroup>
+  <Target Name="ValidateLyciaPackageVersion" BeforeTargets="CollectPackageReferences"
+          Condition="'$(UsePackageRefForLyciaOnPack)' == 'true' and '$(LyciaPackageVersion)' == ''">
+    <Error Text="LyciaPackageVersion must be the exact version produced for Lycia when pack mode is enabled." />
+  </Target>
   <ItemGroup>
     <PackageReference Include="NATS.Net" Version="3.1.0" />
     <PackageReference Include="Nerdbank.GitVersioning" Version="3.*" PrivateAssets="all" />

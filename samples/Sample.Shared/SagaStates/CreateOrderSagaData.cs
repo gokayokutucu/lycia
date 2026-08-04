@@ -8,7 +8,7 @@ namespace Sample.Shared.SagaStates;
 
 public class CreateOrderSagaData : SagaData
 {
-    public string OrderId { get; set; }
+    public string OrderId { get; set; } = string.Empty;
     public int RetryCount { get; set; }
     public bool InventoryCompensated { get; set; }
     public bool PaymentCompensated { get; set; }
