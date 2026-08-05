@@ -8,6 +8,6 @@ namespace Lycia.Saga.Contexts;
 
 public sealed class MessageSerializationContext : IMessageSerializationContext
 {
-    public string ApplicationId { get; set; } = "";
-    public string? ExplicitTypeName { get; set; }
+    public new string ApplicationId { get; set; } = string.Empty;
+    public new string? ExplicitTypeName { get; set; }
 }

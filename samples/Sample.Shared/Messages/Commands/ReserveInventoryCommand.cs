@@ -2,10 +2,11 @@
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 using Lycia.Saga.Messaging;
+using Sample.Shared.Abstractions.Endpoints;
 
 namespace Sample.Shared.Messages.Commands;
 
-public class ReserveInventoryCommand : CommandBase
+public class ReserveInventoryCommand : CommandBase, ISampleOrderConsumerCommand
 {
     public Guid OrderId { get; set; }
 }

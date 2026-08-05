@@ -31,10 +31,10 @@ builder.Configuration
 
 builder.Services.AddSingleton<GatewayAuthenticationHandler>();
 
-// Swagger için gerekli servisleri ekle
+// Register the services required by Swagger.
 builder.Services.AddEndpointsApiExplorer();
 
-// SwaggerForOcelot'tan önce temel Swagger servislerini kaydet
+// Register the base Swagger services before SwaggerForOcelot.
 builder.Services.AddSwaggerGen(options =>
 {
     options.SwaggerDoc("v1", new OpenApiInfo
@@ -44,7 +44,7 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 
-// Ocelot için Swagger entegrasyonu
+// Register Swagger integration for Ocelot.
 builder.Services.AddSwaggerForOcelot(builder.Configuration);
 
 builder.Services

@@ -12,6 +12,7 @@
 
   <ItemGroup>
 	<PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.23" />
+	<PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
 	<PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.23.0" />
 	<PackageReference Include="MMLib.SwaggerForOcelot" Version="10.0.0" />
 	<PackageReference Include="Ocelot" Version="24.1.0" />

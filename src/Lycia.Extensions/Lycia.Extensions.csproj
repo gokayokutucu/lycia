@@ -37,25 +37,34 @@
         <PackageProjectUrl>https://github.com/gokayokutucu/lycia</PackageProjectUrl>
         <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
         <PackageTags>saga distributed-transaction workflow orchestration choreography idempotency retry timeout compensation middleware rabbitmq redis microservices event-driven</PackageTags>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
     </PropertyGroup>
 
-    <PropertyGroup>
-        <LyciaMinVersion>1.17.0-beta</LyciaMinVersion> <!-- default -->
-    </PropertyGroup>
+    <ItemGroup>
+        <None Remove="README.md" />
+        <None Include="README.md" Pack="true" PackagePath="/" />
+    </ItemGroup>
 
     <!-- Local development: project-to-project -->
     <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' != 'true'">
         <ProjectReference Include="..\Lycia\Lycia.csproj" PrivateAssets="All" />
         <ProjectReference Include="..\Lycia.Saga\Lycia.Saga.csproj" PrivateAssets="All" />
+        <!-- Scheduling is a public Extensions API, so its contracts must be a direct compile reference. -->
+        <ProjectReference Include="..\Lycia.Saga.Abstractions\Lycia.Saga.Abstractions.csproj" PrivateAssets="All" />
     </ItemGroup>
 
     <!-- Pack/CI: depend only on Lycia package -->
     <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' == 'true'">
-        <!-- Range suggestion: even if release order fluctuates, allow restore -->
-        <PackageReference Include="Lycia" Version="[$(LyciaMinVersion),)" />
+        <PackageReference Include="Lycia" Version="[$(LyciaPackageVersion)]" />
         <ProjectReference Remove="..\Lycia\Lycia.csproj" />
         <ProjectReference Remove="..\Lycia.Saga\Lycia.Saga.csproj" />
+        <ProjectReference Remove="..\Lycia.Saga.Abstractions\Lycia.Saga.Abstractions.csproj" />
     </ItemGroup>
+
+    <Target Name="ValidateLyciaPackageVersion" BeforeTargets="CollectPackageReferences"
+            Condition="'$(UsePackageRefForLyciaOnPack)' == 'true' and '$(LyciaPackageVersion)' == ''">
+        <Error Text="LyciaPackageVersion must be the exact version produced for Lycia when pack mode is enabled." />
+    </Target>
 
     <!-- Common packages for all target frameworks -->
     <ItemGroup>

@@ -4,7 +4,6 @@ using Lycia.Extensions.Listener;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Owin;
 using Owin;
-using Sample.Product.NetFramework481.API.Middleware;
 using Sample.Product.NetFramework481.Application;
 using Sample.Product.NetFramework481.Infrastructure;
 using Sample.Product.NetFramework481.API.Middleware;

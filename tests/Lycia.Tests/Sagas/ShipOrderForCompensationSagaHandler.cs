@@ -21,7 +21,7 @@ public class ShipOrderForCompensationSagaHandler :
         try
         {
             // Simulated logic
-            const bool stockAvailable = false; // Simulate failure
+            var stockAvailable = false; // Test seam for simulating failure.
 
             if (stockAvailable)
             {

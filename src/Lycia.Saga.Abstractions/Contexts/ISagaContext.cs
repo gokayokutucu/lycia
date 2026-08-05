@@ -18,6 +18,9 @@ public interface ISagaContext<TInitialMessage> : ISagaContext
     where TInitialMessage : IMessage
 {
     Task Send<T>(T command, CancellationToken cancellationToken = default) where T : ICommand;
+    Task Respond<TRequest, TResponse>(TRequest request, TResponse response, CancellationToken cancellationToken = default)
+        where TRequest : IMessage
+        where TResponse : IResponse<TRequest>;
     Task Publish<T>(T @event, CancellationToken cancellationToken = default) where T : IEvent;
     
     Task Publish<T>(T @event, Type? handlerType, CancellationToken cancellationToken = default) where T : IEvent;

@@ -6,7 +6,10 @@ using Lycia.Common.Messaging;
 
 namespace Lycia.Saga.Abstractions.Messaging;
 
-public interface IResponse<TPrevious> : IMessage where TPrevious : IMessage{};
+/// <summary>Non-generic marker for targeted response messages.</summary>
+public interface IResponse : IMessage, IRequestRoutingMetadata { }
+
+public interface IResponse<TPrevious> : IResponse where TPrevious : IMessage{};
 
 public interface ISuccessResponse<TPrevious> : IResponse<TPrevious> where TPrevious : IMessage {}
 

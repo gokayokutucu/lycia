@@ -9,8 +9,11 @@ namespace Lycia.Saga.Abstractions;
 
 public interface IEventBus
 {
+    /// <summary>Gets the canonical logical application endpoint shared by all replicas of this bus.</summary>
+    string ApplicationId { get; }
+
     /// <summary>
-    /// Sends a command to a specific consumer (queue) for point-to-point communication in sagas or workflows.
+    /// Sends a command to the one logical owner declared by its <see cref="ICommandEndpoint"/> marker.
     /// </summary>
     /// <typeparam name="TCommand">
     ///     The type of the command to send. Must implement <see cref="ICommand"/>.
@@ -19,7 +22,7 @@ public interface IEventBus
     ///     The command object to send to the target consumer.
     /// </param>
     /// <param name="handlerType">
-    ///     (Optional) The type of the handler that will process this command, if known. Used for correlation or tracing.
+    ///     Optional handler context for correlation or tracing. It does not select the transport destination.
     /// </param>
     /// <param name="sagaId">
     ///     (Optional) The saga identifier associated with this command, if part of a saga. Used for correlation or tracing.
@@ -30,8 +33,18 @@ public interface IEventBus
     /// </returns>
     Task Send<TCommand>(TCommand command, Type? handlerType = null, Guid? sagaId = null, CancellationToken cancellationToken = default) where TCommand : ICommand;
 
+    /// <summary>Sends a response only to the logical endpoint waiting for the request.</summary>
+    Task Respond<TRequest, TResponse>(
+        TRequest request,
+        TResponse response,
+        Type? handlerType = null,
+        Guid? sagaId = null,
+        CancellationToken cancellationToken = default)
+        where TRequest : IMessage
+        where TResponse : IResponse<TRequest>;
+
     /// <summary>
-    /// Publishes an event to all interested subscribers for broadcasting state changes or domain events in the system.
+    /// Publishes an event to all interested subscribers. Response contracts are not valid broadcast events.
     /// </summary>
     /// <typeparam name="TEvent">
     ///     The type of the event to publish. Must implement <see cref="IEvent"/>.
@@ -40,7 +53,7 @@ public interface IEventBus
     ///     The event object to broadcast to all subscribers.
     /// </param>
     /// <param name="handlerType">
-    ///     (Optional) The type of the handler that will process this event, if known. Used for routing or filtering.
+    ///     Optional handler context for correlation or tracing. Event subscriptions are derived during discovery.
     /// </param>
     /// <param name="sagaId">
     ///     (Optional) The saga identifier associated with this event, if part of a saga. Used for correlation or tracing.
@@ -78,5 +91,5 @@ public interface IEventBus
     /// the message data, metadata, and acknowledgment methods for handling consumed messages.
     /// </returns>
     IAsyncEnumerable<IncomingMessage> ConsumeWithAckAsync(
-        [EnumeratorCancellation] CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default);
 }

@@ -2,11 +2,14 @@
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 using Lycia.Extensions.Configurations;
+using Lycia.Saga.Abstractions.Messaging;
 
 namespace Lycia.Extensions.Helpers;
 
+/// <summary>Creates RabbitMQ headers from Lycia message identity and routing metadata.</summary>
 public static class RabbitMqEventBusHelper
 {
+    /// <summary>Builds transport headers while preserving saga, correlation, causation, request, and targeted-response metadata.</summary>
     public static Dictionary<string, object?> BuildMessageHeaders(object message, Guid? sagaId, Type messageType, string typeLabel)
     {
         var headers = new Dictionary<string, object?>();
@@ -32,6 +35,9 @@ public static class RabbitMqEventBusHelper
         if (parentMessageId != Guid.Empty)
             headers[Constants.ParentMessageIdHeader] = parentMessageId.ToString();
 
+        if (message is IMessage typedMessage && typedMessage.CausationId is { } causationId && causationId != Guid.Empty)
+            headers[Constants.CausationIdHeader] = causationId.ToString();
+
         // Timestamp
         var timestamp = RabbitMqEventBusHelper.GetDateTimeProperty("Timestamp", msg);
         headers[Constants.TimestampHeader] = timestamp.ToString("o");
@@ -40,9 +46,16 @@ public static class RabbitMqEventBusHelper
         var applicationId = RabbitMqEventBusHelper.GetStringProperty("ApplicationId", msg);
         if (!string.IsNullOrWhiteSpace(applicationId)) headers[Constants.ApplicationIdHeader] = applicationId;
 
-        // ParentMessageId (again, fallback/generation)
-        var parentMsgIdForFallback = RabbitMqEventBusHelper.GetGuidProperty("ParentMessageId", msg);
-        headers[Constants.ParentMessageIdHeader] = (parentMsgIdForFallback != Guid.Empty ? parentMsgIdForFallback : Guid.NewGuid()).ToString();
+        if (message is IRequestRoutingMetadata requestMetadata)
+        {
+            if (requestMetadata.RequestId != Guid.Empty)
+                headers[Constants.RequestIdHeader] = requestMetadata.RequestId.ToString();
+            if (!string.IsNullOrWhiteSpace(requestMetadata.ResponseEndpoint))
+            {
+                headers[Constants.ResponseEndpointHeader] = requestMetadata.ResponseEndpoint;
+                headers[Constants.ReplyToHeader] = requestMetadata.ResponseEndpoint;
+            }
+        }
 
         headers[typeLabel] = messageType.FullName;
         headers[Constants.PublishedAtHeader] = DateTime.UtcNow.ToString("o");

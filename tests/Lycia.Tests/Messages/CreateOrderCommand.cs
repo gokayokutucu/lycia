@@ -2,13 +2,16 @@
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 using Lycia.Saga.Messaging;
+using Lycia.Saga.Abstractions.Messaging;
 
 namespace Lycia.Tests.Messages;
 
 /// <summary>
 /// Command to initiate an order creation saga.
 /// </summary>
-public class CreateOrderCommand : CommandBase
+public interface ITestAppCommand : ICommand, ICommandEndpoint { }
+
+public class CreateOrderCommand : CommandBase, ITestAppCommand
 {
     public Guid OrderId { get; set; } = Guid.NewGuid();
     public Guid UserId { get; set; }

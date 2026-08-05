@@ -20,7 +20,7 @@ public class RequestResponseLoggingMiddleware
     {
         var requestId = Guid.NewGuid().ToString("N");
         context.Items["RequestId"] = requestId;
-        context.Response.Headers.Add("X-Request-Id", requestId);
+        context.Response.Headers["X-Request-Id"] = requestId;
 
         var stopwatch = Stopwatch.StartNew();
 
@@ -31,7 +31,7 @@ public class RequestResponseLoggingMiddleware
         // Read request headers
         var requestHeaders = context.Request.Headers
             .Where(h => !h.Key.StartsWith("X-Gateway") && h.Key != "Authorization") // Redact sensitive headers
-            .ToDictionary(h => h.Key, h => string.Join(", ", h.Value));
+            .ToDictionary(h => h.Key, h => h.Value.ToString());
 
         // Log incoming request with headers and body
         Log.Information(
@@ -64,7 +64,7 @@ public class RequestResponseLoggingMiddleware
             // Read response headers
             var responseHeaders = context.Response.Headers
                 .Where(h => !h.Key.StartsWith("X-Gateway"))
-                .ToDictionary(h => h.Key, h => string.Join(", ", h.Value));
+                .ToDictionary(h => h.Key, h => h.Value.ToString());
 
             // Copy response body back
             await responseBody.CopyToAsync(originalResponseBody);

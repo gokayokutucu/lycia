@@ -59,6 +59,121 @@ services.AddLycia(Configuration)
 - **Default Middleware Pipeline (Logging + Tracing + Retry, replaceable via UseSagaMiddleware)**  
 - **Extensibility**: Easily plug in custom implementations of `IMessageSerializer`, `IEventBus`, or `ISagaStore`.
 
+## Strongly Typed Command Ownership
+
+Commands declare their one logical owner in the contract. No destination string or handler name is
+passed to `Send`:
+
+```csharp
+public interface IStockServiceCommand : ICommandEndpoint { }
+
+public sealed class ReserveStockCommand : CommandBase, IStockServiceCommand
+{
+    public Guid OrderId { get; init; }
+}
+
+public sealed class ReserveStockHandler
+    : CoordinatedSagaHandler<ReserveStockCommand, StockSagaData>
+{
+    public override Task HandleAsync(
+        ReserveStockCommand command,
+        CancellationToken cancellationToken = default)
+    {
+        // The handler contains business logic only; transport routing stays unchanged.
+        return Context.MarkAsComplete<ReserveStockCommand>(cancellationToken);
+    }
+}
+
+await sagaContext.Send(new ReserveStockCommand { OrderId = orderId }, cancellationToken);
+```
+
+`IStockServiceCommand` deterministically resolves to the owner `StockService`. The owning host must use
+`ApplicationId = StockService` (comparison is ordinal and case-insensitive). Startup fails when a command
+has no owner marker, more than one owner marker, a handler in the wrong application, or more than one
+handler type in that application.
+
+The generated topology is transport-specific but semantically equivalent:
+
+| Kind | RabbitMQ | NATS | Kafka |
+|---|---|---|---|
+| Command | direct `command.ReserveStockCommand`, queue `command.ReserveStockCommand.StockService`, key `StockService` | subject `command.StockService.ReserveStockCommand`, one durable consumer | topic `lycia.command.StockService.ReserveStockCommand`, one owner consumer group |
+| Event | fanout `event.StockReservedEvent`, one queue per handler/application | subject `event.StockReservedEvent`, one durable consumer per subscription | topic `lycia.event.StockReservedEvent`, one group per subscription |
+| Response | direct requester key and shared requester queue | `response.{Requester}.{Type}` | `lycia.response.{Requester}.{Type}` |
+
+Responses carry `RequestId` and canonical `ResponseEndpoint` (`ReplyTo` remains an obsolete alias);
+`CorrelationId` and `SagaId` correlate workflow state inside
+the requester’s shared response queue. Lycia never creates a queue or topic per saga instance.
+
+### Replicas are competing consumers
+
+A replica is another running copy of the same logical application: another Kubernetes pod, Docker
+container, process, or host. Every replica of a service must use the same `ApplicationId`:
+
+```text
+Correct:
+StockService replica 1 -> ApplicationId = StockService
+StockService replica 2 -> ApplicationId = StockService
+StockService replica 3 -> ApplicationId = StockService
+
+Incorrect:
+StockService replica 1 -> ApplicationId = StockService-1
+StockService replica 2 -> ApplicationId = StockService-2
+StockService replica 3 -> ApplicationId = StockService-3
+```
+
+Correctly configured replicas share one queue, durable consumer, or consumer group, and compete for
+work. Under normal broker operation one delivery is handled by one replica. The incorrect form creates
+independent logical consumers and can create extra queues or duplicate event processing.
+
+The invariant is **one handler type, many runtime handler instances**. One command owner and one command
+handler keep bounded-context ownership clear, prevent accidental command broadcasts, and keep command
+addresses stable when implementation classes are renamed. Commands are intentions; publish an event when
+multiple independent components must react to a fact.
+
+RabbitMQ, JetStream, and Kafka use at-least-once delivery patterns in failure scenarios. Lycia does not
+claim exactly-once application processing; handlers must remain idempotent. Kafka ordering is scoped to a
+partition, and replicas beyond the partition count cannot consume concurrently.
+
+Transport packages are `Lycia.Extensions` (RabbitMQ), `Lycia.Extensions.Nats`, and
+`Lycia.Extensions.Kafka`. JetStream is the durable NATS default; Core NATS is an explicit ephemeral mode.
+
+---
+
+## Durable message scheduling
+
+Register Redis-backed scheduling once and schedule commands, events, or targeted responses from any saga context:
+
+```csharp
+services.AddLyciaScheduling(options =>
+{
+    options.AllowDynamicDelays = false;
+    options.Worker.LeaseDuration = TimeSpan.FromSeconds(30);
+    options.Worker.LeaseRenewInterval = TimeSpan.FromSeconds(10);
+    options.Vacuum.ApplicationTopology.Mode = VacuumMode.ReportOnly;
+});
+
+var scheduleId = await Context.Schedule(
+    new CancelOrderCommand { OrderId = orderId },
+    ScheduleDelay.ThirtySeconds,
+    cancellationToken);
+```
+
+`ScheduleId` identifies the scheduling operation and is deliberately different from `MessageId`. Pass a stable
+`ScheduleId` when retrying schedule creation. `ScheduleAt` accepts an absolute UTC instant; enum months are fixed
+30-day durations and `OneYear` is 365 days, so calendar-aware rules should calculate an instant and use `ScheduleAt`.
+Pending schedules can be cancelled idempotently or rescheduled before dispatch.
+
+RabbitMQ predefined buckets use one fixed-TTL queue per destination and bucket, then dead-letter to the final
+exchange without a plugin. Arbitrary RabbitMQ buckets are opt-in because they create dynamic queues. Kafka always
+uses the durable `SchedulerWorker`; Kafka retention is not delayed delivery. The validated NATS 2.11 baseline also
+falls back to `SchedulerWorker`, and `NativeOnly` fails at startup. Dispatch is at least once around crash windows,
+so handlers must be idempotent.
+
+Dynamic resource cleanup requires exact registry provenance, retention, no active manifest or schedule, an empty and
+unused broker resource, a fenced lease, and conditional deletion. Predefined buckets are retained. Ordinary topology
+defaults to `ReportOnly`, requires quarantine, and needs a second destructive opt-in. Scheduling exposes the
+`Lycia.Scheduling` activity source and meter plus the `LyciaScheduling` health check.
+
 ---
 
 ## Quick Start
@@ -124,7 +239,7 @@ public class CreateOrderSagaHandler :
     public override async Task HandleAsync(CreateOrderCommand cmd, CancellationToken ct = default)
     {
         // Business logic
-        await Context.Publish(new OrderCreatedResponse { OrderId = cmd.OrderId }, ct);
+        await Context.Respond(cmd, new OrderCreatedResponse { OrderId = cmd.OrderId }, ct);
         await Context.MarkAsComplete<CreateOrderCommand>(ct);
     }
     
@@ -133,8 +248,7 @@ public class CreateOrderSagaHandler :
         // Order created, reserve inventory
         await Context.Send(new ReserveInventoryCommand
         {
-            OrderId = response.OrderId,
-            ParentMessageId = response.MessageId
+            OrderId = response.OrderId
         }, cancellationToken);
         await Context.MarkAsComplete<OrderCreatedResponse>();
     }
@@ -189,6 +303,48 @@ This produces a full cross-service trace chain in Grafana Tempo or Jaeger.
   - Avro/Protobuf registry integration (including the built‑in `AvroSchemaConverter`)
   - Backward/forward compatibility detection
   - Contract-driven saga evolution
+
+## Durable request-response identity
+
+Responses are targeted saga continuations, never broadcast events. Use
+`Context.Respond(request, response, cancellationToken)` to send through the broker to the canonical
+`ResponseEndpoint` owned by the waiting saga application. `ReplyTo` is an obsolete alias for the same
+value. `Context.Publish(response)` fails explicitly.
+
+| Field | Meaning |
+| --- | --- |
+| `MessageId` | Identity and idempotency key of this concrete message |
+| `RequestId` | Request answered by a response; a new request uses its own `MessageId` |
+| `CorrelationId` | Complete business workflow |
+| `CausationId` | Direct causing message |
+| `ParentMessageId` | Saga-step and compensation parent |
+| `SagaId` | Durable saga instance |
+| `ResponseEndpoint` | Logical application waiting for the response |
+
+In the M1–M5 flow, request M1 has `RequestId=M1`; response M2 has a distinct identity and
+`RequestId=CausationId=ParentMessageId=M1`; child request M3 has `RequestId=M3` and is caused by M2;
+response M4 answers M3; request M5 is caused by M4. Correlation and saga IDs remain stable.
+Compensation walks only `ParentMessageId`.
+
+`OrderCreatedResponse` intentionally crosses the broker even when order creation is local. The durable,
+observable transition lets another replica reload Redis state and continue, tolerates failure between
+steps, and preserves idempotent redelivery.
+
+### Canonical application identities and migration
+
+Topology keys use invariant lowercase and ignore `-`, `_`, `.`, and whitespace. `StockService`,
+`stock-service`, `stock_service`, and `STOCK.SERVICE` all become `stockservice`; other characters and
+values without an alphanumeric character are rejected. Equivalent replicas share one queue/group.
+
+Canonicalization can rename broker resources. Drain old RabbitMQ queues and stop old consumers; validate
+NATS stream retention before replacing old durables/groups; choose Kafka starting offsets deliberately
+for the new canonical group. Remove old resources only after validation. Lycia never deletes production
+resources or dual-binds old and new names automatically.
+
+Typed endpoints, discovery, startup validation, and canonical matching enforce ownership inside Lycia,
+not globally at the broker. Another RabbitMQ queue, NATS group/durable, or Kafka group can receive the
+same logical message. Delivery follows at-least-once patterns, not exactly once; handlers must be
+idempotent.
 
 ## License
 

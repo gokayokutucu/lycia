@@ -6,11 +6,14 @@ using Polly.Retry;
 #if NET8_0_OR_GREATER
 namespace Lycia.Retry;
 
+/// <summary>Implements Lycia retry semantics with a Polly resilience pipeline.</summary>
 public class PollyRetryPolicy : IRetryPolicy
 {
     private readonly ResiliencePipeline _pipeline;
+    /// <inheritdoc />
     public event Action<RetryContext>? OnRetry;
 
+    /// <summary>Creates a retry policy from optional strategy settings.</summary>
     public PollyRetryPolicy(IOptions<RetryStrategyOptions>? options)
     {
         var src = options?.Value;
@@ -43,11 +46,13 @@ public class PollyRetryPolicy : IRetryPolicy
             .Build();
     }
 
+    /// <inheritdoc />
     public bool ShouldRetry(Exception? exception, int currentRetryCount)
     {
         return exception is TransientSagaException or TimeoutException && currentRetryCount < 3;
     }
 
+    /// <inheritdoc />
     public TimeSpan GetDelay(Exception? exception, int currentRetryCount)
     {
         return exception switch
@@ -58,6 +63,7 @@ public class PollyRetryPolicy : IRetryPolicy
         };
     }
 
+    /// <inheritdoc />
     public ValueTask ExecuteAsync(Func<Task> action, CancellationToken cancellationToken = default)
         => _pipeline.ExecuteAsync(static (act, _) => new ValueTask(act()), action, cancellationToken);
 } 

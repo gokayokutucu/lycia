@@ -14,28 +14,43 @@ using Testcontainers.Redis;
 
 namespace Lycia.Tests;
 
-public class SagaSagaStoreTests : IAsyncLifetime
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class RedisSagaStoreCollection : ICollectionFixture<RedisSagaStoreFixture>
 {
-    private readonly RedisContainer _redisContainer = new RedisBuilder()
+    public const string Name = "Redis saga store";
+}
+
+public sealed class RedisSagaStoreFixture : IAsyncLifetime
+{
+    private readonly RedisContainer _container = new RedisBuilder()
         .WithImage("redis:7-alpine")
         .WithCleanUp(true)
         .Build();
 
-    private IDatabase _db = null!;
+    private ConnectionMultiplexer? _connection;
+    public IConnectionMultiplexer Connection => _connection
+        ?? throw new InvalidOperationException("Redis fixture has not been initialized.");
+    public IDatabase Database { get; private set; } = null!;
 
     public async Task InitializeAsync()
     {
-        await _redisContainer.StartAsync();
-        var connectionString = _redisContainer.GetConnectionString();
-        //var connectionString = "127.0.0.1:6379";
-        var redis = await ConnectionMultiplexer.ConnectAsync(connectionString);
-        _db = redis.GetDatabase();
+        await _container.StartAsync();
+        _connection = await ConnectionMultiplexer.ConnectAsync(_container.GetConnectionString());
+        Database = _connection.GetDatabase();
     }
 
     public async Task DisposeAsync()
     {
-        await _redisContainer.DisposeAsync();
+        if (_connection is not null)
+            await _connection.DisposeAsync();
+        await _container.DisposeAsync();
     }
+}
+
+[Collection(RedisSagaStoreCollection.Name)]
+public class SagaSagaStoreTests(RedisSagaStoreFixture redisFixture)
+{
+    private IDatabase RedisDatabase => redisFixture.Database;
 
     [Theory]
     [InlineData("InMemory")]
@@ -54,7 +69,7 @@ public class SagaSagaStoreTests : IAsyncLifetime
 
         ISagaStore store = storeType switch
         {
-            "Redis" => new RedisSagaStore(_db, null!, null!, null!, sagaStoreOptions),
+            "Redis" => new RedisSagaStore(RedisDatabase, null!, null!, null!, sagaStoreOptions),
             "InMemory" => new InMemorySagaStore(null!, null!, null!),
             _ => throw new ArgumentOutOfRangeException()
         };
@@ -85,7 +100,7 @@ public class SagaSagaStoreTests : IAsyncLifetime
 
         ISagaStore store = storeType switch
         {
-            "Redis" => new RedisSagaStore(_db, null!, null!, null!, sagaStoreOptions),
+            "Redis" => new RedisSagaStore(RedisDatabase, null!, null!, null!, sagaStoreOptions),
             "InMemory" => new InMemorySagaStore(null!, null!, null!),
             _ => throw new ArgumentOutOfRangeException()
         };
@@ -119,7 +134,7 @@ public class SagaSagaStoreTests : IAsyncLifetime
 
         ISagaStore store = storeType switch
         {
-            "Redis" => new RedisSagaStore(_db, null!, null!, null!, sagaStoreOptions),
+            "Redis" => new RedisSagaStore(RedisDatabase, null!, null!, null!, sagaStoreOptions),
             "InMemory" => new InMemorySagaStore(null!, null!, null!),
             _ => throw new ArgumentOutOfRangeException()
         };
@@ -152,7 +167,7 @@ public class SagaSagaStoreTests : IAsyncLifetime
 
         ISagaStore store = storeType switch
         {
-            "Redis" => new RedisSagaStore(_db, null!, null!, null!, sagaStoreOptions),
+            "Redis" => new RedisSagaStore(RedisDatabase, null!, null!, null!, sagaStoreOptions),
             "InMemory" => new InMemorySagaStore(null!, null!, null!),
             _ => throw new ArgumentOutOfRangeException()
         };
@@ -185,7 +200,7 @@ public class SagaSagaStoreTests : IAsyncLifetime
 
         ISagaStore store = storeType switch
         {
-            "Redis" => new RedisSagaStore(_db, null!, null!, null!, sagaStoreOptions),
+            "Redis" => new RedisSagaStore(RedisDatabase, null!, null!, null!, sagaStoreOptions),
             "InMemory" => new InMemorySagaStore(null!, null!, null!),
             _ => throw new ArgumentOutOfRangeException()
         };
@@ -217,7 +232,7 @@ public class SagaSagaStoreTests : IAsyncLifetime
 
         ISagaStore store = storeType switch
         {
-            "Redis" => new RedisSagaStore(_db, null!, null!, null!, sagaStoreOptions),
+            "Redis" => new RedisSagaStore(RedisDatabase, null!, null!, null!, sagaStoreOptions),
             "InMemory" => new InMemorySagaStore(null!, null!, null!),
             _ => throw new ArgumentOutOfRangeException()
         };
@@ -248,7 +263,7 @@ public class SagaSagaStoreTests : IAsyncLifetime
 
         ISagaStore store = storeType switch
         {
-            "Redis" => new RedisSagaStore(_db, null!, null!, null!, sagaStoreOptions),
+            "Redis" => new RedisSagaStore(RedisDatabase, null!, null!, null!, sagaStoreOptions),
             "InMemory" => new InMemorySagaStore(null!, null!, null!),
             _ => throw new ArgumentOutOfRangeException()
         };

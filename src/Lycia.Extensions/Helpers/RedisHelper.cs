@@ -5,6 +5,7 @@ using StackExchange.Redis;
 
 namespace Lycia.Extensions.Helpers;
 
+/// <summary>Provides atomic Redis operations required by concurrent saga state transitions.</summary>
 public static class RedisHelper
 {
     private static readonly string AtomicHashSetIfEqualScript = @"
@@ -16,6 +17,7 @@ else
   return 0
 end";
 
+    /// <summary>Atomically replaces a hash field only when its stored value equals the expected value.</summary>
     public static async Task<bool> HashSetFieldIfEqualAsync(
         IDatabase redisDb,
         string hashKey,

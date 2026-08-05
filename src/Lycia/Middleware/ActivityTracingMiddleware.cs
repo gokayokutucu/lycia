@@ -3,6 +3,8 @@ using Lycia.Observability;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Contexts;
 using Lycia.Saga.Abstractions.Middlewares;
+using Lycia.Saga.Abstractions.Messaging;
+using Lycia.Messaging;
 using Microsoft.Extensions.Logging;
 
 namespace Lycia.Middleware;
@@ -56,15 +58,30 @@ public sealed class ActivityTracingMiddleware(
         if (current is not null)
         {
             // Basic saga/message tags
-            current.SetTag("lycia.saga.id", context.SagaId.ToString());
+            var sagaId = context.SagaId ?? accessor.Current?.SagaId;
+            current.SetTag("lycia.saga.id", sagaId?.ToString());
             current.SetTag("lycia.message.id", context.Message.MessageId.ToString());
             current.SetTag("lycia.handler", context.HandlerType?.FullName);
             current.SetTag("lycia.correlation.id", context.Message.CorrelationId.ToString());
+            current.SetTag("lycia.message_id", context.Message.MessageId.ToString());
+            current.SetTag("lycia.correlation_id", context.Message.CorrelationId.ToString());
+            current.SetTag("lycia.parent_message_id", context.Message.ParentMessageId.ToString());
+            current.SetTag("lycia.causation_id", context.Message.CausationId?.ToString());
+            current.SetTag("lycia.saga_id", sagaId?.ToString());
+
+            if (context.Message is IRequestRoutingMetadata routing)
+            {
+                current.SetTag("lycia.request_id", routing.RequestId.ToString());
+                current.SetTag("lycia.response_endpoint", routing.ResponseEndpoint);
+            }
             
             // If the message exposes ApplicationId, propagate it as well
             if (!string.IsNullOrWhiteSpace(context.Message.ApplicationId))
             {
                 current.SetTag("lycia.application.id", context.Message.ApplicationId);
+                current.SetTag("lycia.application_id", context.Message.ApplicationId);
+                current.SetTag("lycia.application_key",
+                    EndpointIdentityNormalizer.Default.Normalize(context.Message.ApplicationId));
             }
         }
 

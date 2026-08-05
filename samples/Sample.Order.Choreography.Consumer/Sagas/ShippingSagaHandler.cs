@@ -17,14 +17,13 @@ public class ShippingSagaHandler :
     public override async Task HandleAsync(PaymentSucceededEvent evt, CancellationToken cancellationToken = default)
     {
         // Try to ship
-        var shipped = ShippingService.TryShip(evt.OrderId);
+        var shipped = ShippingService.TryShip(evt.OrderId, !SampleScenario.FailShipping);
         if (!shipped)
         {
             // Broadcast failure so *interested* parties can react
             await Context.Publish(new OrderShippingFailedEvent
             {
-                OrderId = evt.OrderId,
-                ParentMessageId = evt.MessageId
+                OrderId = evt.OrderId
             }, cancellationToken);
             await Context.MarkAsFailed<PaymentSucceededEvent>(cancellationToken);
             return;
@@ -32,8 +31,7 @@ public class ShippingSagaHandler :
 
         await Context.Publish(new OrderShippedEvent
         {
-            OrderId = evt.OrderId,
-            ParentMessageId = evt.MessageId
+            OrderId = evt.OrderId
         }, cancellationToken);
         await Context.MarkAsComplete<PaymentSucceededEvent>();
     }
