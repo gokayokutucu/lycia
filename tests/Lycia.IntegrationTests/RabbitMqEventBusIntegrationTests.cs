@@ -12,6 +12,7 @@ using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Abstractions.Scheduling;
 using Lycia.Saga.Messaging;
 using Lycia.Saga.Messaging.Handlers;
+using Lycia.Tests.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
@@ -211,7 +212,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
             }
         }, cts.Token);
 
-        await Task.Delay(200, cts.Token);
+        await EventBusReadiness.WaitForConsumersAsync(bus, cts.Token);
 
         var evt = new TestEvent { SagaId = Guid.NewGuid(), Message = "Ack path message" };
         await bus.Publish(evt);
@@ -277,7 +278,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
             }
         }, cts.Token);
 
-        await Task.Delay(200, cts.Token);
+        await EventBusReadiness.WaitForConsumersAsync(bus, cts.Token);
 
         var evt = new TestEvent { SagaId = Guid.NewGuid(), Message = "Nack path message" };
         await bus.Publish(evt);
@@ -329,7 +330,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
             }
         }, timeout.Token);
 
-        await Task.Delay(250, timeout.Token);
+        await EventBusReadiness.WaitForConsumersAsync(bus, timeout.Token);
         var sagaId = Guid.NewGuid();
         var workflowId = Guid.NewGuid();
         var request = new TestCommand
@@ -417,7 +418,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
             }
         });
 
-        await Task.Delay(250);
+        await EventBusReadiness.WaitForConsumersAsync(eventBus, cts.Token);
 
         var testEvent = new TestEvent
         {
@@ -490,7 +491,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
             }
         });
 
-        await Task.Delay(250);
+        await EventBusReadiness.WaitForConsumersAsync(eventBus, cts.Token);
 
         var testEvent = new TestEvent
         {
@@ -513,10 +514,12 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task SendThenConsume_Command_Succeeds()
     {
-        var applicationId = "TestApp";
+        // Unique application id => unique queue per run. The command routing key is derived from
+        // the command's endpoint marker, so the binding still matches Send() while stale queues
+        // from crashed runs can no longer steal or shadow this run's message.
+        var applicationId = "CommandSingle" + Guid.NewGuid().ToString("N");
         var handlerType = typeof(TestCommandHandlerA);
         var queueName = MessagingNamingHelper.GetQueueName(typeof(TestCommand), handlerType, applicationId);
-        await CleanupQueuesAsync(RabbitMqConnectionString, queueName);
 
         // Only a single consumer/queue mapping for command (point-to-point)
         var queueTypeMap = new Dictionary<string, (Type, Type)>
@@ -545,36 +548,44 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         bool received = false;
 
-        var consumeTask = Task.Run(async () =>
+        try
         {
-            await foreach (var (body, messageType, handlerType, headers) in eventBus.ConsumeAsync(cancellationToken: cts.Token))
+            var consumeTask = Task.Run(async () =>
             {
-                var normalizedHeaders = serializer.NormalizeTransportHeaders(headers);
-                var (_, ctx) = serializer.CreateContextFor(messageType);
-                var cmd = serializer.Deserialize(body, normalizedHeaders, ctx);
+                await foreach (var (body, messageType, handlerType, headers) in eventBus.ConsumeAsync(cancellationToken: cts.Token))
+                {
+                    var normalizedHeaders = serializer.NormalizeTransportHeaders(headers);
+                    var (_, ctx) = serializer.CreateContextFor(messageType);
+                    var cmd = serializer.Deserialize(body, normalizedHeaders, ctx);
 
-                cmd.Should().BeOfType<TestCommand>();
-                ((TestCommand)cmd).Message.Should().Be("Integration test command");
-                received = true;
-                break;
-            }
-        });
+                    cmd.Should().BeOfType<TestCommand>();
+                    ((TestCommand)cmd).Message.Should().Be("Integration test command");
+                    received = true;
+                    break;
+                }
+            });
 
-        await Task.Delay(250);
+            // Deterministic readiness: the queue is declared, bound and consumed from before Send.
+            // A command published to the direct exchange can therefore never be dropped for lack
+            // of a binding, which is what previously made this test hang until the token expired.
+            await EventBusReadiness.WaitForConsumersAsync(eventBus, cts.Token);
 
-        var testCommand = new TestCommand
+            var testCommand = new TestCommand
+            {
+                SagaId = Guid.NewGuid(),
+                Message = "Integration test command"
+            };
+            await eventBus.Send(testCommand);
+
+            await consumeTask;
+
+            received.Should().BeTrue();
+        }
+        finally
         {
-            SagaId = Guid.NewGuid(),
-            Message = "Integration test command"
-        };
-        await eventBus.Send(testCommand);
-
-        await consumeTask;
-
-        received.Should().BeTrue();
-
-        await eventBus.DisposeAsync();
-        await CleanupQueuesAsync(RabbitMqConnectionString, queueName);
+            await eventBus.DisposeAsync();
+            await CleanupQueuesAsync(RabbitMqConnectionString, queueName);
+        }
     }
 
     [Fact]
@@ -618,7 +629,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
             throw new InvalidOperationException("RabbitMQ response consumer completed early.");
         }, timeout.Token);
 
-        await Task.Delay(300, timeout.Token);
+        await EventBusReadiness.WaitForConsumersAsync(consumerBus, timeout.Token);
         var request = new TestCommand { SagaId = Guid.NewGuid(), Message = "request" };
         await producerBus.Send(request, cancellationToken: timeout.Token);
         var response = new TestResponse { Message = "response" };

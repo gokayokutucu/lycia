@@ -42,6 +42,17 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
     /// <inheritdoc />
     public string ApplicationId { get; }
 
+    private readonly TaskCompletionSource<bool> _consumersReady =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
+    /// Completes when a consume loop has declared every mapped queue, bound it to its exchange,
+    /// and registered its consumer. Awaiting this before publishing removes the race in which a
+    /// message reaches a direct exchange before the consumer binding exists and is dropped.
+    /// Faults if consumer registration fails so awaiters do not wait forever.
+    /// </summary>
+    public Task ConsumerReady => _consumersReady.Task;
+
     private RabbitMqEventBus(
         ILogger<RabbitMqEventBus> logger,
         IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap,
@@ -352,92 +363,104 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
                 Headers)>();
 
         // queueName => e.g. Full format: event.OrderCreatedEvent.CreateOrderSagaHandler.OrderService
-        foreach (var kvp in queueTypeMap)
+        try
         {
-            var queueName = kvp.Key;
-            var messageType = kvp.Value.MessageType;
-            var handlerType = kvp.Value.HandlerType;
-            // Ensure queue and exchange exist and are bound before subscribing the consumer.
-            // These operations are idempotent.
-            var exchangeName =
-                MessagingNamingHelper
-                    .GetExchangeName(
-                        messageType); // e.g., "event.OrderCreatedEvent" or "command.CreateOrderCommand" or "response.OrderCreatedResponse"
-            var routingKey = RabbitMqTopology.GetBindingKey(messageType, ApplicationId);
-            var exchangeType = RabbitMqTopology.GetExchangeType(messageType);
-
-            await Task.Run(() => _channel.ExchangeDeclare(
-                exchange: exchangeName,
-                type: exchangeType,
-                durable: true,
-                autoDelete: false,
-                arguments: null)
-            , cancellationToken);
-
-            // Declare the queue with DLX and DLQ arguments
-            var queueArgs = await DeclareDeadLetter(queueName, cancellationToken);
-            if (_options?.MessageTTL is { TotalMilliseconds: > 0 } ttl)
+            foreach (var kvp in queueTypeMap)
             {
-                queueArgs[XMessageTtl] = (int)ttl.TotalMilliseconds;
-            }
+                var queueName = kvp.Key;
+                var messageType = kvp.Value.MessageType;
+                var handlerType = kvp.Value.HandlerType;
+                // Ensure queue and exchange exist and are bound before subscribing the consumer.
+                // These operations are idempotent.
+                var exchangeName =
+                    MessagingNamingHelper
+                        .GetExchangeName(
+                            messageType); // e.g., "event.OrderCreatedEvent" or "command.CreateOrderCommand" or "response.OrderCreatedResponse"
+                var routingKey = RabbitMqTopology.GetBindingKey(messageType, ApplicationId);
+                var exchangeType = RabbitMqTopology.GetExchangeType(messageType);
 
-            await Task.Run(() => _channel.QueueDeclare(
-                queue: queueName,
-                durable: true,
-                exclusive: false,
-                autoDelete: false,
-                arguments: queueArgs.Count > 0 ? queueArgs : null)
-            , cancellationToken);
+                await Task.Run(() => _channel.ExchangeDeclare(
+                    exchange: exchangeName,
+                    type: exchangeType,
+                    durable: true,
+                    autoDelete: false,
+                    arguments: null)
+                , cancellationToken);
 
-            // Bind queue to exchange with queue name as a routing key
-            await Task.Run(() => _channel.QueueBind(
-                queue: queueName,
-                exchange: exchangeName,
-                routingKey: routingKey,
-                arguments: null)
-            , cancellationToken);
-
-            var consumer = new EventingBasicConsumer(_channel);
-
-            // This pattern ensures that message handling errors are caught and do not crash the consumer loop.
-            // Instead, problematic messages are logged and can be dead-lettered for later analysis.
-            consumer.Received += (_, ea) =>
-            {
-                try
+                // Declare the queue with DLX and DLQ arguments
+                var queueArgs = await DeclareDeadLetter(queueName, cancellationToken);
+                if (_options?.MessageTTL is { TotalMilliseconds: > 0 } ttl)
                 {
-                    var headers = ea.BasicProperties?.Headers as IReadOnlyDictionary<string, object?>
-                                  ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-                    messageQueue.Enqueue((ea.Body.ToArray(), messageType, handlerType, headers));
+                    queueArgs[XMessageTtl] = (int)ttl.TotalMilliseconds;
                 }
-                catch (Exception ex)
+
+                await Task.Run(() => _channel.QueueDeclare(
+                    queue: queueName,
+                    durable: true,
+                    exclusive: false,
+                    autoDelete: false,
+                    arguments: queueArgs.Count > 0 ? queueArgs : null)
+                , cancellationToken);
+
+                // Bind queue to exchange with queue name as a routing key
+                await Task.Run(() => _channel.QueueBind(
+                    queue: queueName,
+                    exchange: exchangeName,
+                    routingKey: routingKey,
+                    arguments: null)
+                , cancellationToken);
+
+                var consumer = new EventingBasicConsumer(_channel);
+
+                // This pattern ensures that message handling errors are caught and do not crash the consumer loop.
+                // Instead, problematic messages are logged and can be dead-lettered for later analysis.
+                consumer.Received += (_, ea) =>
                 {
-                    _logger.LogError(ex,
-                        "Failed to process message from queue '{QueueName}' of type '{MessageType}'. Dead-lettering the message",
-                        queueName, messageType.FullName);
-                    // DLQ logic:
-                    _ = Task.Run(async () =>
+                    try
                     {
-                        try
+                        var headers = ea.BasicProperties?.Headers as IReadOnlyDictionary<string, object?>
+                                      ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                        messageQueue.Enqueue((ea.Body.ToArray(), messageType, handlerType, headers));
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex,
+                            "Failed to process message from queue '{QueueName}' of type '{MessageType}'. Dead-lettering the message",
+                            queueName, messageType.FullName);
+                        // DLQ logic:
+                        _ = Task.Run(async () =>
                         {
-                            await PublishToDeadLetterQueueAsync(queueName + ".dlq", ea.Body.ToArray(),
-                                ea.BasicProperties).ConfigureAwait(false);
-                        }
-                        catch (Exception dlqEx)
-                        {
-                            _logger.LogError(dlqEx, "Failed to publish to DLQ for queue '{QueueName}'", queueName);
-                        }
-                    });
-                }
-            };
+                            try
+                            {
+                                await PublishToDeadLetterQueueAsync(queueName + ".dlq", ea.Body.ToArray(),
+                                    ea.BasicProperties).ConfigureAwait(false);
+                            }
+                            catch (Exception dlqEx)
+                            {
+                                _logger.LogError(dlqEx, "Failed to publish to DLQ for queue '{QueueName}'", queueName);
+                            }
+                        });
+                    }
+                };
 
-            await Task.Run(() => _channel.BasicConsume(
-                queue: queueName,
-                autoAck: autoAck,
-                consumer: consumer)
-            , cancellationToken);
+                await Task.Run(() => _channel.BasicConsume(
+                    queue: queueName,
+                    autoAck: autoAck,
+                    consumer: consumer)
+                , cancellationToken);
 
-            _consumers.Add(consumer);
+                _consumers.Add(consumer);
+            }
         }
+        catch (Exception ex)
+        {
+            // Fault the readiness signal so callers synchronizing on ConsumerReady
+            // fail fast instead of waiting forever when registration fails.
+            _consumersReady.TrySetException(ex);
+            throw;
+        }
+
+        _consumersReady.TrySetResult(true);
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -461,89 +484,101 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
 
         var queue = new ConcurrentQueue<IncomingMessage>();
 
-        foreach (var kvp in _queueTypeMap)
+        try
         {
-            var queueName = kvp.Key;
-            var messageType = kvp.Value.MessageType;
-            var handlerType = kvp.Value.HandlerType;
-
-            var exchangeName = MessagingNamingHelper.GetExchangeName(messageType);
-            var routingKey = RabbitMqTopology.GetBindingKey(messageType, ApplicationId);
-            var exchangeType = RabbitMqTopology.GetExchangeType(messageType);
-
-            await Task.Run(() => _channel.ExchangeDeclare(
-                exchange: exchangeName,
-                type: exchangeType,
-                durable: true,
-                autoDelete: false,
-                arguments: null)
-            , cancellationToken);
-
-            var queueArgs = await DeclareDeadLetter(queueName, cancellationToken).ConfigureAwait(false);
-            if (_options?.MessageTTL is { TotalMilliseconds: > 0 } ttl)
-                queueArgs[XMessageTtl] = (int)ttl.TotalMilliseconds;
-
-            await Task.Run(() => _channel.QueueDeclare(
-                queue: queueName,
-                durable: true,
-                exclusive: false,
-                autoDelete: false,
-                arguments: queueArgs.Count > 0 ? queueArgs : null)
-            , cancellationToken);
-
-            // Bind queue to exchange with queue name as a routing key
-            await Task.Run(() => _channel.QueueBind(
-                queue: queueName,
-                exchange: exchangeName,
-                routingKey: routingKey,
-                arguments: null)
-            , cancellationToken);
-
-            var consumer = new EventingBasicConsumer(_channel);
-            consumer.Received += (_, ea) =>
+            foreach (var kvp in _queueTypeMap)
             {
-                try
+                var queueName = kvp.Key;
+                var messageType = kvp.Value.MessageType;
+                var handlerType = kvp.Value.HandlerType;
+
+                var exchangeName = MessagingNamingHelper.GetExchangeName(messageType);
+                var routingKey = RabbitMqTopology.GetBindingKey(messageType, ApplicationId);
+                var exchangeType = RabbitMqTopology.GetExchangeType(messageType);
+
+                await Task.Run(() => _channel.ExchangeDeclare(
+                    exchange: exchangeName,
+                    type: exchangeType,
+                    durable: true,
+                    autoDelete: false,
+                    arguments: null)
+                , cancellationToken);
+
+                var queueArgs = await DeclareDeadLetter(queueName, cancellationToken).ConfigureAwait(false);
+                if (_options?.MessageTTL is { TotalMilliseconds: > 0 } ttl)
+                    queueArgs[XMessageTtl] = (int)ttl.TotalMilliseconds;
+
+                await Task.Run(() => _channel.QueueDeclare(
+                    queue: queueName,
+                    durable: true,
+                    exclusive: false,
+                    autoDelete: false,
+                    arguments: queueArgs.Count > 0 ? queueArgs : null)
+                , cancellationToken);
+
+                // Bind queue to exchange with queue name as a routing key
+                await Task.Run(() => _channel.QueueBind(
+                    queue: queueName,
+                    exchange: exchangeName,
+                    routingKey: routingKey,
+                    arguments: null)
+                , cancellationToken);
+
+                var consumer = new EventingBasicConsumer(_channel);
+                consumer.Received += (_, ea) =>
                 {
-                    var headers = ea.BasicProperties?.Headers as IReadOnlyDictionary<string, object?>
-                                  ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-
-                    ValueTask Ack()
+                    try
                     {
-                        _channel!.BasicAck(ea.DeliveryTag, multiple: false);
-                        return default;
-                    }
+                        var headers = ea.BasicProperties?.Headers as IReadOnlyDictionary<string, object?>
+                                      ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
 
-                    ValueTask Nack(bool requeue)
-                    {
-                        _channel!.BasicNack(ea.DeliveryTag, multiple: false, requeue);
-                        return default;
-                    }
-
-                    queue.Enqueue(new IncomingMessage(ea.Body.ToArray(), messageType, handlerType, headers, Ack, Nack));
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex,
-                        "Failed to enqueue message for queue '{QueueName}' and type '{MessageType}'", queueName,
-                        messageType.FullName);
-                    _ = Task.Run(async () =>
-                    {
-                        try
+                        ValueTask Ack()
                         {
-                            await PublishToDeadLetterQueueAsync(queueName + ".dlq", ea.Body.ToArray(),
-                                ea.BasicProperties, default).ConfigureAwait(false);
+                            _channel!.BasicAck(ea.DeliveryTag, multiple: false);
+                            return default;
                         }
-                        catch (Exception dlqEx)
-                        {
-                            _logger.LogError(dlqEx, "Failed to publish to DLQ for queue '{QueueName}'", queueName);
-                        }
-                    });
-                }
-            };
 
-            await Task.Run(() => _channel.BasicConsume(queue: queueName, autoAck: false, consumer: consumer), cancellationToken);
-            _consumers.Add(consumer);
+                        ValueTask Nack(bool requeue)
+                        {
+                            _channel!.BasicNack(ea.DeliveryTag, multiple: false, requeue);
+                            return default;
+                        }
+
+                        queue.Enqueue(new IncomingMessage(ea.Body.ToArray(), messageType, handlerType, headers, Ack, Nack));
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex,
+                            "Failed to enqueue message for queue '{QueueName}' and type '{MessageType}'", queueName,
+                            messageType.FullName);
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                await PublishToDeadLetterQueueAsync(queueName + ".dlq", ea.Body.ToArray(),
+                                    ea.BasicProperties, default).ConfigureAwait(false);
+                            }
+                            catch (Exception dlqEx)
+                            {
+                                _logger.LogError(dlqEx, "Failed to publish to DLQ for queue '{QueueName}'", queueName);
+                            }
+                        });
+                    }
+                };
+
+                await Task.Run(() => _channel.BasicConsume(queue: queueName, autoAck: false, consumer: consumer), cancellationToken);
+                _consumers.Add(consumer);
+            }
         }
+        catch (Exception ex)
+        {
+            // Fault the readiness signal so callers synchronizing on ConsumerReady
+            // fail fast instead of waiting forever when registration fails.
+            _consumersReady.TrySetException(ex);
+            throw;
+        }
+
+        _consumersReady.TrySetResult(true);
 
         while (!cancellationToken.IsCancellationRequested)
         {
