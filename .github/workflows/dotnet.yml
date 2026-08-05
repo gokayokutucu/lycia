@@ -249,6 +249,7 @@ jobs:
             <packageSourceMapping>
               <packageSource key="local">
                 <package pattern="Lycia" />
+                <package pattern="Lycia.Extensions" />
               </packageSource>
               <packageSource key="nuget.org">
                 <package pattern="*" />
@@ -320,6 +321,43 @@ jobs:
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: dotnet nuget push "artifacts/nupkgs/Lycia.Extensions.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
+
+      - name: Restore RabbitMQ transport and Scheduling with exact Lycia version
+        run: |
+          for PROJECT in Lycia.Extensions.RabbitMq Lycia.Extensions.Scheduling; do
+            dotnet restore "src/$PROJECT/$PROJECT.csproj" \
+              -p:UsePackageRefForLyciaOnPack=true \
+              -p:LyciaPackageVersion='${{ steps.package-version.outputs.version }}' \
+              --source "./artifacts/nupkgs" --source "https://api.nuget.org/v3/index.json"
+          done
+
+      - name: Pack RabbitMQ transport and Scheduling
+        run: |
+          for PROJECT in Lycia.Extensions.RabbitMq Lycia.Extensions.Scheduling; do
+            dotnet pack "src/$PROJECT/$PROJECT.csproj" -c Release \
+              -o artifacts/nupkgs \
+              -p:ContinuousIntegrationBuild=true \
+              -p:UsePackageRefForLyciaOnPack=true \
+              -p:LyciaPackageVersion='${{ steps.package-version.outputs.version }}' \
+              --no-restore
+          done
+
+      - name: Validate RabbitMQ transport and Scheduling packages
+        run: |
+          for PROJECT in Lycia.Extensions.RabbitMq Lycia.Extensions.Scheduling; do
+            PKG=$(ls "artifacts/nupkgs/$PROJECT".*.nupkg | sort -V | tail -n1)
+            echo "$PROJECT nupkg: $PKG"
+            unzip -l "$PKG" | sed -n '1,120p'
+            echo "NUSPEC dependencies (should only contain Lycia and Lycia.Extensions):"
+            unzip -p "$PKG" '*.nuspec' | sed -n '1,160p'
+          done
+
+      - name: Push RabbitMQ transport and Scheduling (nuget.org)
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          dotnet nuget push "artifacts/nupkgs/Lycia.Extensions.RabbitMq.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
+          dotnet nuget push "artifacts/nupkgs/Lycia.Extensions.Scheduling.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
 
       - name: Restore NATS and Kafka transports with exact Lycia version
         run: |

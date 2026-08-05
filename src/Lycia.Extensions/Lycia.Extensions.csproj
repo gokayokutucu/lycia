@@ -23,14 +23,15 @@
 
     <PropertyGroup>
         <Authors>M. Gokay Okutucu</Authors>
-        <Description>Lycia.Extensions provides pluggable modules and integrations for the Lycia Saga framework.
-            It offers ready-to-use extensions for configuration, middleware, retry, scheduling, and observability:
-            - Fluent DI registration (AddLycia with ConfigureSaga, ConfigureEventBus, ConfigureRetry, ConfigureScheduling)
+        <Description>Lycia.Extensions provides transport-independent modules for the Lycia Saga framework:
+            - Fluent DI registration (AddLycia with ConfigureSaga, ConfigureEventBus, ConfigureRetry, ConfigureLogging)
             - Built-in retry policies with Polly integration
-            - Configurable middleware slots (logging, retry, custom middlewares)
+            - Configurable middleware slots (logging, tracing, retry, custom middlewares)
+            - Newtonsoft JSON serializer and Redis saga store
             - Health check integration (IHealthCheck)
-            - Scheduling extensions with Redis-based storage
 
+            Transports and durable scheduling ship separately: Lycia.Extensions.RabbitMq,
+            Lycia.Extensions.Nats, Lycia.Extensions.Kafka, and Lycia.Extensions.Scheduling.
             Keep your Saga setup modular, extensible, and production-grade. Add only the components you need.
         </Description>
         <Copyright>Copyright (c) 2025 M. Gokay Okutucu</Copyright>
