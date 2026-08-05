@@ -21,3 +21,11 @@ draining. Lycia does not dual-bind or delete resources.
 
 Responses use `Context.Respond`, never event publish. Another independently configured durable or queue
 group can still consume the subject; delivery is at least once and ownership is not global exclusivity.
+
+## Scheduling
+
+The validated NATS 2.11/JetStream baseline does not expose a Lycia-validated native delayed-delivery primitive.
+`NatsSchedulingMode.FallbackToWorker` therefore uses the Redis-backed `SchedulerWorker`; `Disabled` explicitly uses
+the same worker path without capability probing, while `NativeOnly` fails during transport construction. Lycia does
+not emulate delay with stream retention. The worker publishes to the normal final subject after the due time and
+preserves command, event, or targeted-response semantics. Delivery is at least once, and handlers must be idempotent.

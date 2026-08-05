@@ -6,6 +6,7 @@ using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Abstractions.Serializers;
 using Lycia.Saga.Extensions;
+using Lycia.Saga.Abstractions.Scheduling;
 using NATS.Client.Core;
 using NATS.Client.JetStream;
 using NATS.Client.JetStream.Models;
@@ -17,7 +18,7 @@ namespace Lycia.Extensions.Nats;
 /// Lycia NATS transport. JetStream is the default for durable saga delivery; Core NATS is an
 /// explicitly selected ephemeral mode for workloads that tolerate subscriber absence.
 /// </summary>
-public sealed class NatsEventBus : IEventBus, IAsyncDisposable
+public sealed class NatsEventBus : IEventBus, INativeSchedulingTransport, IAsyncDisposable
 {
     private readonly IDictionary<string, (Type MessageType, Type HandlerType)> _queueTypeMap;
     private readonly NatsEventBusOptions _options;
@@ -30,6 +31,9 @@ public sealed class NatsEventBus : IEventBus, IAsyncDisposable
     /// <inheritdoc />
     public string ApplicationId { get; }
 
+    /// <inheritdoc />
+    public string TransportName => "nats";
+
     /// <summary>Creates a NATS transport for the discovered logical subscriptions.</summary>
     public NatsEventBus(
         IDictionary<string, (Type MessageType, Type HandlerType)> queueTypeMap,
@@ -41,11 +45,31 @@ public sealed class NatsEventBus : IEventBus, IAsyncDisposable
         _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
         if (string.IsNullOrWhiteSpace(options.ApplicationId))
             throw new ArgumentException("ApplicationId is required.", nameof(options));
+        if (options.SchedulingMode == NatsSchedulingMode.NativeOnly)
+            throw new NotSupportedException(
+                "Native NATS scheduling is unavailable with Lycia's validated NATS 2.11 baseline. Configure FallbackToWorker or Disabled.");
         ApplicationId = EndpointIdentityNormalizer.Default.Normalize(options.ApplicationId);
 
         _client = new NatsClient(options.Url, $"Lycia.{options.ApplicationId}");
         _jetStream = _client.CreateJetStreamContext();
     }
+
+    /// <inheritdoc />
+    public Task<bool> CanScheduleAsync(NativeScheduleEnvelope envelope,
+        CancellationToken cancellationToken = default)
+    {
+        if (envelope == null) throw new ArgumentNullException(nameof(envelope));
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_options.SchedulingMode == NatsSchedulingMode.NativeOnly)
+            throw new NotSupportedException(
+                "Native NATS scheduling is unavailable with Lycia's NATS 2.11 server baseline. Use FallbackToWorker or upgrade to a validated server and client combination.");
+        return Task.FromResult(false);
+    }
+
+    /// <inheritdoc />
+    public Task<string?> ScheduleNativeAsync(NativeScheduleEnvelope envelope,
+        CancellationToken cancellationToken = default) => throw new NotSupportedException(
+        "Native NATS scheduling is not enabled for the validated NATS 2.11 baseline; SchedulerWorker is required.");
 
     /// <inheritdoc />
     public async Task Send<TCommand>(TCommand command, Type? handlerType = null, Guid? sagaId = null,

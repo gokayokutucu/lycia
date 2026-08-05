@@ -28,6 +28,8 @@ public sealed class RedisSagaStoreFixture : IAsyncLifetime
         .Build();
 
     private ConnectionMultiplexer? _connection;
+    public IConnectionMultiplexer Connection => _connection
+        ?? throw new InvalidOperationException("Redis fixture has not been initialized.");
     public IDatabase Database { get; private set; } = null!;
 
     public async Task InitializeAsync()

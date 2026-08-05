@@ -49,6 +49,8 @@
     <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' != 'true'">
         <ProjectReference Include="..\Lycia\Lycia.csproj" PrivateAssets="All" />
         <ProjectReference Include="..\Lycia.Saga\Lycia.Saga.csproj" PrivateAssets="All" />
+        <!-- Scheduling is a public Extensions API, so its contracts must be a direct compile reference. -->
+        <ProjectReference Include="..\Lycia.Saga.Abstractions\Lycia.Saga.Abstractions.csproj" PrivateAssets="All" />
     </ItemGroup>
 
     <!-- Pack/CI: depend only on Lycia package -->
@@ -56,6 +58,7 @@
         <PackageReference Include="Lycia" Version="[$(LyciaPackageVersion)]" />
         <ProjectReference Remove="..\Lycia\Lycia.csproj" />
         <ProjectReference Remove="..\Lycia.Saga\Lycia.Saga.csproj" />
+        <ProjectReference Remove="..\Lycia.Saga.Abstractions\Lycia.Saga.Abstractions.csproj" />
     </ItemGroup>
 
     <Target Name="ValidateLyciaPackageVersion" BeforeTargets="CollectPackageReferences"

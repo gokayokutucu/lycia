@@ -15,6 +15,7 @@ using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Contexts;
 using Lycia.Saga.Exceptions;
 using Lycia.Saga.Helpers;
+using Lycia.Saga.Abstractions.Scheduling;
 
 namespace Lycia.Extensions.Stores;
 
@@ -26,7 +27,8 @@ public class RedisSagaStore(
     IEventBus eventBus,
     ISagaIdGenerator sagaIdGenerator,
     ISagaCompensationCoordinator sagaCompensationCoordinator,
-    SagaStoreOptions? options)
+    SagaStoreOptions? options,
+    IMessageScheduler? messageScheduler = null)
     : ISagaStore, ISagaStoreHealthCheck
 {
     private readonly SagaStoreOptions _options = options ?? new SagaStoreOptions();
@@ -325,7 +327,8 @@ public class RedisSagaStore(
             eventBus: eventBus,
             sagaStore: this,
             sagaIdGenerator: sagaIdGenerator,
-            compensationCoordinator: sagaCompensationCoordinator
+            compensationCoordinator: sagaCompensationCoordinator,
+            messageScheduler: messageScheduler
         );
         return context;
     }

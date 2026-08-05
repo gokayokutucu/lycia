@@ -17,6 +17,7 @@ using Lycia.Messaging;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Abstractions.Serializers;
+using Lycia.Saga.Abstractions.Scheduling;
 using Lycia.Saga.Messaging;
 using Lycia.Saga.Extensions;
 using Constants = Lycia.Extensions.Configurations.Constants;
@@ -24,7 +25,7 @@ using Constants = Lycia.Extensions.Configurations.Constants;
 namespace Lycia.Extensions.Eventing;
 
 /// <summary>Implements Lycia's at-least-once command, event, and targeted-response transport over RabbitMQ.</summary>
-public sealed class RabbitMqEventBus : IEventBus, IAsyncDisposable
+public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTransport, ISchedulingResourceManager, IAsyncDisposable
 {
     private const string XMessageTtl = "x-message-ttl";
 

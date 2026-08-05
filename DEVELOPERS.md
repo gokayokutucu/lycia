@@ -4,6 +4,27 @@ This document provides an in-depth look into the architecture, components, confi
 
 ---
 
+## Transport-independent scheduling
+
+Scheduling contracts live in `Lycia.Saga.Abstractions`, orchestration and deterministic in-memory components live in
+`Lycia`, and Redis/RabbitMQ implementations live in `Lycia.Extensions`. Kafka and the supported NATS baseline use the
+same durable-worker path, keeping transport-specific behavior out of the core scheduler.
+
+Redis creation and claiming use scripts. A claim has an expiring lease and monotonic fencing token; active dispatches
+renew the lease, and every state mutation rejects stale owners. The stored payload retains its original `MessageId`.
+Responses also retain the request payload so dispatch invokes `Respond(request, response)` and preserves targeted
+`ResponseEndpoint`, `RequestId`, correlation, causation, parent, and saga identity. Completion occurs after final
+transport acceptance. A crash between acceptance and completion can repeat a message, so the guarantee is at least
+once rather than exactly once.
+
+RabbitMQ predefined scheduling is fixed queue TTL plus DLX. Dynamic arbitrary-delay queues are opt-in and registered
+with exact provenance. Vacuum uses a per-transport distributed lease/fence, active replica manifests, schedule
+references, broker message/consumer facts, age/idle thresholds, and conditional deletion. Ordinary topology follows a
+separate orphan/quarantine state machine and defaults to report-only; inactivity or a matching name never proves
+ownership. The `Lycia.Scheduling` activity source/meter and `LyciaScheduling` health check avoid payload data.
+
+---
+
 ## Request-response implementation contract
 
 Use `Context.Send` for owned commands, `Context.Respond` for targeted replies, and `Context.Publish` only
