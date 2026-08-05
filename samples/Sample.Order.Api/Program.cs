@@ -3,6 +3,7 @@
 // https://www.apache.org/licenses/LICENSE-2.0
 
 using Lycia.Extensions;
+using Lycia.Extensions.RabbitMq;
 using Lycia.Saga.Abstractions;
 using Microsoft.AspNetCore.Mvc;
 using Sample.Shared.Messages.Commands;
@@ -17,6 +18,8 @@ builder.Services
     .AddLycia(builder.Configuration)
     .AddSagasFromCurrentAssembly()
     .Build();
+
+builder.Services.AddLyciaRabbitMq();
 
 var app = builder.Build();
 

@@ -10,6 +10,7 @@ using Lycia.Helpers;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Messaging;
 using Lycia.Saga.Messaging.Handlers;
+using Lycia.Tests.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using RabbitMQ.Client;
 using Testcontainers.RabbitMq;
@@ -216,7 +217,7 @@ public class RabbitMqEventBusIntegrationTestsNetFramework : IAsyncLifetime
             }
         }, cts.Token);
 
-        await Task.Delay(200, cts.Token);
+        await EventBusReadiness.WaitForConsumersAsync(bus, cts.Token);
 
         var evt = new TestEvent { SagaId = Guid.NewGuid(), Message = "Ack path message" };
         await bus.Publish(evt);
@@ -282,7 +283,7 @@ public class RabbitMqEventBusIntegrationTestsNetFramework : IAsyncLifetime
             }
         }, cts.Token);
 
-        await Task.Delay(200, cts.Token);
+        await EventBusReadiness.WaitForConsumersAsync(bus, cts.Token);
 
         var evt = new TestEvent { SagaId = Guid.NewGuid(), Message = "Nack path message" };
         await bus.Publish(evt);
@@ -351,7 +352,7 @@ public class RabbitMqEventBusIntegrationTestsNetFramework : IAsyncLifetime
             }
         });
 
-        await Task.Delay(250);
+        await EventBusReadiness.WaitForConsumersAsync(eventBus, cts.Token);
 
         var testEvent = new TestEvent
         {
@@ -427,7 +428,7 @@ public class RabbitMqEventBusIntegrationTestsNetFramework : IAsyncLifetime
             }
         });
 
-        await Task.Delay(250);
+        await EventBusReadiness.WaitForConsumersAsync(eventBus, cts.Token);
 
         var testEvent = new TestEvent
         {
@@ -448,14 +449,18 @@ public class RabbitMqEventBusIntegrationTestsNetFramework : IAsyncLifetime
     [Fact]
     public async Task SendThenConsume_Command_Succeeds()
     {
-        var applicationId = "TestApp";
+        // Unique application id => unique queue per run so parallel test classes sharing the CI
+        // broker can neither consume nor delete this run's command queue. The command routing key
+        // is derived from the endpoint marker, so Send() still reaches the unique binding.
+        var applicationId = "CommandSingle" + Guid.NewGuid().ToString("N");
         var handlerType = typeof(TestCommandHandlerA);
+        var queueName = MessagingNamingHelper.GetQueueName(typeof(TestCommand), handlerType, applicationId);
 
         // Only a single consumer/queue mapping for command (point-to-point)
         var queueTypeMap = new Dictionary<string, (Type, Type)>
         {
             {
-                MessagingNamingHelper.GetQueueName(typeof(TestCommand), handlerType, applicationId),
+                queueName,
                 (typeof(TestCommand), typeof(TestCommandHandlerA))
             }
         };
@@ -493,7 +498,9 @@ public class RabbitMqEventBusIntegrationTestsNetFramework : IAsyncLifetime
             }
         });
 
-        await Task.Delay(250);
+        // Deterministic readiness: queue declared, bound and consumed from before Send, so the
+        // command cannot be dropped by the direct exchange for lack of a binding.
+        await EventBusReadiness.WaitForConsumersAsync(eventBus, cts.Token);
 
         var testCommand = new TestCommand
         {
@@ -507,6 +514,7 @@ public class RabbitMqEventBusIntegrationTestsNetFramework : IAsyncLifetime
         received.Should().BeTrue();
 
         await eventBus.DisposeAsync();
+        await CleanupQueuesAsync(RabbitMqConnectionString, queueName);
     }
 
 // Dummy command handler for test

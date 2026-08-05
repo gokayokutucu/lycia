@@ -3,8 +3,6 @@
 // https://www.apache.org/licenses/LICENSE-2.0
 using System.Reflection;
 using Lycia.Extensions.Configurations;
-using Lycia.Extensions.Eventing;
-using Lycia.Extensions.Listener;
 using Lycia.Extensions.Serialization;
 using Lycia.Extensions.Stores;
 using Lycia.Common;
@@ -123,41 +121,16 @@ namespace Lycia.Extensions
             services.TryAddSingleton<IDictionary<string, (Type MessageType, Type HandlerType)>>(sp =>
                 new Dictionary<string, (Type, Type)>());
 
-            // Default EventBus (RabbitMQ). Consumers may override with UseEventBus<T>().
+            // Transport-neutral placeholder. A transport package (Lycia.Extensions.RabbitMq,
+            // Lycia.Extensions.Nats, Lycia.Extensions.Kafka) or UseEventBus<T>() replaces it.
             services.TryAddSingleton<IEventBus>(sp =>
             {
-                var logger = sp.GetRequiredService<ILogger<RabbitMqEventBus>>();
-                var registrationLogger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("LyciaRegistration");
                 var ebOptions = sp.GetRequiredService<IOptions<EventBusOptions>>().Value;
-                var serializer = sp.GetRequiredService<IMessageSerializer>();
-                var map = sp.GetRequiredService<IDictionary<string, (Type MessageType, Type HandlerType)>>();
-
-                if (!string.Equals(ebOptions.Provider, Constants.ProviderRabbitMq, StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new InvalidOperationException($"Unsupported EventBus provider '{ebOptions.Provider}'. " +
-                                                        "Override with LyciaBuilder.UseEventBus<T>() to supply a custom bus.");
-                }
-                
-                if (string.IsNullOrWhiteSpace(ebOptions.ConnectionString))
-                    throw new InvalidOperationException("Lycia:EventBus:ConnectionString is required.");
-
-                try
-                {
-                    return RabbitMqEventBus.CreateAsync(
-                        logger: logger,
-                        queueTypeMap: map,
-                        options: ebOptions,
-                        serializer: serializer
-                    ).GetAwaiter().GetResult();
-                }
-                catch (Exception ex)
-                {
-                    registrationLogger.LogError(ex,
-                        "Lycia failed to connect to RabbitMQ while initializing the event bus. Check Lycia:EventBus settings.");
-                    throw new InvalidOperationException(
-                        "Lycia was unable to initialize the RabbitMQ event bus. See inner exception for details.",
-                        ex);
-                }
+                throw new InvalidOperationException(
+                    $"No Lycia transport is registered for EventBus provider '{ebOptions.Provider}'. " +
+                    "Reference a transport package and register it after AddLycia " +
+                    "(for example Lycia.Extensions.RabbitMq and services.AddLyciaRabbitMq()), " +
+                    "or override with LyciaBuilder.UseEventBus<T>().");
             });
 
             // Default SagaStore (Redis). Consumers may override with UseSagaStore<T>().
@@ -180,23 +153,6 @@ namespace Lycia.Extensions
             });
 
             RegisterMiddlewareAndPolicies(services);
-
-#if NET8_0_OR_GREATER
-            services.AddHostedService<RabbitMqListener>(); 
-#elif NETSTANDARD2_0
-            services.AddSingleton<RabbitMqListener>(sp =>
-            {
-                var listener = new RabbitMqListener(
-                    sp,
-                    sp.GetRequiredService<IEventBus>(),
-                    sp.GetRequiredService<ILogger<RabbitMqListener>>(),
-                    sp.GetRequiredService<IMessageSerializer>(),
-                    sp.GetRequiredService<LyciaActivitySourceHolder>()
-                );
-                listener.Start();
-                return listener;
-            });
-#endif
 
             // Health checks
             services.AddHealthChecks().AddCheck<Helpers.LyciaHealthCheck>("Lycia");
