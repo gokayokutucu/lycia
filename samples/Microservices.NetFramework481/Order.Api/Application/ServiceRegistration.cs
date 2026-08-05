@@ -2,6 +2,7 @@
 using Autofac.Extensions.DependencyInjection;
 using FluentValidation;
 using Lycia.Extensions;
+using Lycia.Extensions.RabbitMq;
 using Lycia.Extensions.Logging;
 using Lycia.Middleware;
 using Mapster;
@@ -60,6 +61,8 @@ public static class ServiceRegistration
             })
             .AddSagasFromCurrentAssembly()
             .Build();
+
+        services.AddLyciaRabbitMq();
 
         builder.Populate(services);
     }

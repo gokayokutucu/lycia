@@ -1,40 +1,32 @@
-# Lycia.Extensions RabbitMQ topology
+# Lycia.Extensions
 
-RabbitMQ uses one durable exchange per message type.
+Transport-independent building blocks for the Lycia Saga framework: fluent dependency-injection
+registration (`AddLycia` with `ConfigureSaga`, `ConfigureEventBus`, `ConfigureRetry`,
+`ConfigureLogging`), the middleware pipeline slots (logging, tracing, retry, custom middlewares),
+Polly-based retry policies, the Newtonsoft JSON serializer, the Redis saga store, outbox-aware
+event-bus decoration, and health checks.
 
-- Commands use a `direct` exchange, marker-derived owner routing key, and
-  `command.{MessageType}.{ApplicationId}` queue. A command queue never contains the handler class.
-- Events use a `fanout` exchange and one
-  `event.{MessageType}.{HandlerType}.{ApplicationId}` queue per logical subscription.
-- Responses use a `direct` exchange and target canonical `ResponseEndpoint`; requesters consume
-  `response.{MessageType}.{ApplicationId}`.
+## Registration
 
-Queues are durable, non-exclusive, and non-auto-delete. Replicas use the same `ApplicationId` and consume
-the same queue competitively. Dead lettering, TTL, explicit ack/nack, serializer headers, and tracing
-metadata remain enabled. Deliveries can be repeated around failures, so handlers must be idempotent.
+```csharp
+services.AddLycia(configuration)
+        .AddSagasFromCurrentAssembly()
+        .Build();
 
-Responses are sent with `Context.Respond` and cannot be broadcast with `Publish`. Headers preserve
-message, request, correlation, causation, parent, saga, and endpoint identity through redelivery and DLQ.
-Application keys use invariant lowercase and ignore dash, underscore, dot, and whitespace.
+// Then register a transport package:
+services.AddLyciaRabbitMq();            // Lycia.Extensions.RabbitMq
+// services.AddLyciaNats(o => ...);     // Lycia.Extensions.Nats
+// services.AddLyciaKafka(o => ...);    // Lycia.Extensions.Kafka
+```
 
-## RabbitMQ scheduling and cleanup
+`AddLycia` binds options, registers core saga services, middleware, serializer, the Redis saga
+store and health checks. It no longer registers a transport: resolve `IEventBus` without a
+transport package and you get a clear error naming the packages to reference.
 
-`AddLyciaScheduling` stores scheduling intent in Redis and hosts `SchedulerWorker`, manifest heartbeat, health checks,
-and `VacuumWorker`. Predefined `ScheduleDelay` values lazily declare durable queues with one fixed
-`x-message-ttl`, `x-dead-letter-exchange`, and `x-dead-letter-routing-key` per destination and bucket. Lycia never
-mixes per-message expirations in a shared queue, and an incompatible pre-existing queue fails redeclaration clearly.
-Buckets beyond RabbitMQ's unsigned 32-bit millisecond TTL limit automatically use `SchedulerWorker` instead of
-overflowing or silently shortening the requested delay.
+## Package split
 
-`AllowDynamicDelays=true` permits deterministic `...{milliseconds}ms` queues and adds `x-expires` as an extra safety
-net. These queues are more expensive and should be exceptional. Vacuum ownership comes from the durable registry,
-never a name prefix. Deletion additionally requires age, idle retention, no manifest or pending schedule, zero
-messages, zero consumers, a current fenced lease, and RabbitMQ `if-empty` plus `if-unused`. Predefined queues are
-protected. Ordinary queues remain `ReportOnly` by default and require quarantine plus
-`AllowDestructiveApplicationTopologyCleanup` for automatic deletion. Runtime scheduling needs Redis access and final
-publish rights; only automatic vacuum needs broker delete rights. Delivery remains at least once.
-
-Canonicalization can rename queues and routing keys. Drain and stop old consumers, deploy and validate
-the canonical topology, then remove obsolete resources; Lycia never deletes or dual-binds them. Another
-independently bound RabbitMQ queue can still receive the same key, so ownership is a Lycia invariant,
-not broker-global exclusivity. Delivery is at least once.
+RabbitMQ-specific code (event bus, listener, topology, TTL + DLX scheduling strategy) moved to
+`Lycia.Extensions.RabbitMq`. Durable transport-independent scheduling (SchedulerWorker, Redis
+schedule store, vacuum workers, `AddLyciaScheduling`) moved to `Lycia.Extensions.Scheduling`.
+Public namespaces were preserved, so migrating is adding the package reference(s) and calling
+`services.AddLyciaRabbitMq()` where RabbitMQ was previously implicit.

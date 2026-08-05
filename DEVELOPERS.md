@@ -6,9 +6,10 @@ This document provides an in-depth look into the architecture, components, confi
 
 ## Transport-independent scheduling
 
-Scheduling contracts live in `Lycia.Saga.Abstractions`, orchestration and deterministic in-memory components live in
-`Lycia`, and Redis/RabbitMQ implementations live in `Lycia.Extensions`. Kafka and the supported NATS baseline use the
-same durable-worker path, keeping transport-specific behavior out of the core scheduler.
+Scheduling contracts live in `Lycia.Saga.Abstractions`; scheduling orchestration, the deterministic in-memory
+components, and the Redis schedule store live in `Lycia.Extensions.Scheduling`; the RabbitMQ TTL+DLX native
+strategy lives in `Lycia.Extensions.RabbitMq`. Kafka and the supported NATS baseline use the same
+durable-worker path, keeping transport-specific behavior out of the core scheduler.
 
 Redis creation and claiming use scripts. A claim has an expiring lease and monotonic fencing token; active dispatches
 renew the lease, and every state mutation rejects stale owners. The stored payload retains its original `MessageId`.
@@ -376,10 +377,14 @@ builder.Services
 ```csharp
 services.AddLycia(configuration)
         .UseMessageSerializer<CustomSerializer>()
-        .UseEventBus<RabbitMqEventBus>()
         .UseSagaStore<RedisSagaStore>()
         .AddSagasFromAssemblies(typeof(SomeHandler).Assembly)
         .Build();
+
+// Transport registration comes from a transport package
+// (Lycia.Extensions.RabbitMq here; Nats/Kafka expose equivalents):
+services.AddLyciaRabbitMq();
+// A custom bus can still be plugged in with .UseEventBus<TEventBus>().
 ```
 
 - Builder APIs:

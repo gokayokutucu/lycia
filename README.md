@@ -9,7 +9,16 @@
 
 **Lycia** is the **main package** of the Lycia framework.  
 It provides the saga infrastructure, orchestration, and choreography support.  
-Extensions (e.g. Redis, RabbitMQ, Scheduling, Observability) are published separately under `Lycia.Extensions.*`.
+Extensions are published separately under `Lycia.Extensions.*`:
+
+| Package | Contents |
+| --- | --- |
+| `Lycia.Extensions` | Transport-independent registration, middleware, logging, retry, Redis saga store |
+| `Lycia.Extensions.RabbitMq` | RabbitMQ transport, topology, DLQ, native TTL+DLX scheduling strategy |
+| `Lycia.Extensions.Scheduling` | Durable transport-independent scheduling (SchedulerWorker, Redis store, vacuum) |
+| `Lycia.Extensions.Nats` | NATS JetStream / Core NATS transport |
+| `Lycia.Extensions.Kafka` | Kafka transport |
+| `Lycia.Extensions.OpenTelemetry` | Tracing integration |
 
 **Lycia** began with a vision on *May 28, 2023*.  
 Our motto: *“Turning difficult paths into joyful simplicity.”* Inspired by the ancient *Lycian Way*, we set out to build a framework that makes complex saga workflows easy to manage — supported by strong documentation and aligned with modern software practices.
@@ -49,6 +58,8 @@ Unlike other frameworks, Lycia offers:
 services.AddLycia(Configuration)
         .AddSagasFromCurrentAssembly()
         .Build();
+
+services.AddLyciaRabbitMq(); // transport package, e.g. Lycia.Extensions.RabbitMq
 ```
 
 - **Clear Naming and Semantics**:  
@@ -134,14 +145,17 @@ RabbitMQ, JetStream, and Kafka use at-least-once delivery patterns in failure sc
 claim exactly-once application processing; handlers must remain idempotent. Kafka ordering is scoped to a
 partition, and replicas beyond the partition count cannot consume concurrently.
 
-Transport packages are `Lycia.Extensions` (RabbitMQ), `Lycia.Extensions.Nats`, and
-`Lycia.Extensions.Kafka`. JetStream is the durable NATS default; Core NATS is an explicit ephemeral mode.
+Transport packages are `Lycia.Extensions.RabbitMq`, `Lycia.Extensions.Nats`, and
+`Lycia.Extensions.Kafka`; each registers itself after `AddLycia(...)` (`AddLyciaRabbitMq()`,
+`AddLyciaNats(...)`, `AddLyciaKafka(...)`). JetStream is the durable NATS default; Core NATS is an
+explicit ephemeral mode.
 
 ---
 
 ## Durable message scheduling
 
-Register Redis-backed scheduling once and schedule commands, events, or targeted responses from any saga context:
+Reference `Lycia.Extensions.Scheduling`, register Redis-backed scheduling once, and schedule commands,
+events, or targeted responses from any saga context:
 
 ```csharp
 services.AddLyciaScheduling(options =>

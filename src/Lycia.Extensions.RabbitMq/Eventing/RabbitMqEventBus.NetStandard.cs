@@ -3,7 +3,7 @@
 // https://www.apache.org/licenses/LICENSE-2.0
 // All async operations are now cancellation-aware and propagate the CancellationToken for graceful shutdown and responsiveness.
 
-#if NET8_0_OR_GREATER
+#if NETSTANDARD2_0
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
@@ -32,15 +32,26 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
     private readonly ConnectionFactory _factory;
     private readonly ILogger<RabbitMqEventBus> _logger;
     private IConnection? _connection;
-    private IChannel? _channel;
+    private IModel? _channel;
     private readonly IDictionary<string, (Type MessageType, Type HandlerType)> _queueTypeMap;
-    private readonly List<AsyncEventingBasicConsumer> _consumers = [];
+    private readonly List<EventingBasicConsumer> _consumers = [];
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private readonly EventBusOptions _options;
     private readonly IMessageSerializer _serializer;
 
     /// <inheritdoc />
     public string ApplicationId { get; }
+
+    private readonly TaskCompletionSource<bool> _consumersReady =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
+    /// Completes when a consume loop has declared every mapped queue, bound it to its exchange,
+    /// and registered its consumer. Awaiting this before publishing removes the race in which a
+    /// message reaches a direct exchange before the consumer binding exists and is dropped.
+    /// Faults if consumer registration fails so awaiters do not wait forever.
+    /// </summary>
+    public Task ConsumerReady => _consumersReady.Task;
 
     private RabbitMqEventBus(
         ILogger<RabbitMqEventBus> logger,
@@ -80,8 +91,8 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
 
     private async Task ConnectAsync(CancellationToken cancellationToken = default)
     {
-        _connection = await _factory.CreateConnectionAsync(cancellationToken).ConfigureAwait(false);
-        _channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+        _connection = await Task.Run(() => _factory.CreateConnection(), cancellationToken).ConfigureAwait(false);
+        _channel = await Task.Run(() => _connection.CreateModel(), cancellationToken).ConfigureAwait(false);
     }
 
     private async Task EnsureChannelAsync(CancellationToken cancellationToken = default)
@@ -102,8 +113,7 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
             }
             else
             {
-                _channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken)
-                    .ConfigureAwait(false);
+                _channel = await Task.Run(() => _connection.CreateModel(), cancellationToken).ConfigureAwait(false);
             }
         }
         finally
@@ -157,12 +167,13 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
                 "Channel is not initialized. Ensure RabbitMqEventBus is properly created.");
         }
 
-        await _channel.ExchangeDeclareAsync(
+        await Task.Run(() => _channel.ExchangeDeclare(
             exchange: exchangeName,
             type: exchangeType,
             durable: true,
             autoDelete: false,
-            arguments: null, cancellationToken: cancellationToken);
+            arguments: null)
+        , cancellationToken);
 
         // Build base headers (Lycia metadata)
         var headers =
@@ -179,11 +190,9 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
         foreach (var kv in serializerHeaders)
             headers[kv.Key] = kv.Value;
 
-        var properties = new BasicProperties
-        {
-            Persistent = true,
-            Headers = headers
-        };
+        var properties = _channel.CreateBasicProperties();
+        properties.Persistent = true;
+        properties.Headers = headers;
         ApplyRequestProperties(properties, message);
 
         // Set AMQP ContentType from headers (if provided by the serializer)
@@ -193,13 +202,13 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
             properties.ContentType = ct;
         }
 
-        await _channel.BasicPublishAsync(
+        await Task.Run(() => _channel.BasicPublish(
             exchange: exchangeName,
             routingKey: routingKey,
             mandatory: false,
             basicProperties: properties,
-            body: body,
-            cancellationToken: cancellationToken);
+            body: body)
+        , cancellationToken); ;
     }
 
     /// <inheritdoc />
@@ -210,7 +219,6 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
         CancellationToken cancellationToken = default) where TCommand : ICommand
     {
         await EnsureChannelAsync(cancellationToken).ConfigureAwait(false);
-
         RequestRouting.Prepare(command);
 
         var exchangeName = MessagingNamingHelper.GetExchangeName(typeof(TCommand)); // command.CreateOrderCommand
@@ -222,13 +230,13 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
                 "Channel is not initialized. Ensure RabbitMqEventBus is properly created.");
         }
 
-        await _channel.ExchangeDeclareAsync(
+        await Task.Run(() => _channel.ExchangeDeclare(
             exchange: exchangeName,
             type: ExchangeType.Direct,
             durable: true,
             autoDelete: false,
-            arguments: null,
-            cancellationToken: cancellationToken);
+            arguments: null)
+        , cancellationToken);
 
         // Build base headers (Lycia metadata)
         var headers =
@@ -245,11 +253,9 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
         foreach (var kv in serializerHeaders)
             headers[kv.Key] = kv.Value;
 
-        var properties = new BasicProperties
-        {
-            Persistent = true,
-            Headers = headers
-        };
+        var properties = _channel.CreateBasicProperties();
+        properties.Persistent = true;
+        properties.Headers = headers;
         ApplyRequestProperties(properties, command);
 
         // Set AMQP ContentType from headers if present
@@ -259,16 +265,16 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
             properties.ContentType = ct;
         }
 
-        await _channel.BasicPublishAsync(
+        await Task.Run(() => _channel.BasicPublish(
             exchange: exchangeName,
             routingKey: routingKey,
             mandatory: false,
             basicProperties: properties,
-            body: body,
-            cancellationToken: cancellationToken);
+            body: body)
+        , cancellationToken);
     }
 
-    private async Task PublishToDeadLetterQueueAsync(string dlqName, byte[] body, IReadOnlyBasicProperties props,
+    private async Task PublishToDeadLetterQueueAsync(string dlqName, byte[] body, IBasicProperties props,
         CancellationToken cancellationToken = default)
     {
         try
@@ -283,16 +289,16 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
                 dlqArgs[XMessageTtl] = (int)ttl.TotalMilliseconds;
             }
 
-            await _channel.QueueDeclareAsync(
+            await Task.Run(() => _channel.QueueDeclare(
                 queue: dlqName,
                 durable: true,
                 exclusive: false,
                 autoDelete: false,
-                arguments: dlqArgs.Count > 0 ? dlqArgs : null,
-                cancellationToken: cancellationToken);
+                arguments: dlqArgs.Count > 0 ? dlqArgs : null)
+            , cancellationToken);
 
             // For RabbitMQ.Client 7.x+ this is the only valid way:
-            var basicProps = props as BasicProperties ?? new BasicProperties();
+            var basicProps = props as IBasicProperties ?? _channel.CreateBasicProperties();
             if (props != basicProps)
             {
                 basicProps.Headers = props.Headers;
@@ -313,14 +319,13 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
                 basicProps.ReplyToAddress = props.ReplyToAddress;
             }
 
-            await _channel.BasicPublishAsync(
+            await Task.Run(() => _channel.BasicPublish(
                 exchange: string.Empty,
                 routingKey: dlqName,
                 mandatory: false,
                 basicProps,
-                body,
-                cancellationToken
-            );
+                body)
+            , cancellationToken);
 
             _logger.LogWarning("Dead-lettered message published to DLQ: {DlqName}", dlqName);
         }
@@ -358,81 +363,104 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
                 Headers)>();
 
         // queueName => e.g. Full format: event.OrderCreatedEvent.CreateOrderSagaHandler.OrderService
-        foreach (var kvp in queueTypeMap)
+        try
         {
-            var queueName = kvp.Key;
-            var messageType = kvp.Value.MessageType;
-            var handlerType = kvp.Value.HandlerType;
-            // Ensure queue and exchange exist and are bound before subscribing the consumer.
-            // These operations are idempotent.
-            var exchangeName =
-                MessagingNamingHelper
-                    .GetExchangeName(
-                        messageType); // e.g., "event.OrderCreatedEvent" or "command.CreateOrderCommand" or "response.OrderCreatedResponse"
-            var routingKey = RabbitMqTopology.GetBindingKey(messageType, ApplicationId);
-            var exchangeType = RabbitMqTopology.GetExchangeType(messageType);
-
-            await _channel.ExchangeDeclareAsync(
-                exchange: exchangeName,
-                type: exchangeType,
-                durable: true,
-                autoDelete: false,
-                arguments: null, cancellationToken: cancellationToken);
-
-            // Declare the queue with DLX and DLQ arguments
-            var queueArgs = await DeclareDeadLetter(queueName, cancellationToken);
-            if (_options?.MessageTTL is { TotalMilliseconds: > 0 } ttl)
+            foreach (var kvp in queueTypeMap)
             {
-                queueArgs[XMessageTtl] = (int)ttl.TotalMilliseconds;
+                var queueName = kvp.Key;
+                var messageType = kvp.Value.MessageType;
+                var handlerType = kvp.Value.HandlerType;
+                // Ensure queue and exchange exist and are bound before subscribing the consumer.
+                // These operations are idempotent.
+                var exchangeName =
+                    MessagingNamingHelper
+                        .GetExchangeName(
+                            messageType); // e.g., "event.OrderCreatedEvent" or "command.CreateOrderCommand" or "response.OrderCreatedResponse"
+                var routingKey = RabbitMqTopology.GetBindingKey(messageType, ApplicationId);
+                var exchangeType = RabbitMqTopology.GetExchangeType(messageType);
+
+                await Task.Run(() => _channel.ExchangeDeclare(
+                    exchange: exchangeName,
+                    type: exchangeType,
+                    durable: true,
+                    autoDelete: false,
+                    arguments: null)
+                , cancellationToken);
+
+                // Declare the queue with DLX and DLQ arguments
+                var queueArgs = await DeclareDeadLetter(queueName, cancellationToken);
+                if (_options?.MessageTTL is { TotalMilliseconds: > 0 } ttl)
+                {
+                    queueArgs[XMessageTtl] = (int)ttl.TotalMilliseconds;
+                }
+
+                await Task.Run(() => _channel.QueueDeclare(
+                    queue: queueName,
+                    durable: true,
+                    exclusive: false,
+                    autoDelete: false,
+                    arguments: queueArgs.Count > 0 ? queueArgs : null)
+                , cancellationToken);
+
+                // Bind queue to exchange with queue name as a routing key
+                await Task.Run(() => _channel.QueueBind(
+                    queue: queueName,
+                    exchange: exchangeName,
+                    routingKey: routingKey,
+                    arguments: null)
+                , cancellationToken);
+
+                var consumer = new EventingBasicConsumer(_channel);
+
+                // This pattern ensures that message handling errors are caught and do not crash the consumer loop.
+                // Instead, problematic messages are logged and can be dead-lettered for later analysis.
+                consumer.Received += (_, ea) =>
+                {
+                    try
+                    {
+                        var headers = ea.BasicProperties?.Headers as IReadOnlyDictionary<string, object?>
+                                      ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                        messageQueue.Enqueue((ea.Body.ToArray(), messageType, handlerType, headers));
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex,
+                            "Failed to process message from queue '{QueueName}' of type '{MessageType}'. Dead-lettering the message",
+                            queueName, messageType.FullName);
+                        // DLQ logic:
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                await PublishToDeadLetterQueueAsync(queueName + ".dlq", ea.Body.ToArray(),
+                                    ea.BasicProperties).ConfigureAwait(false);
+                            }
+                            catch (Exception dlqEx)
+                            {
+                                _logger.LogError(dlqEx, "Failed to publish to DLQ for queue '{QueueName}'", queueName);
+                            }
+                        });
+                    }
+                };
+
+                await Task.Run(() => _channel.BasicConsume(
+                    queue: queueName,
+                    autoAck: autoAck,
+                    consumer: consumer)
+                , cancellationToken);
+
+                _consumers.Add(consumer);
             }
-
-            await _channel.QueueDeclareAsync(
-                queue: queueName,
-                durable: true,
-                exclusive: false,
-                autoDelete: false,
-                arguments: queueArgs.Count > 0 ? queueArgs : null,
-                cancellationToken: cancellationToken);
-
-            // Bind queue to exchange with queue name as a routing key
-            await _channel.QueueBindAsync(
-                queue: queueName,
-                exchange: exchangeName,
-                routingKey: routingKey,
-                arguments: null,
-                cancellationToken: cancellationToken);
-
-            var consumer = new AsyncEventingBasicConsumer(_channel);
-
-            // This pattern ensures that message handling errors are caught and do not crash the consumer loop.
-            // Instead, problematic messages are logged and can be dead-lettered for later analysis.
-            consumer.ReceivedAsync += async (_, ea) =>
-            {
-                try
-                {
-                    var headers = ea.BasicProperties?.Headers as IReadOnlyDictionary<string, object?>
-                                  ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-                    messageQueue.Enqueue((ea.Body.ToArray(), messageType, handlerType, headers));
-                    await Task.CompletedTask;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex,
-                        "Failed to process message from queue '{QueueName}' of type '{MessageType}'. Dead-lettering the message",
-                        queueName, messageType.FullName);
-                    // DLQ logic:
-                    await PublishToDeadLetterQueueAsync(queueName + ".dlq", ea.Body.ToArray(), ea.BasicProperties,
-                        cancellationToken);
-                }
-            };
-
-            await _channel.BasicConsumeAsync(
-                queue: queueName,
-                autoAck: autoAck,
-                consumer: consumer, cancellationToken: cancellationToken);
-
-            _consumers.Add(consumer);
         }
+        catch (Exception ex)
+        {
+            // Fault the readiness signal so callers synchronizing on ConsumerReady
+            // fail fast instead of waiting forever when registration fails.
+            _consumersReady.TrySetException(ex);
+            throw;
+        }
+
+        _consumersReady.TrySetResult(true);
 
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -456,81 +484,115 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
 
         var queue = new ConcurrentQueue<IncomingMessage>();
 
-        foreach (var kvp in _queueTypeMap)
+        try
         {
-            var queueName = kvp.Key;
-            var messageType = kvp.Value.MessageType;
-            var handlerType = kvp.Value.HandlerType;
-
-            var exchangeName = MessagingNamingHelper.GetExchangeName(messageType);
-            var routingKey = RabbitMqTopology.GetBindingKey(messageType, ApplicationId);
-            var exchangeType = RabbitMqTopology.GetExchangeType(messageType);
-
-            await _channel.ExchangeDeclareAsync(
-                exchange: exchangeName,
-                type: exchangeType,
-                durable: true,
-                autoDelete: false,
-                arguments: null, cancellationToken: cancellationToken);
-
-            var queueArgs = await DeclareDeadLetter(queueName, cancellationToken).ConfigureAwait(false);
-            if (_options?.MessageTTL is { TotalMilliseconds: > 0 } ttl)
-                queueArgs[XMessageTtl] = (int)ttl.TotalMilliseconds;
-
-            await _channel.QueueDeclareAsync(
-                queue: queueName,
-                durable: true,
-                exclusive: false,
-                autoDelete: false,
-                arguments: queueArgs.Count > 0 ? queueArgs : null,
-                cancellationToken: cancellationToken);
-
-            // Bind queue to exchange with queue name as a routing key
-            await _channel.QueueBindAsync(
-                queue: queueName,
-                exchange: exchangeName,
-                routingKey: routingKey,
-                arguments: null,
-                cancellationToken: cancellationToken);
-
-            var consumer = new AsyncEventingBasicConsumer(_channel);
-            consumer.ReceivedAsync += async (_, ea) =>
+            foreach (var kvp in _queueTypeMap)
             {
-                try
+                var queueName = kvp.Key;
+                var messageType = kvp.Value.MessageType;
+                var handlerType = kvp.Value.HandlerType;
+
+                var exchangeName = MessagingNamingHelper.GetExchangeName(messageType);
+                var routingKey = RabbitMqTopology.GetBindingKey(messageType, ApplicationId);
+                var exchangeType = RabbitMqTopology.GetExchangeType(messageType);
+
+                await Task.Run(() => _channel.ExchangeDeclare(
+                    exchange: exchangeName,
+                    type: exchangeType,
+                    durable: true,
+                    autoDelete: false,
+                    arguments: null)
+                , cancellationToken);
+
+                var queueArgs = await DeclareDeadLetter(queueName, cancellationToken).ConfigureAwait(false);
+                if (_options?.MessageTTL is { TotalMilliseconds: > 0 } ttl)
+                    queueArgs[XMessageTtl] = (int)ttl.TotalMilliseconds;
+
+                await Task.Run(() => _channel.QueueDeclare(
+                    queue: queueName,
+                    durable: true,
+                    exclusive: false,
+                    autoDelete: false,
+                    arguments: queueArgs.Count > 0 ? queueArgs : null)
+                , cancellationToken);
+
+                // Bind queue to exchange with queue name as a routing key
+                await Task.Run(() => _channel.QueueBind(
+                    queue: queueName,
+                    exchange: exchangeName,
+                    routingKey: routingKey,
+                    arguments: null)
+                , cancellationToken);
+
+                var consumer = new EventingBasicConsumer(_channel);
+                consumer.Received += (_, ea) =>
                 {
-                    var headers = ea.BasicProperties?.Headers as IReadOnlyDictionary<string, object?>
-                                  ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                    try
+                    {
+                        var headers = ea.BasicProperties?.Headers as IReadOnlyDictionary<string, object?>
+                                      ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
 
-                    ValueTask Ack() => _channel!.BasicAckAsync(ea.DeliveryTag, multiple: false,
-                        cancellationToken: cancellationToken);
+                        ValueTask Ack()
+                        {
+                            _channel!.BasicAck(ea.DeliveryTag, multiple: false);
+                            return default;
+                        }
 
-                    ValueTask Nack(bool requeue) => _channel!.BasicNackAsync(ea.DeliveryTag, multiple: false,
-                        requeue: requeue, cancellationToken: cancellationToken);
+                        ValueTask Nack(bool requeue)
+                        {
+                            _channel!.BasicNack(ea.DeliveryTag, multiple: false, requeue);
+                            return default;
+                        }
 
-                    queue.Enqueue(new IncomingMessage(ea.Body.ToArray(), messageType, handlerType, headers, Ack, Nack));
-                    await Task.CompletedTask;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex,
-                        "Failed to enqueue message for queue '{QueueName}' and type '{MessageType}'", queueName,
-                        messageType.FullName);
-                    await PublishToDeadLetterQueueAsync(queueName + ".dlq", ea.Body.ToArray(), ea.BasicProperties,
-                        cancellationToken).ConfigureAwait(false);
-                }
-            };
+                        queue.Enqueue(new IncomingMessage(ea.Body.ToArray(), messageType, handlerType, headers, Ack, Nack));
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex,
+                            "Failed to enqueue message for queue '{QueueName}' and type '{MessageType}'", queueName,
+                            messageType.FullName);
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                await PublishToDeadLetterQueueAsync(queueName + ".dlq", ea.Body.ToArray(),
+                                    ea.BasicProperties, default).ConfigureAwait(false);
+                            }
+                            catch (Exception dlqEx)
+                            {
+                                _logger.LogError(dlqEx, "Failed to publish to DLQ for queue '{QueueName}'", queueName);
+                            }
+                        });
+                    }
+                };
 
-            await _channel.BasicConsumeAsync(queue: queueName, autoAck: false, consumer: consumer,
-                cancellationToken: cancellationToken);
-            _consumers.Add(consumer);
+                await Task.Run(() => _channel.BasicConsume(queue: queueName, autoAck: false, consumer: consumer), cancellationToken);
+                _consumers.Add(consumer);
+            }
         }
+        catch (Exception ex)
+        {
+            // Fault the readiness signal so callers synchronizing on ConsumerReady
+            // fail fast instead of waiting forever when registration fails.
+            _consumersReady.TrySetException(ex);
+            throw;
+        }
+
+        _consumersReady.TrySetResult(true);
 
         while (!cancellationToken.IsCancellationRequested)
         {
             while (queue.TryDequeue(out var msg))
                 yield return msg;
 
-            await Task.Delay(50, cancellationToken);
+            try
+            {
+                await Task.Delay(50, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
         }
     }
 
@@ -542,30 +604,30 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
 
 
         // DLX (Dead Letter Exchange) declare
-        await _channel!.ExchangeDeclareAsync(
+        await Task.Run(() => _channel!.ExchangeDeclare(
             exchange: dlxExchange,
             type: ExchangeType.Direct,
             durable: true,
             autoDelete: false,
-            arguments: null,
-            cancellationToken: cancellationToken);
+            arguments: null)
+        , cancellationToken);
 
         // DLQ (Dead Letter Queue) declare
-        await _channel!.QueueDeclareAsync(
+        await Task.Run(() => _channel!.QueueDeclare(
             queue: dlqName,
             durable: true,
             exclusive: false,
             autoDelete: false,
-            arguments: null,
-            cancellationToken: cancellationToken);
+            arguments: null)
+        , cancellationToken);
 
         // DLQ binding
-        await _channel!.QueueBindAsync(
+        await Task.Run(() => _channel!.QueueBind(
             queue: dlqName,
             exchange: dlxExchange,
             routingKey: dlqName,
-            arguments: null,
-            cancellationToken: cancellationToken);
+            arguments: null)
+        , cancellationToken);
 
         return new Dictionary<string, object?>
         {
@@ -574,7 +636,7 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
         };
     }
 
-    private static void ApplyRequestProperties(BasicProperties properties, object message)
+    private static void ApplyRequestProperties(IBasicProperties properties, object message)
     {
         if (!(message is IRequestRoutingMetadata metadata)) return;
         properties.CorrelationId = metadata.RequestId == Guid.Empty ? null : metadata.RequestId.ToString();
@@ -598,7 +660,7 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
                 {
                     try
                     {
-                        await _channel.BasicCancelAsync(consumerTag: tag).ConfigureAwait(false);
+                        await Task.Run(() => _channel.BasicCancel(consumerTag: tag)).ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
@@ -633,7 +695,7 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
     {
         try
         {
-            await _connection!.CloseAsync().ConfigureAwait(false);
+            await Task.Run(() => _connection!.Close()).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -642,7 +704,7 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
 
         try
         {
-            await _connection!.DisposeAsync().ConfigureAwait(false);
+            await Task.Run(() => _connection!.Dispose()).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -654,7 +716,7 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
     {
         try
         {
-            await _channel!.CloseAsync().ConfigureAwait(false);
+            await Task.Run(() => _channel!.Close()).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -663,12 +725,12 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
 
         try
         {
-            await _channel!.DisposeAsync().ConfigureAwait(false);
+            await Task.Run(() => _channel!.Dispose()).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "RabbitMQ channel DisposeAsync failed");
         }
     }
-} 
+}
 #endif
