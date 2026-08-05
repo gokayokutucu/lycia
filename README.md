@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Lycia Logo" width="220">
+  <img src="assets/transparent_logo.png" alt="Lycia Logo" width="220">
 </p>
 
 # Lycia
