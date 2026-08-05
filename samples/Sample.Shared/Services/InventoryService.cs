@@ -9,4 +9,9 @@ public static class InventoryService
     {
         Console.WriteLine($"Release Stock {messageOrderId}");
     }
+
+    public static void ReserveStock(Guid messageOrderId)
+    {
+        Console.WriteLine($"Reserve Stock {messageOrderId}");
+    }
 }

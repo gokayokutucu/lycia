@@ -9,4 +9,9 @@ public static class PaymentService
     {
         return paymentSucceeded;
     }
+
+    public static void Refund(Guid failedOrderId)
+    {
+        Console.WriteLine($"Refund is done | OrderID:{failedOrderId}");
+    }
 }
