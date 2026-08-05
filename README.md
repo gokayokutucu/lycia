@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="Lycia Logo" width="220">
+</p>
+
 # Lycia
 
 [![NuGet](https://img.shields.io/nuget/v/Lycia.svg)](https://www.nuget.org/packages/Lycia)
