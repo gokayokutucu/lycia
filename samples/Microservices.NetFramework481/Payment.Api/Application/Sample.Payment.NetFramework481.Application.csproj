@@ -14,6 +14,7 @@
     <ProjectReference Include="..\..\Shared.Contracts\Shared.Contracts.csproj" />
     <ProjectReference Include="..\..\..\..\src\Lycia.Saga\Lycia.Saga.csproj" />
     <ProjectReference Include="..\..\..\..\src\Lycia.Extensions\Lycia.Extensions.csproj" />
+    <ProjectReference Include="..\..\..\..\src\Lycia.Extensions.RabbitMq\Lycia.Extensions.RabbitMq.csproj" />
   </ItemGroup>
 
   <ItemGroup>

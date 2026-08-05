@@ -3,6 +3,7 @@
 // https://www.apache.org/licenses/LICENSE-2.0
 
 using Lycia.Extensions;
+using Lycia.Extensions.RabbitMq;
 using Lycia.Extensions.Logging;
 using Lycia.Extensions.OpenTelemetry;
 using Lycia.Extensions.Scheduling;
@@ -81,6 +82,8 @@ builder.Services
     // })
     .AddSagasFromCurrentAssembly()
     .Build();
+
+builder.Services.AddLyciaRabbitMq();
 
 builder.Services.AddLyciaScheduling(options =>
 {

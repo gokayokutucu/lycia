@@ -3,6 +3,7 @@
 // https://www.apache.org/licenses/LICENSE-2.0
 using Lycia.Extensions.Logging;
 using Lycia.Extensions;
+using Lycia.Extensions.RabbitMq;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -15,6 +16,8 @@ builder.Services
     })
     .AddSagasFromCurrentAssembly()
     .Build();
+
+builder.Services.AddLyciaRabbitMq();
 
 var host = builder.Build();
 await host.RunAsync();

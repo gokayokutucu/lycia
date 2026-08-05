@@ -13,6 +13,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\..\src\Lycia.Extensions\Lycia.Extensions.csproj" />
+        <ProjectReference Include="..\..\src\Lycia.Extensions.RabbitMq\Lycia.Extensions.RabbitMq.csproj" />
         <ProjectReference Include="..\..\src\Lycia\Lycia.csproj" />
         <ProjectReference Include="..\Sample.Shared\Sample.Shared.csproj" />
     </ItemGroup>
