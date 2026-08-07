@@ -15,6 +15,7 @@ namespace Lycia.Extensions.Scheduling;
 public static class LyciaSchedulingExtensions
 {
     /// <summary>Registers Redis-backed scheduling, SchedulerWorker, and conservative vacuum defaults.</summary>
+    [Obsolete("Use AddLycia(configuration, lycia => lycia.AddScheduling().WithRedisStore()...) instead.")]
     public static IServiceCollection AddLyciaScheduling(this IServiceCollection services,
         Action<SchedulingOptions>? configure = null)
     {
@@ -38,6 +39,7 @@ public static class LyciaSchedulingExtensions
     }
 
     /// <summary>Registers deterministic in-memory scheduling for tests and single-process development.</summary>
+    [Obsolete("Use AddLycia(configuration, lycia => lycia.AddScheduling().WithInMemoryStore()...) instead.")]
     public static IServiceCollection AddLyciaInMemoryScheduling(this IServiceCollection services,
         Action<SchedulingOptions>? configure = null)
     {

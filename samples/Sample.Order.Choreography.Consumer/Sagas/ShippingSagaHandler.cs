@@ -41,6 +41,6 @@ public sealed class ShippingSagaHandler :
             },
             cancellationToken);
 
-        await Context.MarkAsComplete<PaymentSucceededEvent>();
+        await Context.MarkAsComplete<PaymentSucceededEvent>(cancellationToken);
     }
 }

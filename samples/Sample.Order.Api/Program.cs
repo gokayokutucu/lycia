@@ -14,12 +14,16 @@ var builder = WebApplication.CreateBuilder(args);
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 
-builder.Services
-    .AddLycia(builder.Configuration)
-    .AddSagasFromCurrentAssembly()
-    .Build();
+builder.Services.AddLycia(builder.Configuration, lycia =>
+{
+    lycia
+        .AddSagas()
+            .FromCurrentAssembly();
 
-builder.Services.AddLyciaRabbitMq();
+    lycia
+        .UseTransport()
+            .RabbitMq();
+});
 
 var app = builder.Build();
 

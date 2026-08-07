@@ -52,17 +52,21 @@ public static class ServiceRegistration
 
         var services = new ServiceCollection();
 
-        services
-            .AddLycia(configuration)
-            .UseSagaMiddleware(opt =>
-            {
-                opt.AddMiddleware<SerilogLoggingMiddleware>();
-                opt.AddMiddleware<RetryMiddleware>();
-            })
-            .AddSagasFromCurrentAssembly()
-            .Build();
+        services.AddLycia(configuration, lycia =>
+        {
+            lycia
+                .AddSagas()
+                    .FromCurrentAssembly();
 
-        services.AddLyciaRabbitMq();
+            lycia
+                .UseTransport()
+                    .RabbitMq();
+
+            lycia
+                .AddMiddleware()
+                    .WithLogging<SerilogLoggingMiddleware>()
+                    .WithRetry();
+        });
 
         builder.Populate(services);
     }

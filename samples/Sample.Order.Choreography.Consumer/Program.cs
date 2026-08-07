@@ -7,17 +7,20 @@ using Lycia.Extensions.RabbitMq;
 
 var builder = Host.CreateApplicationBuilder(args);
 
-builder.Services
-    .AddLycia(builder.Configuration)
-    .UseSagaMiddleware(opt =>
-    {
-        opt.AddMiddleware<SerilogLoggingMiddleware>();
-        //opt.AddMiddleware<RetryMiddleware>();
-    })
-    .AddSagasFromCurrentAssembly()
-    .Build();
+builder.Services.AddLycia(builder.Configuration, lycia =>
+{
+    lycia
+        .AddSagas()
+            .FromCurrentAssembly();
 
-builder.Services.AddLyciaRabbitMq();
+    lycia
+        .UseTransport()
+            .RabbitMq();
+
+    lycia
+        .AddMiddleware()
+            .WithLogging<SerilogLoggingMiddleware>();
+});
 
 var host = builder.Build();
 await host.RunAsync();

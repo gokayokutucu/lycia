@@ -86,7 +86,41 @@ dotnet add package Lycia.Extensions.Kafka
 
 ## Minimal Setup
 
-Register Lycia, discover saga handlers and register the selected transport:
+Register Lycia, discover saga handlers and select a transport with the nested fluent DSL. The
+callback boundary itself finalizes registration, so there is no separate `.Build()` call:
+
+```csharp
+services.AddLycia(configuration, lycia =>
+{
+    lycia
+        .AddSagas()
+            .FromCurrentAssembly();
+
+    lycia
+        .UseTransport()
+            .RabbitMq();
+});
+```
+
+The DSL is nested by concern but stays fluent: `AddSagas()` starts saga discovery,
+`UseTransport()` selects a transport provider, `UsePersistence()` selects saga-store/persistence
+providers, `AddScheduling()` (from `Lycia.Extensions.Scheduling`) configures durable scheduling,
+and `AddMiddleware()` configures the logging/retry/tracing pipeline. Transport registration is
+explicit — `AddLycia` does not pick a transport for you, and selecting two different transport
+providers on the same registration (for example `UseTransport().RabbitMq()` followed by
+`UseTransport().Nats()`) fails clearly instead of silently letting the second call win.
+
+`Lycia.Extensions` never depends on a transport, scheduling, or persistence-provider package.
+Each package contributes its own methods to the shared `LyciaTransportBuilder` /
+`LyciaPersistenceBuilder` / `LyciaBuilder` DSL types instead (for example
+`Lycia.Extensions.RabbitMq` adds `.RabbitMq()` to `UseTransport()`), so IntelliSense stays scoped
+to what is actually installed.
+
+<details>
+<summary>Migrating from the older direct APIs</summary>
+
+The previous flat form still compiles and is now a thin, `[Obsolete]`-marked wrapper around the
+same registration logic:
 
 ```csharp
 services
@@ -97,9 +131,11 @@ services
 services.AddLyciaRabbitMq();
 ```
 
-Transport registration is explicit.
+`AddLyciaRabbitMq()`, `AddLyciaNats(...)`, `AddLyciaKafka(...)`, `AddLyciaScheduling(...)`, and
+`AddLyciaInMemoryScheduling(...)` continue to work unchanged; each obsolete warning names its DSL
+replacement.
 
-`AddLycia` no longer owns RabbitMQ-specific topology or registration. Applications using RabbitMQ must reference `Lycia.Extensions.RabbitMq` and call `AddLyciaRabbitMq()`.
+</details>
 
 ---
 
@@ -445,12 +481,16 @@ dotnet add package Lycia.Extensions.RabbitMq
 Register:
 
 ```csharp
-services
-    .AddLycia(configuration)
-    .AddSagasFromCurrentAssembly()
-    .Build();
+services.AddLycia(configuration, lycia =>
+{
+    lycia
+        .AddSagas()
+            .FromCurrentAssembly();
 
-services.AddLyciaRabbitMq();
+    lycia
+        .UseTransport()
+            .RabbitMq(); // or .RabbitMq(options => { ... }) for code-first overrides
+});
 ```
 
 The RabbitMQ package owns:
@@ -481,23 +521,27 @@ Install:
 dotnet add package Lycia.Extensions.Scheduling
 ```
 
-Register Redis-backed scheduling:
+Register Redis-backed scheduling as part of the same `AddLycia` DSL:
 
 ```csharp
-services.AddLyciaScheduling(options =>
-{
-    options.AllowDynamicDelays = false;
-
-    options.Worker.LeaseDuration =
-        TimeSpan.FromSeconds(30);
-
-    options.Worker.LeaseRenewInterval =
-        TimeSpan.FromSeconds(10);
-
-    options.Vacuum.ApplicationTopology.Mode =
-        VacuumMode.ReportOnly;
-});
+lycia
+    .AddScheduling()
+        .WithRedisStore()
+        .WithPredefinedDelays()
+        .WithWorker(options =>
+        {
+            options.LeaseDuration = TimeSpan.FromSeconds(30);
+            options.LeaseRenewInterval = TimeSpan.FromSeconds(10);
+        })
+        .WithVacuum(options =>
+        {
+            options.ApplicationTopology.Mode = VacuumMode.ReportOnly;
+        });
 ```
+
+`WithPredefinedDelays()` sets `AllowDynamicDelays = false`; use `WithDynamicDelays()` for
+`AllowDynamicDelays = true`. Both are semantic aliases over the same `SchedulingOptions` property —
+nothing was removed, so code that still sets `options.AllowDynamicDelays` directly keeps working.
 
 Schedule a message:
 
@@ -552,7 +596,15 @@ Ordinary application topology defaults to report-only inspection and requires ex
 
 ## Middleware
 
-Lycia includes a replaceable middleware pipeline.
+Lycia includes a replaceable middleware pipeline, configured through the same `AddLycia` DSL:
+
+```csharp
+lycia
+    .AddMiddleware()
+        .WithLogging()
+        .WithRetry(options => options.MaxRetryAttempts = 5)
+        .WithTracing();
+```
 
 Default middleware slots include:
 
@@ -560,7 +612,9 @@ Default middleware slots include:
 - retry
 - tracing
 
-Implementations may be replaced through:
+Implementations may be replaced through the generic form of each method
+(`WithLogging<TMiddleware>()`, `WithRetry<TMiddleware>()`, `WithTracing<TMiddleware>()`), which
+drives the same three interfaces the pipeline has always used:
 
 - `ILoggingSagaMiddleware`
 - `IRetrySagaMiddleware`
@@ -684,6 +738,11 @@ Applications and extension packages may provide custom implementations of:
 - scheduling storage and strategies
 
 Transport-specific behavior remains outside the core package.
+
+`lycia.UsePersistence().WithRedisSagaStore()` exposes today's persistence provider (Redis) through
+the same nested DSL; future provider packages (PostgreSQL Inbox/Outbox, split-store, ...) extend
+`LyciaPersistenceBuilder` with their own `With...()` methods the same way transport packages extend
+`LyciaTransportBuilder` — no such providers exist yet.
 
 ---
 
