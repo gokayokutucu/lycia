@@ -89,6 +89,17 @@ namespace Lycia.Extensions
                 .AddOptions<SagaOptions>()
                 .Bind(configuration.GetSection("Lycia:Saga"))
                 .PostConfigure(o => { o.DefaultIdempotency ??= true; });
+
+            // Inbox/Outbox are optional and disabled by default: binding these options never activates
+            // either capability by itself. Activation is always the explicit UsePersistence().With...Inbox()/
+            // With...Outbox() code-first call.
+            services
+                .AddOptions<InboxOptions>()
+                .Bind(configuration.GetSection(InboxOptions.SectionName));
+
+            services
+                .AddOptions<OutboxOptions>()
+                .Bind(configuration.GetSection(OutboxOptions.SectionName));
             
             services
                 .AddOptions<LoggingOptions>()

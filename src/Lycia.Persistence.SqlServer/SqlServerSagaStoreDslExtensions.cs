@@ -2,8 +2,11 @@
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 using Lycia.Extensions;
+using Lycia.Persistence.Relational.Internal.Sessions;
 using Lycia.Saga.Abstractions;
+using Lycia.Saga.Abstractions.Persistence;
 using Lycia.Saga.Abstractions.Scheduling;
+using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -43,6 +46,12 @@ public static class SqlServerSagaStoreDslExtensions
             sp.GetRequiredService<ISagaIdGenerator>(),
             sp.GetRequiredService<ISagaCompensationCoordinator>(),
             sp.GetService<IMessageScheduler>()));
+
+        // Prepares the relational transaction boundary for a future atomic Saga+Inbox+Outbox commit.
+        // Not yet wired into SagaStore/Inbox/Outbox operations - see the Strong Consistency roadmap item.
+        persistence.Services.RemoveAll(typeof(ILyciaPersistenceSessionFactory));
+        persistence.Services.AddScoped<ILyciaPersistenceSessionFactory>(_ =>
+            new RelationalPersistenceSessionFactory(() => new SqlConnection(options.ConnectionString)));
 
         return persistence;
     }
