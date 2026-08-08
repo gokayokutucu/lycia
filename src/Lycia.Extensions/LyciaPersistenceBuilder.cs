@@ -3,14 +3,19 @@
 // https://www.apache.org/licenses/LICENSE-2.0
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Lycia.Extensions;
 
 /// <summary>
-/// Fluent persistence DSL reached via <see cref="LyciaBuilder.UsePersistence"/>. Only exposes providers that
-/// exist today (the Redis saga store); future persistence packages (inbox/outbox/split-store providers)
-/// extend this builder with their own <c>With...()</c> extension methods, the same pattern
-/// <see cref="LyciaTransportBuilder"/> uses for transport packages.
+/// Fluent persistence DSL reached via <see cref="LyciaBuilder.UsePersistence"/>. <c>Lycia.Extensions</c>
+/// defines only this builder and its provider-selection guard; it takes no compile-time dependency on any
+/// concrete persistence package. SagaStore/Inbox/Outbox provider packages (e.g. <c>Lycia.Persistence.InMemory</c>,
+/// <c>Lycia.Persistence.Redis</c>, <c>Lycia.Persistence.SqlServer</c>, <c>Lycia.Persistence.PostgreSql</c>)
+/// contribute their own <c>With...()</c> extension methods on this type, the same pattern
+/// <see cref="LyciaTransportBuilder"/> uses for transport packages. Configuration values (connection strings,
+/// timeouts, schema names) may still flow from <see cref="Configuration"/>/<c>IOptions</c>; provider selection
+/// itself is always an explicit code-first call, never inferred from a configuration string.
 /// </summary>
 public sealed class LyciaPersistenceBuilder
 {
@@ -27,13 +32,37 @@ public sealed class LyciaPersistenceBuilder
     }
 
     /// <summary>
-    /// Registers the Redis-backed saga store. This is Lycia's current default persistence provider, so
-    /// calling this is only required to be explicit or to restore Redis after another
-    /// <c>UsePersistence()</c>/<c>UseSagaStore&lt;T&gt;()</c> call replaced it.
+    /// Marks <paramref name="providerName"/> as the selected SagaStore provider. SagaStore provider packages
+    /// must call this before registering their <c>ISagaStore</c> implementation. Throws if a different
+    /// SagaStore provider was already selected on this service collection, so e.g.
+    /// <c>UsePersistence().WithRedisSagaStore(...)</c> followed by <c>.WithPostgreSqlSagaStore(...)</c> fails
+    /// clearly instead of silently letting the last registration win.
     /// </summary>
-    public LyciaPersistenceBuilder WithRedisSagaStore()
+    public void SelectProvider(string providerName)
     {
-        LyciaRegistrationExtensions.RegisterRedisSagaStore(Services);
-        return this;
+        if (string.IsNullOrWhiteSpace(providerName))
+            throw new ArgumentException("SagaStore provider name must not be empty.", nameof(providerName));
+
+        var existing = Services
+            .LastOrDefault(sd => sd.ServiceType == typeof(LyciaSagaStoreProviderMarker))
+            ?.ImplementationInstance as LyciaSagaStoreProviderMarker;
+
+        if (existing != null && !string.Equals(existing.ProviderName, providerName, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Multiple SagaStore providers were configured. " +
+                $"Existing provider: {existing.ProviderName}, Conflicting provider: {providerName}. " +
+                "Exactly one SagaStore provider is allowed.");
+        }
+
+        Services.RemoveAll(typeof(LyciaSagaStoreProviderMarker));
+        Services.AddSingleton(new LyciaSagaStoreProviderMarker(providerName));
     }
+}
+
+/// <summary>Tracks which SagaStore provider has been selected on a service collection, for duplicate detection.</summary>
+internal sealed class LyciaSagaStoreProviderMarker
+{
+    public string ProviderName { get; }
+    public LyciaSagaStoreProviderMarker(string providerName) => ProviderName = providerName;
 }

@@ -216,9 +216,9 @@ namespace Lycia.Extensions
         }
 
         /// <summary>
-        /// Registers the Redis-backed <see cref="ISagaStore"/>. Shared by the default <c>AddLycia</c>
-        /// bootstrap and <see cref="LyciaPersistenceBuilder.WithRedisSagaStore"/> so there is a single
-        /// implementation of Redis saga-store registration.
+        /// Registers the Redis-backed <see cref="ISagaStore"/>. Used by the default <c>AddLycia</c> bootstrap.
+        /// NOTE: this is legacy inline registration predating the <c>Lycia.Persistence.Redis</c> package;
+        /// the explicit <c>UsePersistence().WithRedisSagaStore(...)</c> DSL is implemented there instead.
         /// </summary>
         internal static void RegisterRedisSagaStore(IServiceCollection services)
         {
