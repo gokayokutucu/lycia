@@ -31,17 +31,22 @@ public interface ISagaContext<TInitialMessage> : ISagaContext
     ISagaStepFluent SendWithTracking<TNextStep>(TNextStep nextCommand, CancellationToken cancellationToken = default)
         where TNextStep : ICommand;
 
+    ISagaStepFluent RespondWithTracking<TRequest, TResponse>(TRequest request, TResponse response,
+        CancellationToken cancellationToken = default)
+        where TRequest : IMessage
+        where TResponse : IResponse<TRequest>;
+
     Task Compensate<T>(T @event, CancellationToken cancellationToken = default) where T : IFailedEventBase;
 
     Task MarkAsComplete<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage;
     Task MarkAsFailed<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage;
     Task MarkAsFailed<TStep>(Exception? ex, CancellationToken cancellationToken = default) where TStep : IMessage;
     Task MarkAsFailed<TStep>(FailResponse fail, CancellationToken cancellationToken = default) where TStep : IMessage;
-    Task MarkAsCompensated<TStep>() where TStep : IMessage;
+    Task MarkAsCompensated<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage;
     Task CompensateAndBubbleUp<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage;
-    Task MarkAsCompensationFailed<TStep>() where TStep : IMessage;    
-    Task MarkAsCompensationFailed<TStep>(Exception? ex) where TStep : IMessage;
-    Task MarkAsCancelled<TStep>(Exception? ex) where TStep : IMessage;
+    Task MarkAsCompensationFailed<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage;
+    Task MarkAsCompensationFailed<TStep>(Exception? ex, CancellationToken cancellationToken = default) where TStep : IMessage;
+    Task MarkAsCancelled<TStep>(Exception? ex = null, CancellationToken cancellationToken = default) where TStep : IMessage;
 
     Task<bool> IsAlreadyCompleted<T>() where T : IMessage;
 }
@@ -57,4 +62,9 @@ public interface ISagaContext<TInitialMessage, out TSagaData> : ISagaContext<TIn
 
     new ISagaStepFluent SendWithTracking<TNextStep>(TNextStep nextCommand, CancellationToken cancellationToken = default)
         where TNextStep : ICommand;
+
+    new ISagaStepFluent RespondWithTracking<TRequest, TResponse>(TRequest request, TResponse response,
+        CancellationToken cancellationToken = default)
+        where TRequest : IMessage
+        where TResponse : IResponse<TRequest>;
 }

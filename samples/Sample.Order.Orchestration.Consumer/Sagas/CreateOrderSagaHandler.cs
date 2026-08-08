@@ -25,7 +25,7 @@ public class CreateOrderSagaHandler :
         {
             OrderId = message.OrderId
         }, cancellationToken);
-        await Context.MarkAsComplete<CreateOrderCommand>();
+        await Context.MarkAsComplete<CreateOrderCommand>(cancellationToken);
     }
 
     public override async Task HandleSuccessResponseAsync(OrderCreatedResponse response, CancellationToken cancellationToken = default)
@@ -52,7 +52,7 @@ public class CreateOrderSagaHandler :
         {
             OrderId = response.OrderId
         }, cancellationToken);
-        await Context.MarkAsComplete<InventoryReservedResponse>();
+        await Context.MarkAsComplete<InventoryReservedResponse>(cancellationToken);
     }
 
     public Task HandleFailResponseAsync(InventoryReservedResponse response, FailResponse fail, CancellationToken cancellationToken = default)
@@ -69,7 +69,7 @@ public class CreateOrderSagaHandler :
         {
             OrderId = response.OrderId
         }, cancellationToken);
-        await Context.MarkAsComplete<PaymentSucceededResponse>();
+        await Context.MarkAsComplete<PaymentSucceededResponse>(cancellationToken);
     }
 
     public Task HandleFailResponseAsync(PaymentSucceededResponse response, FailResponse fail, CancellationToken cancellationToken = default)
@@ -93,7 +93,7 @@ public class CreateOrderSagaHandler :
         // Here you can mark the saga as completed (DB update, event publish, etc.)
         // Example:
         Context.Data.IsCompleted = true;
-        await Context.MarkAsComplete<OrderShippedResponse>();
+        await Context.MarkAsComplete<OrderShippedResponse>(cancellationToken);
     }
 
     public Task HandleFailResponseAsync(OrderShippedResponse response, FailResponse fail, CancellationToken cancellationToken = default)

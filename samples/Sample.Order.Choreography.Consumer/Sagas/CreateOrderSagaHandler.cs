@@ -29,7 +29,7 @@ public sealed class CreateOrderSagaHandler :
             },
             cancellationToken);
 
-        await Context.MarkAsComplete<CreateOrderCommand>();
+        await Context.MarkAsComplete<CreateOrderCommand>(cancellationToken);
     }
 
     public override async Task CompensateStartAsync(

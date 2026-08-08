@@ -18,7 +18,7 @@ public class InventorySagaHandler :
         {
             OrderId = message.OrderId
         }, cancellationToken);
-        await Context.MarkAsComplete<ReserveInventoryCommand>();
+        await Context.MarkAsComplete<ReserveInventoryCommand>(cancellationToken);
     }
 
     public override Task CompensateAsync(ReserveInventoryCommand message, CancellationToken cancellationToken = default)

@@ -44,7 +44,7 @@ public sealed class PaymentSagaHandler :
             },
             cancellationToken);
 
-        await Context.MarkAsComplete<InventoryReservedEvent>();
+        await Context.MarkAsComplete<InventoryReservedEvent>(cancellationToken);
     }
 
     public async Task CompensateAsync(
