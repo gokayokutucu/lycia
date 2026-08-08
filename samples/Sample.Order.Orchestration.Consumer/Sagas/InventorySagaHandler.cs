@@ -14,11 +14,12 @@ public class InventorySagaHandler :
 {
     public override async Task HandleAsync(ReserveInventoryCommand message, CancellationToken cancellationToken = default)
     {
-        await Context.Respond(message, new InventoryReservedResponse
-        {
-            OrderId = message.OrderId
-        }, cancellationToken);
-        await Context.MarkAsComplete<ReserveInventoryCommand>(cancellationToken);
+        await Context
+            .RespondWithTracking(message, new InventoryReservedResponse
+            {
+                OrderId = message.OrderId
+            })
+            .ThenMarkAsComplete<ReserveInventoryCommand>(cancellationToken);
     }
 
     public override Task CompensateAsync(ReserveInventoryCommand message, CancellationToken cancellationToken = default)

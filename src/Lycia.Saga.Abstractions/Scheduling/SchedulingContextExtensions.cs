@@ -1,6 +1,7 @@
 // Copyright 2023 Lycia Contributors
 // Licensed under the Apache License, Version 2.0
 
+using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Contexts;
 using Lycia.Saga.Abstractions.Messaging;
 
@@ -9,6 +10,17 @@ namespace Lycia.Saga.Abstractions.Scheduling;
 /// <summary>Transport-independent scheduling operations available from a Lycia saga context.</summary>
 public static class SchedulingContextExtensions
 {
+    /// <summary>
+    /// Creates a deferred tracked schedule operation for a predefined delay bucket, reachable from any
+    /// <see cref="ISagaContext"/>-typed <c>Context</c> property (for example inside a
+    /// <c>CoordinatedSagaHandler&lt;TMessage,TSagaData&gt;</c>), mirroring how <see cref="Schedule{TMessage}(ISagaContext,TMessage,ScheduleDelay,CancellationToken)"/>
+    /// is reachable for the standalone form. The underlying schedule call is not made until a terminal
+    /// method on the returned <see cref="ISagaStepFluent"/> is awaited.
+    /// </summary>
+    public static ISagaStepFluent ScheduleWithTracking<TMessage>(this ISagaContext context, TMessage message,
+        ScheduleDelay delay, CancellationToken cancellationToken = default) where TMessage : IMessage =>
+        GetSchedulingContext(context).ScheduleWithTracking(message, delay, cancellationToken);
+
     /// <summary>Schedules a command, event, or response using a recommended predefined delay bucket.</summary>
     public static Task<Guid> Schedule<TMessage>(this ISagaContext context, TMessage message, ScheduleDelay delay,
         CancellationToken cancellationToken = default) where TMessage : IMessage =>

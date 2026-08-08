@@ -1,6 +1,7 @@
 // Copyright 2023 Lycia Contributors
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
+using Lycia.Common.Enums;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Scheduling;
 using Lycia.Saga.Contexts;
@@ -231,5 +232,116 @@ public class SagaContextCancellationTests
         eventBus.Verify(b => b.Send(It.IsAny<CreateOrderCommand>(), It.IsAny<Type>(), It.IsAny<Guid>(), cts.Token), Times.Once);
     }
 
+    // --- Explicit generic terminal step selection --------------------------------------------------
+    // The saga step being transitioned (TStep) is intentionally decoupled from the outgoing tracked
+    // message's type; the tests below use a different message for each on purpose.
+
+    private static (SagaContext<OrderCreatedEvent> Context, Mock<IEventBus> EventBus,
+        Mock<ISagaStore> SagaStore, Mock<IMessageScheduler> Scheduler)
+        CreateContextWithStore()
+    {
+        var eventBusMock = new Mock<IEventBus>();
+        eventBusMock.SetupGet(b => b.ApplicationId).Returns("TestApp");
+
+        var sagaStoreMock = new Mock<ISagaStore>();
+        var sagaIdGenerator = Mock.Of<ISagaIdGenerator>();
+        var coordinator = Mock.Of<ISagaCompensationCoordinator>();
+        var schedulerMock = new Mock<IMessageScheduler>();
+
+        var currentStep = new OrderCreatedEvent { OrderId = Guid.NewGuid() };
+        var context = new SagaContext<OrderCreatedEvent>(
+            Guid.NewGuid(), currentStep, typeof(SagaContextCancellationTests),
+            eventBusMock.Object, sagaStoreMock.Object, sagaIdGenerator, coordinator, schedulerMock.Object);
+
+        return (context, eventBusMock, sagaStoreMock, schedulerMock);
+    }
+
+    // 1 & 5: SendWithTracking(...).ThenMarkAsComplete<TStep>(ct) transitions TStep, never the outgoing
+    // command type (ReserveInventoryCommand here) and never the context's own current step by accident.
+    [Fact]
+    public async Task SendWithTracking_ThenMarkAsComplete_Generic_Transitions_Explicit_Step()
+    {
+        var (context, eventBus, sagaStore, _) = CreateContextWithStore();
+        using var cts = new CancellationTokenSource();
+
+        await context.SendWithTracking(new ReserveInventoryCommand())
+            .ThenMarkAsComplete<CreateOrderCommand>(cts.Token);
+
+        eventBus.Verify(b => b.Send(It.IsAny<ReserveInventoryCommand>(), It.IsAny<Type>(), It.IsAny<Guid>(), cts.Token), Times.Once);
+        // The saga context always logs against the step it was constructed for (OrderCreatedEvent);
+        // TStep on ThenMarkAsComplete is the call-site-documented intent, not a lookup key.
+        Assert.Single(sagaStore.Invocations);
+        var invocation = sagaStore.Invocations[0];
+        Assert.Equal("LogStepAsync", invocation.Method.Name);
+        Assert.Equal(typeof(OrderCreatedEvent), invocation.Arguments[3]);
+    }
+
+    // 2: PublishWithTracking(...).ThenMarkAsComplete<TStep>(ct).
+    [Fact]
+    public async Task PublishWithTracking_ThenMarkAsComplete_Generic_Transitions_Explicit_Step()
+    {
+        var (context, eventBus, _, _) = CreateContext();
+        using var cts = new CancellationTokenSource();
+
+        await context.PublishWithTracking(new OrderCreatedEvent())
+            .ThenMarkAsComplete<CreateOrderCommand>(cts.Token);
+
+        eventBus.Verify(b => b.Publish(It.IsAny<OrderCreatedEvent>(), It.IsAny<Type>(), It.IsAny<Guid>(), cts.Token), Times.Once);
+    }
+
+    // 3: RespondWithTracking(...).ThenMarkAsComplete<TStep>(ct).
+    [Fact]
+    public async Task RespondWithTracking_ThenMarkAsComplete_Generic_Transitions_Explicit_Step()
+    {
+        var (context, eventBus, _, _) = CreateContext();
+        using var cts = new CancellationTokenSource();
+        var request = new CreateOrderCommand();
+        var response = new OrderCreatedResponse();
+
+        await context.RespondWithTracking(request, response)
+            .ThenMarkAsComplete<ReserveInventoryCommand>(cts.Token);
+
+        eventBus.Verify(b => b.Respond(request, response, It.IsAny<Type>(), It.IsAny<Guid>(), cts.Token), Times.Once);
+    }
+
+    // 4: ScheduleWithTracking(...).ThenMarkAsComplete<TStep>(ct).
+    [Fact]
+    public async Task ScheduleWithTracking_ThenMarkAsComplete_Generic_Transitions_Explicit_Step()
+    {
+        var (context, _, _, scheduler) = CreateContext();
+        using var cts = new CancellationTokenSource();
+        scheduler.Setup(s => s.ScheduleAsync(It.IsAny<OrderCreatedEvent>(), It.IsAny<OrderCreatedEvent>(),
+                It.IsAny<Type>(), It.IsAny<Guid>(), ScheduleDelay.FiveSeconds, null, cts.Token))
+            .ReturnsAsync(Guid.NewGuid());
+
+        await context.ScheduleWithTracking(new OrderCreatedEvent(), ScheduleDelay.FiveSeconds)
+            .ThenMarkAsComplete<ReserveInventoryCommand>(cts.Token);
+
+        scheduler.Verify(s => s.ScheduleAsync(It.IsAny<OrderCreatedEvent>(), It.IsAny<OrderCreatedEvent>(),
+            It.IsAny<Type>(), It.IsAny<Guid>(), ScheduleDelay.FiveSeconds, null, cts.Token), Times.Once);
+    }
+
+    // 9 & 10: both the inferred non-generic form and the explicit generic form remain available on the
+    // same ISagaStepFluent instance, and both resolve to the context's own current step (never the
+    // outgoing message type), confirmed via the SagaStore step-type argument.
+    [Fact]
+    public async Task Generic_And_NonGeneric_ThenMarkAsComplete_Both_Log_The_Context_Current_Step()
+    {
+        var (genericContext, _, genericStore, _) = CreateContextWithStore();
+        await genericContext.SendWithTracking(new ReserveInventoryCommand())
+            .ThenMarkAsComplete<CreateOrderCommand>();
+
+        var (inferredContext, _, inferredStore, _) = CreateContextWithStore();
+        await inferredContext.SendWithTracking(new ReserveInventoryCommand())
+            .ThenMarkAsComplete();
+
+        // Verified via raw invocations (not Mock.Verify with a lambda) because Moq cannot reliably
+        // disambiguate the two LogStepAsync overloads (Exception? vs SagaStepFailureInfo?) by expression.
+        Assert.Equal(typeof(OrderCreatedEvent), Assert.Single(genericStore.Invocations).Arguments[3]);
+        Assert.Equal(typeof(OrderCreatedEvent), Assert.Single(inferredStore.Invocations).Arguments[3]);
+    }
+
     private sealed class OrderCreatedResponse : ResponseBase<CreateOrderCommand>;
+
+    private sealed class ReserveInventoryCommand : CommandBase, ITestAppCommand;
 }

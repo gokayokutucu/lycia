@@ -21,21 +21,24 @@ public class CreateOrderSagaHandler :
     public override async Task HandleStartAsync(CreateOrderCommand message, CancellationToken cancellationToken = default)
     {
         // Persist order in the database, perform initial business logic
-        await Context.Respond(message, new OrderCreatedResponse
-        {
-            OrderId = message.OrderId
-        }, cancellationToken);
-        await Context.MarkAsComplete<CreateOrderCommand>(cancellationToken);
+        await Context
+            .RespondWithTracking(message, new OrderCreatedResponse
+            {
+                OrderId = message.OrderId
+            })
+            .ThenMarkAsComplete<CreateOrderCommand>(cancellationToken);
     }
 
     public override async Task HandleSuccessResponseAsync(OrderCreatedResponse response, CancellationToken cancellationToken = default)
     {
-        // Order created, reserve inventory
-        await Context.Send(new ReserveInventoryCommand
-        {
-            OrderId = response.OrderId
-        }, cancellationToken);
-        await Context.MarkAsComplete<OrderCreatedResponse>();
+        // Order created, reserve inventory. The outgoing command (ReserveInventoryCommand) and the saga
+        // step being completed (OrderCreatedResponse) are intentionally different types.
+        await Context
+            .SendWithTracking(new ReserveInventoryCommand
+            {
+                OrderId = response.OrderId
+            })
+            .ThenMarkAsComplete<OrderCreatedResponse>(cancellationToken);
     }
 
     public override Task HandleFailResponseAsync(OrderCreatedResponse response, FailResponse fail, CancellationToken cancellationToken = default)
