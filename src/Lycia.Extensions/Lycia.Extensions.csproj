@@ -27,11 +27,11 @@
             - Fluent DI registration (AddLycia with ConfigureSaga, ConfigureEventBus, ConfigureRetry, ConfigureLogging)
             - Built-in retry policies with Polly integration
             - Configurable middleware slots (logging, tracing, retry, custom middlewares)
-            - Newtonsoft JSON serializer and Redis saga store
+            - Newtonsoft JSON serializer
             - Health check integration (IHealthCheck)
 
-            Transports and durable scheduling ship separately: Lycia.Extensions.RabbitMq,
-            Lycia.Extensions.Nats, Lycia.Extensions.Kafka, and Lycia.Extensions.Scheduling.
+            Transports, durable scheduling, and persistence providers ship separately: Lycia.Extensions.RabbitMq,
+            Lycia.Extensions.Nats, Lycia.Extensions.Kafka, Lycia.Extensions.Scheduling, and Lycia.Persistence.Redis.
             Keep your Saga setup modular, extensible, and production-grade. Add only the components you need.
         </Description>
         <Copyright>Copyright (c) 2025 M. Gokay Okutucu</Copyright>
@@ -74,7 +74,6 @@
         <PackageReference Include="Microsoft.CSharp" Version="4.7.0" />
         <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
         <PackageReference Include="Serilog" Version="4.3.0" />
-        <PackageReference Include="StackExchange.Redis" Version="2.8.37" />
     </ItemGroup>
 
     <!-- netstandard2.0 specific packages -->

@@ -11,4 +11,11 @@ public abstract class SagaData
     public Type? FailedHandlerType { get; set; }
     public DateTime? CompletedAt { get; set; }
     public DateTime? FailedAt { get; set; }
+
+    /// <summary>
+    /// Explicit optimistic-concurrency version of this saga's persisted data. Zero means the saga has not
+    /// been saved yet. Only meaningful for stores implementing <see cref="Lycia.Saga.Abstractions.IVersionedSagaStore"/>;
+    /// plain <see cref="ISagaStore"/> callers/providers may ignore it.
+    /// </summary>
+    public long Version { get; set; }
 }

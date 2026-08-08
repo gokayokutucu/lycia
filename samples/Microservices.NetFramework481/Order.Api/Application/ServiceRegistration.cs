@@ -5,6 +5,7 @@ using Lycia.Extensions;
 using Lycia.Extensions.RabbitMq;
 using Lycia.Extensions.Logging;
 using Lycia.Middleware;
+using Lycia.Persistence.Redis;
 using Mapster;
 using MediatR;
 using Microsoft.Extensions.Configuration;
@@ -61,6 +62,10 @@ public static class ServiceRegistration
             lycia
                 .UseTransport()
                     .RabbitMq();
+
+            lycia
+                .UsePersistence()
+                    .WithRedisSagaStore();
 
             lycia
                 .AddMiddleware()

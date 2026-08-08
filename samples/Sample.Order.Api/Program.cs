@@ -4,6 +4,7 @@
 
 using Lycia.Extensions;
 using Lycia.Extensions.RabbitMq;
+using Lycia.Persistence.Redis;
 using Lycia.Saga.Abstractions;
 using Microsoft.AspNetCore.Mvc;
 using Sample.Shared.Messages.Commands;
@@ -23,6 +24,10 @@ builder.Services.AddLycia(builder.Configuration, lycia =>
     lycia
         .UseTransport()
             .RabbitMq();
+
+    lycia
+        .UsePersistence()
+            .WithRedisSagaStore();
 });
 
 var app = builder.Build();
