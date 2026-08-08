@@ -111,6 +111,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Extensions.Scheduling
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Persistence.TestKit", "tests\Lycia.Persistence.TestKit\Lycia.Persistence.TestKit.csproj", "{52C1E4C5-7A32-4908-BD0B-5C2E45EEA805}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Persistence.Redis", "src\Lycia.Persistence.Redis\Lycia.Persistence.Redis.csproj", "{CE690FB5-AA71-4173-BFEE-2C498F763EC7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Persistence.Redis.Tests", "tests\Lycia.Persistence.Redis.Tests\Lycia.Persistence.Redis.Tests.csproj", "{3D4AC999-DEAF-45C5-8DC9-28F68331AEDE}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -649,6 +653,30 @@ Global
 		{52C1E4C5-7A32-4908-BD0B-5C2E45EEA805}.Release|x64.Build.0 = Release|Any CPU
 		{52C1E4C5-7A32-4908-BD0B-5C2E45EEA805}.Release|x86.ActiveCfg = Release|Any CPU
 		{52C1E4C5-7A32-4908-BD0B-5C2E45EEA805}.Release|x86.Build.0 = Release|Any CPU
+		{CE690FB5-AA71-4173-BFEE-2C498F763EC7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CE690FB5-AA71-4173-BFEE-2C498F763EC7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CE690FB5-AA71-4173-BFEE-2C498F763EC7}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{CE690FB5-AA71-4173-BFEE-2C498F763EC7}.Debug|x64.Build.0 = Debug|Any CPU
+		{CE690FB5-AA71-4173-BFEE-2C498F763EC7}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{CE690FB5-AA71-4173-BFEE-2C498F763EC7}.Debug|x86.Build.0 = Debug|Any CPU
+		{CE690FB5-AA71-4173-BFEE-2C498F763EC7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CE690FB5-AA71-4173-BFEE-2C498F763EC7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CE690FB5-AA71-4173-BFEE-2C498F763EC7}.Release|x64.ActiveCfg = Release|Any CPU
+		{CE690FB5-AA71-4173-BFEE-2C498F763EC7}.Release|x64.Build.0 = Release|Any CPU
+		{CE690FB5-AA71-4173-BFEE-2C498F763EC7}.Release|x86.ActiveCfg = Release|Any CPU
+		{CE690FB5-AA71-4173-BFEE-2C498F763EC7}.Release|x86.Build.0 = Release|Any CPU
+		{3D4AC999-DEAF-45C5-8DC9-28F68331AEDE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3D4AC999-DEAF-45C5-8DC9-28F68331AEDE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3D4AC999-DEAF-45C5-8DC9-28F68331AEDE}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{3D4AC999-DEAF-45C5-8DC9-28F68331AEDE}.Debug|x64.Build.0 = Debug|Any CPU
+		{3D4AC999-DEAF-45C5-8DC9-28F68331AEDE}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{3D4AC999-DEAF-45C5-8DC9-28F68331AEDE}.Debug|x86.Build.0 = Debug|Any CPU
+		{3D4AC999-DEAF-45C5-8DC9-28F68331AEDE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3D4AC999-DEAF-45C5-8DC9-28F68331AEDE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3D4AC999-DEAF-45C5-8DC9-28F68331AEDE}.Release|x64.ActiveCfg = Release|Any CPU
+		{3D4AC999-DEAF-45C5-8DC9-28F68331AEDE}.Release|x64.Build.0 = Release|Any CPU
+		{3D4AC999-DEAF-45C5-8DC9-28F68331AEDE}.Release|x86.ActiveCfg = Release|Any CPU
+		{3D4AC999-DEAF-45C5-8DC9-28F68331AEDE}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -704,6 +732,8 @@ Global
 		{D7366F84-C467-4204-B2FB-D508456CCF83} = {59E39671-6EFC-4EE2-B70F-DF6955451C7C}
 		{ACFDE9FB-6D2A-4796-B9A0-CE1BF343CCDE} = {59E39671-6EFC-4EE2-B70F-DF6955451C7C}
 		{52C1E4C5-7A32-4908-BD0B-5C2E45EEA805} = {39547434-F68A-4275-8482-B1EB3CFC8F02}
+		{CE690FB5-AA71-4173-BFEE-2C498F763EC7} = {59E39671-6EFC-4EE2-B70F-DF6955451C7C}
+		{3D4AC999-DEAF-45C5-8DC9-28F68331AEDE} = {39547434-F68A-4275-8482-B1EB3CFC8F02}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {A79E706E-1C9F-4CF1-A700-5A2D09B33AC6}

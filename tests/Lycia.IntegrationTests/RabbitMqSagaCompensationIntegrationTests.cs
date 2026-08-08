@@ -12,7 +12,7 @@ using Testcontainers.Redis;
 using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Eventing;
 using Lycia.Extensions.Serialization;
-using Lycia.Extensions.Stores;
+using Lycia.Persistence.Redis;
 
 
 
