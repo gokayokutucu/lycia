@@ -22,14 +22,12 @@ public sealed class CreateOrderSagaHandler :
     {
         // Create the order in Pending state.
 
-        await Context.Publish(
-            new OrderCreatedEvent
+        await Context
+            .PublishWithTracking(new OrderCreatedEvent
             {
                 OrderId = command.OrderId
-            },
-            cancellationToken);
-
-        await Context.MarkAsComplete<CreateOrderCommand>(cancellationToken);
+            })
+            .ThenMarkAsComplete<CreateOrderCommand>(cancellationToken);
     }
 
     public override async Task CompensateStartAsync(
