@@ -46,7 +46,7 @@ Lycia is split into focused packages.
 | `Lycia.Extensions.Nats` | NATS Core and JetStream transport integration |
 | `Lycia.Extensions.Kafka` | Kafka transport integration |
 | `Lycia.Extensions.OpenTelemetry` | OpenTelemetry tracing and propagation integration |
-| `Lycia.Persistence.InMemory` | In-memory `ISagaStore` provider. Tests and local development only — not durable production storage |
+| `Lycia.Persistence.InMemory` | In-memory `ISagaStore`/`IInboxStore`/`IOutboxStore` provider. Tests and local development only — not durable production storage |
 | `Lycia.Persistence.Redis` | Redis-backed `ISagaStore` provider with atomic optimistic concurrency |
 | `Lycia.Persistence.SqlServer` | SQL Server-backed `ISagaStore` provider with embedded schema migration |
 | `Lycia.Persistence.PostgreSql` | PostgreSQL-backed `ISagaStore` provider with embedded schema migration |
@@ -735,6 +735,21 @@ Same MessageId delivered twice
 -> committed business effect executes once
 ```
 
+The optional Inbox enforces this at the handler-execution boundary, before saga-state work begins:
+
+```csharp
+services.AddLycia(configuration, lycia =>
+{
+    lycia
+        .UsePersistence()
+            .WithRedisSagaStore(options => options.ConnectionString = redisConnection)
+            .WithInMemoryInbox(); // disabled by default; only an in-memory implementation exists today
+});
+```
+
+`IInboxStore` is resolved optionally — dispatch behaves exactly as it did before Inbox existed when
+nothing is registered.
+
 ### Optimistic concurrency
 
 Optimistic concurrency prevents different valid messages from overwriting the same saga state.
@@ -763,6 +778,7 @@ Applications and extension packages may provide custom implementations of:
 
 - `IEventBus`
 - `ISagaStore`
+- `IInboxStore` / `IOutboxStore` (optional, disabled by default)
 - `IMessageSerializer`
 - middleware slots
 - retry policies
@@ -820,9 +836,11 @@ Lycia currently provides and prepares for:
 - publisher confirmation integration where supported
 - durable scheduling
 
-Native provider-based Inbox and Outbox persistence is planned as a separate persistence architecture.
+The Inbox/Outbox **architectural foundation** exists today (contracts, in-memory implementation, DSL,
+dispatcher integration) — see below. A durable, production-grade Inbox/Outbox (real provider stores
+for Redis/SQL Server/PostgreSQL, a publisher worker, reconciliation) is still future work.
 
-The intended model distinguishes:
+The model distinguishes:
 
 ```text
 Saga state
@@ -835,7 +853,27 @@ Outbox
 -> durable publication lifecycle of outgoing messages
 ```
 
-The saga state machine does not replace Inbox or Outbox.
+The saga state machine does not replace Inbox or Outbox. These concerns may share one database
+transaction in the future (see `ILyciaPersistenceSession`), but they remain separate lifecycles.
+
+**Idempotency** prevents duplicate handling of the same logical message — Inbox implements this at
+the handler-execution level: `IInboxStore.TryBeginAsync(messageId, handlerType)` claims a
+(MessageId, HandlerType) pair before the handler body runs; a redelivered message for the same pair
+returns `AlreadyProcessing`/`AlreadyCompleted`/`AlreadyFailed` instead of re-running the handler.
+This is optional and disabled by default — enable it via `UsePersistence().WithInMemoryInbox()` (or
+a future durable provider's `.With...Inbox()`). It is complementary to, not a replacement for, the
+existing per-step transition/duplicate-payload checks in `ISagaStore.LogStepAsync`.
+
+**Outbox** durably captures outgoing message intent (`IOutboxStore.AddAsync`) with an explicit
+lifecycle (`Pending` → `Claimed` → `Publishing` → `Published`/`ConfirmationUnknown`/`Failed`) so a
+future publisher worker can dispatch it reliably. Only an in-memory implementation exists today — it
+tracks state for tests and prepares the contract; there is no publisher worker, retry policy, or
+broker-confirmation wiring yet. `Published` must only ever be set after a positive broker
+confirmation once that wiring exists — no component sets it automatically today.
+
+**Lycia provides at-least-once delivery semantics. It does not claim exactly-once processing.**
+Inbox reduces duplicate-processing risk; Outbox will reduce the local-store/broker dual-write window
+once its publisher is built. Neither changes Lycia's fundamental at-least-once delivery guarantee.
 
 ---
 
@@ -862,7 +900,7 @@ own schema via an embedded migration (`ApplyMigrations` by default).
 
 Not yet built — still future work, not implemented and not to be assumed available:
 
-- optional Inbox and Outbox providers
+- durable, production-grade Inbox/Outbox provider stores (Redis/SQL Server/PostgreSQL)
 - strong-consistency relational mode (`WithStrongConsistency()` / `RequireAtomicBoundary()`)
 - split-store Redis + relational mode (`WithSplitStore()`)
 - deterministic replay / Redis rebuild from canonical history
@@ -871,14 +909,23 @@ Not yet built — still future work, not implemented and not to be assumed avail
 
 ### Inbox and Outbox
 
-Planned reliability work includes:
+Implemented today (architectural foundation only):
 
-- canonical incoming and outgoing journals
-- idempotent consumers
-- transactional Outbox
-- publisher confirmation tracking
+- `IInboxStore` / `IOutboxStore` provider-neutral contracts, in `Lycia.Saga.Abstractions`
+- `InboxMessageStatus`/`InboxBeginResult` and `OutboxMessageStatus`/`OutboxMessage` models
+- `Lycia.Persistence.InMemory`'s `InMemoryInboxStore`/`InMemoryOutboxStore` — deterministic, for tests
+- `UsePersistence().WithInbox<T>()` / `.WithOutbox<T>()` DSL (plus `.WithInMemoryInbox()`/`.WithInMemoryOutbox()` sugar), both optional and disabled by default, each with the same duplicate-provider guard as SagaStore
+- `SagaDispatcher` Inbox integration: claims (MessageId, HandlerType) before invoking a handler and marks it completed/failed afterward, with zero behavior change when no `IInboxStore` is registered
+- `ILyciaPersistenceSession`/`ILyciaPersistenceSessionFactory` — a real relational transaction boundary (`RelationalPersistenceSession`, backed by `Microsoft.Data.SqlClient`/`Npgsql`) registered by the SQL Server/PostgreSQL SagaStore providers, and a `NonAtomicPersistenceSession` default for InMemory/Redis that honestly reports `SupportsAtomicTransactions = false`
+
+Still planned (not implemented):
+
+- durable Inbox/Outbox stores for Redis/SQL Server/PostgreSQL
+- wiring SagaStore + Inbox + Outbox operations to actually share one `ILyciaPersistenceSession`
+- canonical incoming/outgoing journals
+- Outbox publisher worker, retry policy, and broker publisher-confirmation tracking
 - reconciliation workers
-- fail-closed processing
+- fail-closed processing guarantees beyond what SagaStore already provides
 - bounded recovery
 - Redis saga-state rebuild from canonical relational history
 

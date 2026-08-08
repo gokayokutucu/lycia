@@ -4,12 +4,14 @@
 
 using Lycia.Common.Messaging;
 using Lycia.Common.Enums;
+using Lycia.Common.SagaSteps;
 using Lycia.Contexts;
 using Lycia.Extensions;
 using Lycia.Helpers;
 using Lycia.Middleware;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Contexts;
+using Lycia.Saga.Abstractions.Inbox;
 using Lycia.Saga.Abstractions.Handlers;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Abstractions.Middlewares;
@@ -134,7 +136,23 @@ public class SagaDispatcher(
         }
         
         if (!IsSupportedSagaHandler(handlerType)) return;
-        
+
+        // Inbox is optional and disabled by default: IInboxStore only resolves when a persistence
+        // provider registered one via UsePersistence().With...Inbox(). When absent, dispatch behaves
+        // exactly as before this check existed.
+        var inboxStore = serviceProvider.GetService<IInboxStore>();
+        if (inboxStore != null)
+        {
+            var beginResult = await inboxStore.TryBeginAsync(message.MessageId, handlerType, cancellationToken);
+            if (beginResult != InboxBeginResult.Started)
+            {
+                logger.LogInformation(
+                    "Inbox: message {MessageId} for handler {HandlerType} is already {InboxResult}; skipping duplicate execution.",
+                    message.MessageId, handlerType.Name, beginResult);
+                return;
+            }
+        }
+
         var createdContext = await SagaContextFactory.InitializeForHandlerAsync(
             handler,
             sagaId!.Value,
@@ -169,6 +187,16 @@ public class SagaDispatcher(
             if (sagaContextAccessor != null)
                 sagaContextAccessor.Current = createdContext as ISagaContext;
             await pipeline.InvokeAsync(ctx, () => HandleSagaAsync(message, handler, handlerType, cancellationToken));
+
+            if (inboxStore != null)
+                await inboxStore.MarkCompletedAsync(message.MessageId, handlerType, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            if (inboxStore != null)
+                await inboxStore.MarkFailedAsync(message.MessageId, handlerType,
+                    new SagaStepFailureInfo("Handler execution failed", ex.GetType().Name, ex.ToString()), cancellationToken);
+            throw;
         }
         finally
         {

@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 using Lycia.Saga.Abstractions;
+using Lycia.Saga.Abstractions.Persistence;
 using Lycia.Saga.Abstractions.Scheduling;
 using Lycia.Stores;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,5 +22,9 @@ internal static class InMemorySagaStoreRegistrationExtensions
             sp.GetRequiredService<ISagaIdGenerator>(),
             sp.GetRequiredService<ISagaCompensationCoordinator>(),
             sp.GetService<IMessageScheduler>()));
+
+        // InMemory cannot join a real cross-store transaction; register the non-atomic default so
+        // ILyciaPersistenceSessionFactory is always resolvable regardless of the selected provider.
+        services.TryAddSingleton<ILyciaPersistenceSessionFactory, NonAtomicPersistenceSessionFactory>();
     }
 }
