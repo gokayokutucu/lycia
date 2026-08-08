@@ -21,12 +21,14 @@ public class CreateOrderSagaHandler :
     
     public override async Task HandleStartAsync(CreateOrderCommand command, CancellationToken cancellationToken = default)
     {
+        // Preferred fluent form: the token is passed to the terminal method, not to SendWithTracking,
+        // so it governs both the deferred Send and the saga-step completion that follows it.
         await Context
             .SendWithTracking(new ReserveInventoryCommand
             {
                 OrderId = command.OrderId,
-            }, cancellationToken)
-            .ThenMarkAsComplete();
+            })
+            .ThenMarkAsComplete(cancellationToken);
     }
 
     public override async Task CompensateStartAsync(CreateOrderCommand message, CancellationToken cancellationToken = default)
@@ -35,14 +37,14 @@ public class CreateOrderSagaHandler :
         {
             CompensateCalled = true;
             // Compensation logic
-            await Context.MarkAsCompensated<CreateOrderCommand>();
+            await Context.MarkAsCompensated<CreateOrderCommand>(cancellationToken);
         }
         catch (Exception ex)
         {
             // Log, notify, halt chain, etc.
             Console.WriteLine($"❌ Compensation failed: {ex.Message}");
-            
-            await Context.MarkAsCompensationFailed<CreateOrderCommand>(ex);
+
+            await Context.MarkAsCompensationFailed<CreateOrderCommand>(ex, cancellationToken);
             // Optionally: rethrow or store for manual retry
             throw; // Or suppress and log for retry system
         }

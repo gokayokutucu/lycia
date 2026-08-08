@@ -13,38 +13,51 @@ namespace Lycia.Saga;
 
 public class CoordinatedSagaStepFluent<TInitialMessage, TSagaData>(
     ISagaContext<TInitialMessage, TSagaData> context,
-    Func<Task> operation) : ISagaStepFluent
+    Func<CancellationToken, Task> operation,
+    CancellationToken capturedCancellationToken = default) : ISagaStepFluent
     where TInitialMessage : IMessage
     where TSagaData : SagaData
 {
-    public static object Create(Type stepType, Type sagaDataType, object context, Func<Task> operation)
+    public static object Create(Type stepType, Type sagaDataType, object context, Func<CancellationToken, Task> operation,
+        CancellationToken capturedCancellationToken = default)
     {
         var open = typeof(CoordinatedSagaStepFluent<,>);
         var closed = open.MakeGenericType(stepType, sagaDataType);
-        return Activator.CreateInstance(closed, context, operation)!;
+        return Activator.CreateInstance(closed, context, operation, capturedCancellationToken)!;
     }
-    
-    public async Task ThenMarkAsComplete()
+
+    // Preferred: pass the token here, not to the WithTracking(...) call that created this instance.
+    // If the caller still supplied one there, it is used as a fallback when this token is left default,
+    // for source compatibility with the WithTracking(msg, cancellationToken).Then...() call shape.
+    public async Task ThenMarkAsComplete(CancellationToken cancellationToken = default)
     {
-        await operation();
-        await context.MarkAsComplete<TInitialMessage>();
+        var token = SagaStepFluentToken.Resolve(cancellationToken, capturedCancellationToken);
+        token.ThrowIfCancellationRequested();
+        await operation(token);
+        await context.MarkAsComplete<TInitialMessage>(token);
     }
 
     public async Task ThenMarkAsFailed(FailResponse fail, CancellationToken cancellationToken = default)
     {
-        await operation();
-        await context.MarkAsFailed<TInitialMessage>(cancellationToken);
+        var token = SagaStepFluentToken.Resolve(cancellationToken, capturedCancellationToken);
+        token.ThrowIfCancellationRequested();
+        await operation(token);
+        await context.MarkAsFailed<TInitialMessage>(token);
     }
 
     public async Task ThenMarkAsCompensated(CancellationToken cancellationToken = default)
     {
-        await operation();
-        await context.CompensateAndBubbleUp<TInitialMessage>(cancellationToken);
+        var token = SagaStepFluentToken.Resolve(cancellationToken, capturedCancellationToken);
+        token.ThrowIfCancellationRequested();
+        await operation(token);
+        await context.CompensateAndBubbleUp<TInitialMessage>(token);
     }
 
-    public async Task ThenMarkAsCompensationFailed()
+    public async Task ThenMarkAsCompensationFailed(CancellationToken cancellationToken = default)
     {
-        await operation();
-        await context.MarkAsCompensationFailed<TInitialMessage>();
+        var token = SagaStepFluentToken.Resolve(cancellationToken, capturedCancellationToken);
+        token.ThrowIfCancellationRequested();
+        await operation(token);
+        await context.MarkAsCompensationFailed<TInitialMessage>(token);
     }
 }
