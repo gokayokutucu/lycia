@@ -6,6 +6,7 @@ using Lycia.Common.SagaSteps;
 using Lycia.Dispatching;
 using Lycia.Extensions;
 using Lycia.Saga.Abstractions;
+using Lycia.Saga.Abstractions.Inbox;
 using Lycia.Saga.Exceptions;
 using Lycia.Saga.Messaging;
 using Lycia.Saga.Messaging.Handlers;
@@ -21,6 +22,120 @@ namespace Lycia.Tests;
 
 public class SagaDispatcherTests
 {
+    /// <summary>Minimal in-memory <see cref="IInboxStore"/> fake used only to verify the dispatcher's Inbox hook.</summary>
+    private sealed class FakeInboxStore : IInboxStore
+    {
+        private readonly Dictionary<(Guid, Type), InboxMessageStatus> _records = new();
+
+        public Task<InboxBeginResult> TryBeginAsync(Guid messageId, Type handlerType, CancellationToken cancellationToken = default)
+        {
+            var key = (messageId, handlerType);
+            if (_records.TryGetValue(key, out var status))
+            {
+                return Task.FromResult(status switch
+                {
+                    InboxMessageStatus.Completed => InboxBeginResult.AlreadyCompleted,
+                    InboxMessageStatus.Failed => InboxBeginResult.AlreadyFailed,
+                    _ => InboxBeginResult.AlreadyProcessing
+                });
+            }
+
+            _records[key] = InboxMessageStatus.Processing;
+            return Task.FromResult(InboxBeginResult.Started);
+        }
+
+        public Task MarkCompletedAsync(Guid messageId, Type handlerType, CancellationToken cancellationToken = default)
+        {
+            _records[(messageId, handlerType)] = InboxMessageStatus.Completed;
+            return Task.CompletedTask;
+        }
+
+        public Task MarkFailedAsync(Guid messageId, Type handlerType, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default)
+        {
+            _records[(messageId, handlerType)] = InboxMessageStatus.Failed;
+            return Task.CompletedTask;
+        }
+
+        public Task<InboxMessageStatus> GetStatusAsync(Guid messageId, Type handlerType, CancellationToken cancellationToken = default) =>
+            Task.FromResult(_records.TryGetValue((messageId, handlerType), out var status) ? status : InboxMessageStatus.None);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_With_Inbox_Registered_Redelivered_MessageId_Does_Not_Reinvoke_Handler()
+    {
+        var fixedSagaId = Guid.NewGuid();
+        var services = new ServiceCollection();
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string>
+            {
+                ["ApplicationId"] = "TestApp"
+            }!)
+            .Build();
+        services.AddLyciaInMemory(configuration)
+            .AddSaga(typeof(InboxCountingSagaHandler))
+            .Build();
+
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        services.AddSingleton<InboxCountingSagaHandler.InvocationCounter>();
+        services.AddSingleton<IInboxStore, FakeInboxStore>();
+
+        var provider = services.BuildServiceProvider();
+        var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
+        var counter = provider.GetRequiredService<InboxCountingSagaHandler.InvocationCounter>();
+
+        var message = new OrderCreatedEvent
+        {
+            OrderId = Guid.NewGuid(),
+            SagaId = fixedSagaId
+        };
+
+        // Act: dispatch the exact same message (same MessageId) twice, simulating at-least-once redelivery.
+        await dispatcher.DispatchAsync(message, handlerType: typeof(InboxCountingSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
+        await dispatcher.DispatchAsync(message, handlerType: typeof(InboxCountingSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
+
+        // Assert: the handler body only ran once; the second delivery was a safe no-op.
+        Assert.Equal(1, counter.Count);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_Without_Inbox_Registered_Behaves_As_Before()
+    {
+        var fixedSagaId = Guid.NewGuid();
+        var services = new ServiceCollection();
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string>
+            {
+                ["ApplicationId"] = "TestApp"
+            }!)
+            .Build();
+        services.AddLyciaInMemory(configuration)
+            .AddSaga(typeof(InboxCountingSagaHandler))
+            .Build();
+
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+        services.AddSingleton<InboxCountingSagaHandler.InvocationCounter>();
+        // No IInboxStore registered.
+
+        var provider = services.BuildServiceProvider();
+        var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
+        var counter = provider.GetRequiredService<InboxCountingSagaHandler.InvocationCounter>();
+
+        var message = new OrderCreatedEvent
+        {
+            OrderId = Guid.NewGuid(),
+            SagaId = fixedSagaId
+        };
+
+        // Act: dispatch the same message twice with no Inbox configured.
+        await dispatcher.DispatchAsync(message, handlerType: typeof(InboxCountingSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
+        await dispatcher.DispatchAsync(message, handlerType: typeof(InboxCountingSagaHandler), sagaId: fixedSagaId, CancellationToken.None);
+
+        // Assert: unchanged pre-Inbox behavior - the handler runs every time it's dispatched.
+        Assert.Equal(2, counter.Count);
+    }
+
     [Fact]
     public async Task DispatchAsync_Should_Not_Invoke_Handler_On_MessageType_Mismatch()
     {

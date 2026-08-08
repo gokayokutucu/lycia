@@ -6,9 +6,12 @@ using Lycia.Extensions.Nats;
 using Lycia.Extensions.RabbitMq;
 using Lycia.Extensions.Scheduling;
 using Lycia.Middleware;
+using Lycia.Common.SagaSteps;
 using Lycia.Persistence.Redis;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Contexts;
+using Lycia.Saga.Abstractions.Inbox;
+using Lycia.Saga.Abstractions.Outbox;
 using Lycia.Saga.Abstractions.Middlewares;
 using Lycia.Saga.Messaging;
 using Lycia.Saga.Messaging.Handlers;
@@ -180,6 +183,67 @@ public class LyciaDslTests
         Assert.Single(services, sd => sd.ServiceType == typeof(ISagaStore));
     }
 
+    // Inbox/Outbox are optional and disabled by default: no IInboxStore/IOutboxStore is registered
+    // unless UsePersistence().WithInbox<T>()/WithOutbox<T>() is called.
+    [Fact]
+    public void UsePersistence_Without_Inbox_Or_Outbox_Registers_Neither()
+    {
+        var services = new ServiceCollection();
+        var builder = services.AddLycia(Configuration());
+        builder.UsePersistence().WithRedisSagaStore();
+
+        Assert.DoesNotContain(services, sd => sd.ServiceType == typeof(IInboxStore));
+        Assert.DoesNotContain(services, sd => sd.ServiceType == typeof(IOutboxStore));
+    }
+
+    [Fact]
+    public void UsePersistence_WithInbox_Registers_IInboxStore()
+    {
+        var services = new ServiceCollection();
+        var builder = services.AddLycia(Configuration());
+
+        var persistence = builder.UsePersistence().WithInbox<DslProbeInboxStore>();
+
+        Assert.IsType<LyciaPersistenceBuilder>(persistence);
+        Assert.Single(services, sd => sd.ServiceType == typeof(IInboxStore));
+    }
+
+    [Fact]
+    public void UsePersistence_WithOutbox_Registers_IOutboxStore()
+    {
+        var services = new ServiceCollection();
+        var builder = services.AddLycia(Configuration());
+
+        var persistence = builder.UsePersistence().WithOutbox<DslProbeOutboxStore>();
+
+        Assert.IsType<LyciaPersistenceBuilder>(persistence);
+        Assert.Single(services, sd => sd.ServiceType == typeof(IOutboxStore));
+    }
+
+    [Fact]
+    public void UsePersistence_Selecting_Two_Inbox_Providers_Throws()
+    {
+        var services = new ServiceCollection();
+        var builder = services.AddLycia(Configuration());
+        var persistence = builder.UsePersistence();
+        persistence.WithInbox<DslProbeInboxStore>();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => persistence.WithInbox<DslProbeSecondInboxStore>());
+        Assert.Contains("Multiple Inbox providers were configured", ex.Message);
+    }
+
+    [Fact]
+    public void UsePersistence_Selecting_Two_Outbox_Providers_Throws()
+    {
+        var services = new ServiceCollection();
+        var builder = services.AddLycia(Configuration());
+        var persistence = builder.UsePersistence();
+        persistence.WithOutbox<DslProbeOutboxStore>();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => persistence.WithOutbox<DslProbeSecondOutboxStore>());
+        Assert.Contains("Multiple Outbox providers were configured", ex.Message);
+    }
+
     // 9: legacy compatibility wrappers still work when kept.
     [Fact]
     public void Legacy_AddLyciaScheduling_And_AddLyciaInMemoryScheduling_Still_Work()
@@ -208,4 +272,30 @@ public class LyciaDslTests
     {
         public Task InvokeAsync(IInvocationContext context, Func<Task> next) => next();
     }
+
+    private class DslProbeInboxStore : IInboxStore
+    {
+        public Task<InboxBeginResult> TryBeginAsync(Guid messageId, Type handlerType, CancellationToken cancellationToken = default) =>
+            Task.FromResult(InboxBeginResult.Started);
+        public Task MarkCompletedAsync(Guid messageId, Type handlerType, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task MarkFailedAsync(Guid messageId, Type handlerType, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<InboxMessageStatus> GetStatusAsync(Guid messageId, Type handlerType, CancellationToken cancellationToken = default) =>
+            Task.FromResult(InboxMessageStatus.None);
+    }
+
+    private sealed class DslProbeSecondInboxStore : DslProbeInboxStore;
+
+    private class DslProbeOutboxStore : IOutboxStore
+    {
+        public Task AddAsync(OutboxMessage message, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<OutboxMessage?> GetByMessageIdAsync(Guid messageId, CancellationToken cancellationToken = default) => Task.FromResult<OutboxMessage?>(null);
+        public Task<IReadOnlyList<OutboxMessage>> ClaimPendingBatchAsync(int maxCount, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<OutboxMessage>>(Array.Empty<OutboxMessage>());
+        public Task MarkPublishingAsync(Guid messageId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task MarkPublishedAsync(Guid messageId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task MarkConfirmationUnknownAsync(Guid messageId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task MarkFailedAsync(Guid messageId, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class DslProbeSecondOutboxStore : DslProbeOutboxStore;
 }

@@ -239,6 +239,44 @@ check. All four providers run the same shared `Lycia.Persistence.TestKit` confor
 semantics are identical across providers.
 
 
+## 📥📤 Inbox / Outbox Foundation
+
+Architectural foundation only — see the Roadmap section of README.md for what's still planned.
+
+- **`IInboxStore`** (`Lycia.Saga.Abstractions.Inbox`) — tracks committed processing identity of
+  incoming messages, keyed by `(MessageId, HandlerType)`. Distinct from `ISagaStore`'s per-step
+  transition validation: Inbox gates *before* the handler body runs (dedup on message delivery),
+  while the SagaStore step log remains the source of truth for saga progress/compensation.
+  `SagaDispatcher.InvokeHandlerAsync` calls `TryBeginAsync` right before building the saga context;
+  a non-`Started` result (`AlreadyProcessing`/`AlreadyCompleted`/`AlreadyFailed`) short-circuits the
+  dispatch as a safe no-op. `MarkCompletedAsync`/`MarkFailedAsync` are called after the handler
+  pipeline finishes. `IInboxStore` is resolved optionally (`serviceProvider.GetService<IInboxStore>()`)
+  — when nothing is registered, dispatch behaves exactly as it did before Inbox existed.
+- **`IOutboxStore`** (`Lycia.Saga.Abstractions.Outbox`) — durably captures outgoing message intent
+  (`AddAsync`, idempotent on `MessageId`) with an explicit lifecycle
+  (`Pending → Claimed → Publishing → Published/ConfirmationUnknown/Failed`) for a future publisher
+  worker. No publisher, retry policy, or broker-confirmation wiring exists yet — this phase only
+  provides the durable-capture contract and status bookkeeping.
+- **`Lycia.Persistence.InMemory`** implements both (`InMemoryInboxStore`, `InMemoryOutboxStore`) —
+  deterministic, in-memory, for tests/local development only.
+- **DSL**: `UsePersistence().WithInbox<T>()` / `.WithOutbox<T>()` are generic escape hatches on
+  `LyciaPersistenceBuilder` (same shape as `LyciaBuilder.UseSagaStore<T>()`), each with its own
+  duplicate-provider guard (`SelectInboxProvider`/`SelectOutboxProvider`, mirroring
+  `SelectProvider`'s marker-in-`IServiceCollection` pattern). `Lycia.Persistence.InMemory` adds sugar:
+  `.WithInMemoryInbox()`/`.WithInMemoryOutbox()`. Both remain optional and disabled by default; no
+  `.WithPostgreSqlInbox()`/`.WithSqlServerOutbox()`/etc. exist yet because no such implementation
+  exists yet — the DSL only exposes what's actually built.
+- **`ILyciaPersistenceSession`/`ILyciaPersistenceSessionFactory`** (`Lycia.Saga.Abstractions.Persistence`)
+  — a provider-neutral transaction boundary, prepared for a future atomic Saga+Inbox+Outbox commit.
+  `RelationalPersistenceSession`/`RelationalPersistenceSessionFactory`
+  (`Lycia.Persistence.Relational.Internal.Sessions`) wrap a real `DbConnection`/`DbTransaction`, and
+  are registered by `WithSqlServerSagaStore(...)`/`WithPostgreSqlSagaStore(...)` using
+  `SqlConnection`/`NpgsqlConnection` respectively (`SupportsAtomicTransactions = true`).
+  `NonAtomicPersistenceSession`/`NonAtomicPersistenceSessionFactory` are the honest no-op default for
+  InMemory/Redis (`SupportsAtomicTransactions = false`) — nothing is disguised as atomic. **No
+  SagaStore/Inbox/Outbox operation actually enlists in a session yet** — that wiring is future work.
+
+
 ## 🧪 Integration Tests
 
 - `RabbitMqEventBusIntegrationTests` – verifies serialization headers and Ack/Nack/DLQ behavior
@@ -286,7 +324,9 @@ services.AddLycia(configuration, lycia =>
 
 ## 🔮 Roadmap
 
-- Add Outbox/Inbox pattern with persistence layer
+- Inbox/Outbox architectural foundation done (contracts, in-memory implementation, DSL, dispatcher
+  integration); durable provider stores, a publisher worker, and atomic Saga+Inbox+Outbox
+  transactions via `ILyciaPersistenceSession` remain to be built
 - Add support for Avro / Protobuf with Schema Registry (including the built‑in `AvroSchemaConverter`)
 - Finalize `IRetryPolicy` (done) and extend `Lycia.Scheduling` module for delayed retries
 - Improve distributed tracing and observability

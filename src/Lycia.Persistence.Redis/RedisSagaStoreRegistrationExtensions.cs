@@ -3,6 +3,7 @@
 // https://www.apache.org/licenses/LICENSE-2.0
 using Lycia.Extensions.Configurations;
 using Lycia.Saga.Abstractions;
+using Lycia.Saga.Abstractions.Persistence;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -60,5 +61,9 @@ internal static class RedisSagaStoreRegistrationExtensions
             var redis = sp.GetRequiredService<IDatabase>();
             return new RedisSagaStore(redis, eventBus, idGen, compCoord, storeOpts);
         });
+
+        // Redis cannot join a real cross-store transaction; register the non-atomic default so
+        // ILyciaPersistenceSessionFactory is always resolvable regardless of the selected provider.
+        services.TryAddSingleton<ILyciaPersistenceSessionFactory, NonAtomicPersistenceSessionFactory>();
     }
 }
