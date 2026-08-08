@@ -3,10 +3,10 @@
 // https://www.apache.org/licenses/LICENSE-2.0
 using StackExchange.Redis;
 
-namespace Lycia.Extensions.Helpers;
+namespace Lycia.Persistence.Redis;
 
 /// <summary>Provides atomic Redis operations required by concurrent saga state transitions.</summary>
-public static class RedisHelper
+internal static class RedisHelper
 {
     private static readonly string AtomicHashSetIfEqualScript = @"
 local current = redis.call('hget', KEYS[1], ARGV[1])

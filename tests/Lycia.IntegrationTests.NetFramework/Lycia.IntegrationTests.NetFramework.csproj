@@ -28,6 +28,7 @@
     <ItemGroup>
         <ProjectReference Include="..\..\samples\Sample.Shared\Sample.Shared.csproj" />
         <ProjectReference Include="..\..\src\Lycia\Lycia.csproj" />
+        <ProjectReference Include="..\..\src\Lycia.Persistence.Redis\Lycia.Persistence.Redis.csproj" />
         <ProjectReference Include="..\Lycia.Tests.Helpers\Lycia.Tests.Helpers.csproj" />
     </ItemGroup>
 

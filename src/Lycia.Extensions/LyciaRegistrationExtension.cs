@@ -4,7 +4,6 @@
 using System.Reflection;
 using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Serialization;
-using Lycia.Extensions.Stores;
 using Lycia.Common;
 using Lycia.Common.Configurations;
 using Lycia.Compensating;
@@ -25,9 +24,7 @@ using Lycia.Stores;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using StackExchange.Redis;
 using IRetryPolicy = Lycia.Retry.IRetryPolicy;
 
 #if NET8_0_OR_GREATER
@@ -52,9 +49,6 @@ namespace Lycia.Extensions
             services.AddLogging();
             var rootAppId = configuration["ApplicationId"];
             var commonTtlSeconds = configuration.GetValue<int?>("Lycia:CommonTTL");
-            
-            // --- Redis connection (only if EventStore provider is Redis) ---
-            var storeSection = configuration.GetSection(SagaStoreOptions.SectionName);
 
             // 1) Bind options with defaults
             services
@@ -75,7 +69,6 @@ namespace Lycia.Extensions
                     }
                 });
 
-            ConfigureRedisEventStore(services, storeSection);
             services
                 .AddOptions<SagaStoreOptions>()
                 .Bind(configuration.GetSection(SagaStoreOptions.SectionName))
@@ -133,8 +126,16 @@ namespace Lycia.Extensions
                     "or override with LyciaBuilder.UseEventBus<T>().");
             });
 
-            // Default SagaStore (Redis). Consumers may override with UseSagaStore<T>() or UsePersistence().
-            RegisterRedisSagaStore(services);
+            // Persistence-neutral placeholder. A persistence provider package (Lycia.Persistence.Redis,
+            // Lycia.Persistence.InMemory, ...) or UseSagaStore<T>() replaces it.
+            services.TryAddScoped<ISagaStore>(sp =>
+            {
+                var storeOpts = sp.GetRequiredService<IOptions<SagaStoreOptions>>().Value;
+                throw new InvalidOperationException(
+                    $"No Lycia SagaStore is registered for provider '{storeOpts.Provider}'. " +
+                    "Reference a persistence provider package (e.g. Lycia.Persistence.Redis, Lycia.Persistence.InMemory) " +
+                    "and configure it via UsePersistence().With...SagaStore(...), or override with LyciaBuilder.UseSagaStore<T>().");
+            });
 
             RegisterMiddlewareAndPolicies(services);
 
@@ -216,32 +217,6 @@ namespace Lycia.Extensions
         }
 
         /// <summary>
-        /// Registers the Redis-backed <see cref="ISagaStore"/>. Used by the default <c>AddLycia</c> bootstrap.
-        /// NOTE: this is legacy inline registration predating the <c>Lycia.Persistence.Redis</c> package;
-        /// the explicit <c>UsePersistence().WithRedisSagaStore(...)</c> DSL is implemented there instead.
-        /// </summary>
-        internal static void RegisterRedisSagaStore(IServiceCollection services)
-        {
-            services.TryAddScoped<ISagaStore>(sp =>
-            {
-                var storeOpts = sp.GetRequiredService<IOptions<SagaStoreOptions>>().Value;
-                var eventBus = sp.GetRequiredService<IEventBus>();
-                var idGen = sp.GetRequiredService<ISagaIdGenerator>();
-                var compCoord = sp.GetRequiredService<ISagaCompensationCoordinator>();
-
-                if (!string.Equals(storeOpts.Provider, Constants.ProviderRedis, StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new InvalidOperationException($"Unsupported SagaStore provider '{storeOpts.Provider}'. " +
-                                                        "Override with LyciaBuilder.UseSagaStore<T>() to supply a custom store.");
-                }
-
-                // Expect IDatabase to be registered by the host app (same as before)
-                var redis = sp.GetRequiredService<IDatabase>();
-                return new RedisSagaStore(redis, eventBus, idGen, compCoord, storeOpts);
-            });
-        }
-
-        /// <summary>
         /// Registers the deterministic in-process <see cref="InMemoryEventBus"/>. Shared by
         /// <see cref="AddLyciaInMemory"/> and <see cref="LyciaTransportBuilder.InMemory"/>.
         /// </summary>
@@ -252,37 +227,6 @@ namespace Lycia.Extensions
                 new InMemoryEventBus(
                     new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>),
                     applicationId));
-        }
-
-        private static void ConfigureRedisEventStore(IServiceCollection services, IConfigurationSection storeSection)
-        {
-            var storeProvider = storeSection["Provider"] ?? Constants.ProviderRedis;
-            if (storeProvider.Equals(Constants.ProviderRedis, StringComparison.OrdinalIgnoreCase))
-            {
-                var redisConn = storeSection["ConnectionString"];
-                if (string.IsNullOrWhiteSpace(redisConn))
-                    throw new InvalidOperationException("Lycia:EventStore:ConnectionString is required for Redis provider.");
-
-                services.TryAddSingleton<IConnectionMultiplexer>(sp =>
-                {
-                    var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("LyciaRegistration");
-                    try
-                    {
-                        return ConnectionMultiplexer.Connect(redisConn!);
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogError(ex,
-                            "Lycia failed to connect to Redis while initializing the saga store. Check Lycia:EventStore settings.");
-                        throw new InvalidOperationException(
-                            "Lycia was unable to initialize the Redis connection for the saga store. See inner exception for details.",
-                            ex);
-                    }
-                });
-
-                services.TryAddScoped<IDatabase>(sp =>
-                    sp.GetRequiredService<IConnectionMultiplexer>().GetDatabase());
-            }
         }
 
         /// <summary>

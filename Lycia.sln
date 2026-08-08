@@ -125,6 +125,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Persistence.SqlServer
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Persistence.PostgreSql.Tests", "tests\Lycia.Persistence.PostgreSql.Tests\Lycia.Persistence.PostgreSql.Tests.csproj", "{8B674C37-A5E2-448E-830F-634F40A4C39D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Persistence.Redis", "src\Lycia.Persistence.Redis\Lycia.Persistence.Redis.csproj", "{93A7235A-8322-4092-B02C-8F75144FD234}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Persistence.Redis.Tests", "tests\Lycia.Persistence.Redis.Tests\Lycia.Persistence.Redis.Tests.csproj", "{4ECBED45-EB46-4C75-9C06-85775D00DE09}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -747,6 +751,30 @@ Global
 		{8B674C37-A5E2-448E-830F-634F40A4C39D}.Release|x64.Build.0 = Release|Any CPU
 		{8B674C37-A5E2-448E-830F-634F40A4C39D}.Release|x86.ActiveCfg = Release|Any CPU
 		{8B674C37-A5E2-448E-830F-634F40A4C39D}.Release|x86.Build.0 = Release|Any CPU
+		{93A7235A-8322-4092-B02C-8F75144FD234}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{93A7235A-8322-4092-B02C-8F75144FD234}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{93A7235A-8322-4092-B02C-8F75144FD234}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{93A7235A-8322-4092-B02C-8F75144FD234}.Debug|x64.Build.0 = Debug|Any CPU
+		{93A7235A-8322-4092-B02C-8F75144FD234}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{93A7235A-8322-4092-B02C-8F75144FD234}.Debug|x86.Build.0 = Debug|Any CPU
+		{93A7235A-8322-4092-B02C-8F75144FD234}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{93A7235A-8322-4092-B02C-8F75144FD234}.Release|Any CPU.Build.0 = Release|Any CPU
+		{93A7235A-8322-4092-B02C-8F75144FD234}.Release|x64.ActiveCfg = Release|Any CPU
+		{93A7235A-8322-4092-B02C-8F75144FD234}.Release|x64.Build.0 = Release|Any CPU
+		{93A7235A-8322-4092-B02C-8F75144FD234}.Release|x86.ActiveCfg = Release|Any CPU
+		{93A7235A-8322-4092-B02C-8F75144FD234}.Release|x86.Build.0 = Release|Any CPU
+		{4ECBED45-EB46-4C75-9C06-85775D00DE09}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4ECBED45-EB46-4C75-9C06-85775D00DE09}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4ECBED45-EB46-4C75-9C06-85775D00DE09}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{4ECBED45-EB46-4C75-9C06-85775D00DE09}.Debug|x64.Build.0 = Debug|Any CPU
+		{4ECBED45-EB46-4C75-9C06-85775D00DE09}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{4ECBED45-EB46-4C75-9C06-85775D00DE09}.Debug|x86.Build.0 = Debug|Any CPU
+		{4ECBED45-EB46-4C75-9C06-85775D00DE09}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4ECBED45-EB46-4C75-9C06-85775D00DE09}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4ECBED45-EB46-4C75-9C06-85775D00DE09}.Release|x64.ActiveCfg = Release|Any CPU
+		{4ECBED45-EB46-4C75-9C06-85775D00DE09}.Release|x64.Build.0 = Release|Any CPU
+		{4ECBED45-EB46-4C75-9C06-85775D00DE09}.Release|x86.ActiveCfg = Release|Any CPU
+		{4ECBED45-EB46-4C75-9C06-85775D00DE09}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -809,6 +837,8 @@ Global
 		{94315719-35AD-4D69-9B88-04029ED328F0} = {59E39671-6EFC-4EE2-B70F-DF6955451C7C}
 		{1634DD6C-50B8-4FCE-90DA-D49255E420A8} = {39547434-F68A-4275-8482-B1EB3CFC8F02}
 		{8B674C37-A5E2-448E-830F-634F40A4C39D} = {39547434-F68A-4275-8482-B1EB3CFC8F02}
+		{93A7235A-8322-4092-B02C-8F75144FD234} = {59E39671-6EFC-4EE2-B70F-DF6955451C7C}
+		{4ECBED45-EB46-4C75-9C06-85775D00DE09} = {39547434-F68A-4275-8482-B1EB3CFC8F02}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {A79E706E-1C9F-4CF1-A700-5A2D09B33AC6}

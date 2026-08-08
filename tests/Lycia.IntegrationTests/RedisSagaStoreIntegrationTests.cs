@@ -8,7 +8,7 @@ using Lycia.Common.SagaSteps;
 using Lycia.Extensions.Configurations;
 using StackExchange.Redis;
 using Testcontainers.Redis;
-using Lycia.Extensions.Stores;
+using Lycia.Persistence.Redis;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Contexts;
 using Lycia.Saga.Exceptions;
