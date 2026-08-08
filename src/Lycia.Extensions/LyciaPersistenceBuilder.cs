@@ -1,6 +1,7 @@
 // Copyright 2023 Lycia Contributors
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
+using Lycia.Outbox;
 using Lycia.Saga.Abstractions.Inbox;
 using Lycia.Saga.Abstractions.Outbox;
 using Microsoft.Extensions.Configuration;
@@ -120,6 +121,7 @@ public sealed class LyciaPersistenceBuilder
         SelectOutboxProvider(typeof(TOutbox).Name);
         Services.RemoveAll(typeof(IOutboxStore));
         Services.AddSingleton<IOutboxStore, TOutbox>();
+        Services.TryAddScoped<IOutboxDispatcher, OutboxDispatcher>();
         return this;
     }
 }
