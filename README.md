@@ -47,9 +47,9 @@ Lycia is split into focused packages.
 | `Lycia.Extensions.Kafka` | Kafka transport integration |
 | `Lycia.Extensions.OpenTelemetry` | OpenTelemetry tracing and propagation integration |
 | `Lycia.Persistence.InMemory` | In-memory `ISagaStore`/`IInboxStore`/`IOutboxStore` provider. Tests and local development only — not durable production storage |
-| `Lycia.Persistence.Redis` | Redis-backed `ISagaStore` provider with atomic optimistic concurrency |
-| `Lycia.Persistence.SqlServer` | SQL Server-backed `ISagaStore` provider with embedded schema migration |
-| `Lycia.Persistence.PostgreSql` | PostgreSQL-backed `ISagaStore` provider with embedded schema migration |
+| `Lycia.Persistence.Redis` | Redis-backed `ISagaStore`/`IInboxStore`/`IOutboxStore` provider with atomic optimistic concurrency and Lua-script Inbox/Outbox claims |
+| `Lycia.Persistence.SqlServer` | SQL Server-backed `ISagaStore`/`IInboxStore`/`IOutboxStore` provider with embedded schema migration |
+| `Lycia.Persistence.PostgreSql` | PostgreSQL-backed `ISagaStore`/`IInboxStore`/`IOutboxStore` provider with embedded schema migration |
 
 RabbitMQ and scheduling are intentionally separate packages.
 
@@ -836,9 +836,10 @@ Lycia currently provides and prepares for:
 - publisher confirmation integration where supported
 - durable scheduling
 
-The Inbox/Outbox **architectural foundation** exists today (contracts, in-memory implementation, DSL,
-dispatcher integration) — see below. A durable, production-grade Inbox/Outbox (real provider stores
-for Redis/SQL Server/PostgreSQL, a publisher worker, reconciliation) is still future work.
+Durable Inbox/Outbox provider stores exist today for InMemory, Redis, SQL Server, and PostgreSQL,
+plus a pull-based `IOutboxDispatcher` that publishes claimed Outbox messages through `IEventBus` —
+see below. A background hosted-service loop, automatic `Context.Publish()` interception into the
+Outbox, and reconciliation are still future work.
 
 The model distinguishes:
 
@@ -860,20 +861,36 @@ transaction in the future (see `ILyciaPersistenceSession`), but they remain sepa
 the handler-execution level: `IInboxStore.TryBeginAsync(messageId, handlerType)` claims a
 (MessageId, HandlerType) pair before the handler body runs; a redelivered message for the same pair
 returns `AlreadyProcessing`/`AlreadyCompleted`/`AlreadyFailed` instead of re-running the handler.
-This is optional and disabled by default — enable it via `UsePersistence().WithInMemoryInbox()` (or
-a future durable provider's `.With...Inbox()`). It is complementary to, not a replacement for, the
-existing per-step transition/duplicate-payload checks in `ISagaStore.LogStepAsync`.
+This is optional and disabled by default — enable it via `UsePersistence().WithInMemoryInbox()` /
+`.WithRedisInbox()` / `.WithSqlServerInbox()` / `.WithPostgreSqlInbox()`. It is complementary to, not
+a replacement for, the existing per-step transition/duplicate-payload checks in
+`ISagaStore.LogStepAsync`.
 
-**Outbox** durably captures outgoing message intent (`IOutboxStore.AddAsync`) with an explicit
-lifecycle (`Pending` → `Claimed` → `Publishing` → `Published`/`ConfirmationUnknown`/`Failed`) so a
-future publisher worker can dispatch it reliably. Only an in-memory implementation exists today — it
-tracks state for tests and prepares the contract; there is no publisher worker, retry policy, or
-broker-confirmation wiring yet. `Published` must only ever be set after a positive broker
-confirmation once that wiring exists — no component sets it automatically today.
+**Outbox** durably captures outgoing message intent (`IOutboxStore.AddAsync`, idempotent on
+`MessageId`) with an explicit lifecycle (`Pending` → `Claimed` → `Publishing` →
+`Published`/`ConfirmationUnknown`/`Failed`). Durable stores exist for InMemory, Redis, SQL Server,
+and PostgreSQL — enable one via `.WithInMemoryOutbox()` / `.WithRedisOutbox()` /
+`.WithSqlServerOutbox()` / `.WithPostgreSqlOutbox()`. An `IOutboxDispatcher` claims pending messages
+(`ClaimPendingBatchAsync`, safe under concurrent callers — the store guarantees only one worker wins
+each message) and publishes them through the application's `IEventBus`:
+
+```csharp
+var result = await outboxDispatcher.DispatchPendingBatchAsync(maxCount: 50);
+// result.Published / result.ConfirmationUnknown / result.Failed
+```
+
+`Published` reflects only that the `IEventBus.Publish` call completed without throwing — there is no
+broker-level publisher-confirms wiring yet, so this is not a verified broker acknowledgment. Any
+exception during the publish attempt itself is classified `ConfirmationUnknown` (the message may have
+reached the broker before the exception, so Lycia never guesses); only a local failure before
+anything left the process (unresolvable message type, bad payload) is `Failed`. Today the dispatcher
+only redispatches `IEvent`-typed messages via `IEventBus.Publish`; there is no background
+hosted-service loop calling it automatically, and nothing yet intercepts `Context.Publish()`/`Send()`
+to populate the Outbox for you — callers add messages to it explicitly via `IOutboxStore.AddAsync`.
 
 **Lycia provides at-least-once delivery semantics. It does not claim exactly-once processing.**
-Inbox reduces duplicate-processing risk; Outbox will reduce the local-store/broker dual-write window
-once its publisher is built. Neither changes Lycia's fundamental at-least-once delivery guarantee.
+Inbox reduces duplicate-processing risk; Outbox reduces the local-store/broker dual-write window when
+used correctly. Neither changes Lycia's fundamental at-least-once delivery guarantee.
 
 ---
 
@@ -900,7 +917,6 @@ own schema via an embedded migration (`ApplyMigrations` by default).
 
 Not yet built — still future work, not implemented and not to be assumed available:
 
-- durable, production-grade Inbox/Outbox provider stores (Redis/SQL Server/PostgreSQL)
 - strong-consistency relational mode (`WithStrongConsistency()` / `RequireAtomicBoundary()`)
 - split-store Redis + relational mode (`WithSplitStore()`)
 - deterministic replay / Redis rebuild from canonical history
@@ -909,22 +925,36 @@ Not yet built — still future work, not implemented and not to be assumed avail
 
 ### Inbox and Outbox
 
-Implemented today (architectural foundation only):
+Implemented today:
 
 - `IInboxStore` / `IOutboxStore` provider-neutral contracts, in `Lycia.Saga.Abstractions`
 - `InboxMessageStatus`/`InboxBeginResult` and `OutboxMessageStatus`/`OutboxMessage` models
-- `Lycia.Persistence.InMemory`'s `InMemoryInboxStore`/`InMemoryOutboxStore` — deterministic, for tests
-- `UsePersistence().WithInbox<T>()` / `.WithOutbox<T>()` DSL (plus `.WithInMemoryInbox()`/`.WithInMemoryOutbox()` sugar), both optional and disabled by default, each with the same duplicate-provider guard as SagaStore
-- `SagaDispatcher` Inbox integration: claims (MessageId, HandlerType) before invoking a handler and marks it completed/failed afterward, with zero behavior change when no `IInboxStore` is registered
+- Durable Inbox/Outbox stores for **InMemory** (deterministic, tests only), **Redis**
+  (`RedisInboxStore`/`RedisOutboxStore` — atomic claim via `SETNX`/Lua scripts, standalone/non-clustered
+  Redis only; cross-key Lua atomicity is not Cluster-safe without hash tags, which are not used here),
+  **SQL Server** (`LyciaInbox`/`LyciaOutbox` tables, `UPDATE TOP (@n) ... OUTPUT INSERTED.*` for safe
+  concurrent claiming), and **PostgreSQL** (`lycia_inbox`/`lycia_outbox` tables with `jsonb` payload
+  columns, `FOR UPDATE SKIP LOCKED` for safe concurrent claiming)
+- `UsePersistence().WithInbox<T>()` / `.WithOutbox<T>()` generic DSL, plus named sugar per provider —
+  `.WithInMemoryInbox()`/`.WithInMemoryOutbox()`, `.WithRedisInbox()`/`.WithRedisOutbox()`,
+  `.WithSqlServerInbox()`/`.WithSqlServerOutbox()`, `.WithPostgreSqlInbox()`/`.WithPostgreSqlOutbox()` —
+  all optional and disabled by default, each with the same duplicate-provider guard as SagaStore
+- `SagaDispatcher` Inbox integration: claims (MessageId, HandlerType) before invoking a handler and
+  marks it completed/failed afterward, with zero behavior change when no `IInboxStore` is registered
+- `IOutboxDispatcher`/`OutboxDispatcher`: claims a pending batch and publishes each through
+  `IEventBus`, applying the conservative Pending→Claimed→Publishing→Published/ConfirmationUnknown/Failed
+  lifecycle described above. Registered automatically whenever an Outbox provider is selected.
 - `ILyciaPersistenceSession`/`ILyciaPersistenceSessionFactory` — a real relational transaction boundary (`RelationalPersistenceSession`, backed by `Microsoft.Data.SqlClient`/`Npgsql`) registered by the SQL Server/PostgreSQL SagaStore providers, and a `NonAtomicPersistenceSession` default for InMemory/Redis that honestly reports `SupportsAtomicTransactions = false`
 
 Still planned (not implemented):
 
-- durable Inbox/Outbox stores for Redis/SQL Server/PostgreSQL
+- a background hosted-service loop driving `IOutboxDispatcher` automatically
+- `Context.Publish()`/`Send()` interception to populate the Outbox automatically (today callers call `IOutboxStore.AddAsync` themselves)
+- Outbox-backed `Send`/`Respond` routing (the dispatcher only redispatches `IEvent`-typed messages today)
+- real broker publisher-confirmation tracking (today "Published" only means the transport call didn't throw)
 - wiring SagaStore + Inbox + Outbox operations to actually share one `ILyciaPersistenceSession`
 - canonical incoming/outgoing journals
-- Outbox publisher worker, retry policy, and broker publisher-confirmation tracking
-- reconciliation workers
+- reconciliation workers, leases and fencing
 - fail-closed processing guarantees beyond what SagaStore already provides
 - bounded recovery
 - Redis saga-state rebuild from canonical relational history
