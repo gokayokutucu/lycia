@@ -133,24 +133,8 @@ namespace Lycia.Extensions
                     "or override with LyciaBuilder.UseEventBus<T>().");
             });
 
-            // Default SagaStore (Redis). Consumers may override with UseSagaStore<T>().
-            services.TryAddScoped<ISagaStore>(sp =>
-            {
-                var storeOpts = sp.GetRequiredService<IOptions<SagaStoreOptions>>().Value;
-                var eventBus = sp.GetRequiredService<IEventBus>();
-                var idGen = sp.GetRequiredService<ISagaIdGenerator>();
-                var compCoord = sp.GetRequiredService<ISagaCompensationCoordinator>();
-
-                if (!string.Equals(storeOpts.Provider, Constants.ProviderRedis, StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new InvalidOperationException($"Unsupported SagaStore provider '{storeOpts.Provider}'. " +
-                                                        "Override with LyciaBuilder.UseSagaStore<T>() to supply a custom store.");
-                }
-
-                // Expect IDatabase to be registered by the host app (same as before)
-                var redis = sp.GetRequiredService<IDatabase>();
-                return new RedisSagaStore(redis, eventBus, idGen, compCoord, storeOpts);
-            });
+            // Default SagaStore (Redis). Consumers may override with UseSagaStore<T>() or UsePersistence().
+            RegisterRedisSagaStore(services);
 
             RegisterMiddlewareAndPolicies(services);
 
@@ -161,7 +145,7 @@ namespace Lycia.Extensions
         }
         
         /// <summary>
-        /// Adds Lycia and allows inline configuration of LyciaBuilder. 
+        /// Adds Lycia and allows inline configuration of LyciaBuilder.
         /// All Configure* methods are only valid inside this action.
         /// </summary>
         public static LyciaBuilder AddLycia(
@@ -180,6 +164,34 @@ namespace Lycia.Extensions
                 builder.SetInlineConfigure(false);
             }
             return builder;
+        }
+
+        /// <summary>
+        /// Canonical Lycia registration entry point. Configures Lycia with the nested, concern-scoped fluent
+        /// DSL (<see cref="LyciaBuilder.AddSagas()"/>, <see cref="LyciaBuilder.UseTransport"/>,
+        /// <see cref="LyciaBuilder.UsePersistence"/>, <see cref="LyciaBuilder.AddMiddleware"/>, and any
+        /// <c>AddScheduling()</c> contributed by a scheduling package) inside a single callback. The callback
+        /// boundary finalizes the registration, so callers do not call <c>Build()</c> themselves.
+        /// </summary>
+        public static IServiceCollection AddLycia(
+            this IServiceCollection services,
+            IConfiguration configuration,
+            Action<LyciaBuilder> lycia)
+        {
+            if (lycia == null) throw new ArgumentNullException(nameof(lycia));
+
+            var builder = AddLycia(services, configuration);
+            builder.SetInlineConfigure(true);
+            try
+            {
+                lycia.Invoke(builder);
+            }
+            finally
+            {
+                builder.SetInlineConfigure(false);
+            }
+            builder.Build();
+            return services;
         }
 
         private static void RegisterMiddlewareAndPolicies(IServiceCollection services)
@@ -201,6 +213,45 @@ namespace Lycia.Extensions
                 typeof(ActivityTracingMiddleware),
                 typeof(RetryMiddleware)
             });
+        }
+
+        /// <summary>
+        /// Registers the Redis-backed <see cref="ISagaStore"/>. Shared by the default <c>AddLycia</c>
+        /// bootstrap and <see cref="LyciaPersistenceBuilder.WithRedisSagaStore"/> so there is a single
+        /// implementation of Redis saga-store registration.
+        /// </summary>
+        internal static void RegisterRedisSagaStore(IServiceCollection services)
+        {
+            services.TryAddScoped<ISagaStore>(sp =>
+            {
+                var storeOpts = sp.GetRequiredService<IOptions<SagaStoreOptions>>().Value;
+                var eventBus = sp.GetRequiredService<IEventBus>();
+                var idGen = sp.GetRequiredService<ISagaIdGenerator>();
+                var compCoord = sp.GetRequiredService<ISagaCompensationCoordinator>();
+
+                if (!string.Equals(storeOpts.Provider, Constants.ProviderRedis, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException($"Unsupported SagaStore provider '{storeOpts.Provider}'. " +
+                                                        "Override with LyciaBuilder.UseSagaStore<T>() to supply a custom store.");
+                }
+
+                // Expect IDatabase to be registered by the host app (same as before)
+                var redis = sp.GetRequiredService<IDatabase>();
+                return new RedisSagaStore(redis, eventBus, idGen, compCoord, storeOpts);
+            });
+        }
+
+        /// <summary>
+        /// Registers the deterministic in-process <see cref="InMemoryEventBus"/>. Shared by
+        /// <see cref="AddLyciaInMemory"/> and <see cref="LyciaTransportBuilder.InMemory"/>.
+        /// </summary>
+        internal static void RegisterInMemoryEventBus(IServiceCollection services, string? applicationId)
+        {
+            services.RemoveAll(typeof(IEventBus));
+            services.AddScoped<IEventBus>(sp =>
+                new InMemoryEventBus(
+                    new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>),
+                    applicationId));
         }
 
         private static void ConfigureRedisEventStore(IServiceCollection services, IConfigurationSection storeSection)
@@ -282,11 +333,7 @@ namespace Lycia.Extensions
             services.AddSingleton<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
 
             // In-memory transports/stores
-            services.RemoveAll(typeof(IEventBus));
-            services.AddScoped<IEventBus>(sp =>
-                new InMemoryEventBus(
-                    new Lazy<ISagaDispatcher>(sp.GetRequiredService<ISagaDispatcher>),
-                    configuration["ApplicationId"]));
+            RegisterInMemoryEventBus(services, configuration["ApplicationId"]);
 
             services.RemoveAll(typeof(ISagaStore));
             services.AddScoped<ISagaStore, InMemorySagaStore>();
@@ -322,7 +369,33 @@ namespace Lycia.Extensions
             _configuration = configuration;
             _appIdCache = _configuration["ApplicationId"] ?? throw new InvalidOperationException("ApplicationId is not configured.");
         }
-        
+
+        /// <summary>
+        /// The underlying service collection. Exposed so that concern-specific DSL builders
+        /// (<see cref="LyciaTransportBuilder"/>, <see cref="LyciaPersistenceBuilder"/>, and extension
+        /// methods contributed by transport/scheduling/persistence packages) can register services
+        /// without a second configuration store.
+        /// </summary>
+        public IServiceCollection Services => _services;
+
+        /// <summary>The configuration this builder was created from.</summary>
+        public IConfiguration Configuration => _configuration;
+
+        // ---------------------------
+        // Nested concern-specific DSL entry points
+        // ---------------------------
+        /// <summary>Starts the saga-discovery DSL: <c>lycia.AddSagas().FromCurrentAssembly()</c>.</summary>
+        public LyciaSagaBuilder AddSagas() => new(this);
+
+        /// <summary>Starts the transport-selection DSL: <c>lycia.UseTransport().RabbitMq()</c>.</summary>
+        public LyciaTransportBuilder UseTransport() => new(_services, _configuration);
+
+        /// <summary>Starts the persistence DSL: <c>lycia.UsePersistence().WithRedisSagaStore()</c>.</summary>
+        public LyciaPersistenceBuilder UsePersistence() => new(_services, _configuration);
+
+        /// <summary>Starts the middleware DSL: <c>lycia.AddMiddleware().WithLogging().WithRetry().WithTracing()</c>.</summary>
+        public LyciaMiddlewareBuilder AddMiddleware() => new(this, _services);
+
         internal void SetInlineConfigure(bool enabled) => _inlineConfigureGate = enabled;
 
         private void EnsureInlineConfigure(string method)

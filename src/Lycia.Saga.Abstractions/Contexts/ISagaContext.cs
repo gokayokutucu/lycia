@@ -33,7 +33,7 @@ public interface ISagaContext<TInitialMessage> : ISagaContext
 
     Task Compensate<T>(T @event, CancellationToken cancellationToken = default) where T : IFailedEventBase;
 
-    Task MarkAsComplete<TStep>() where TStep : IMessage;
+    Task MarkAsComplete<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage;
     Task MarkAsFailed<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage;
     Task MarkAsFailed<TStep>(Exception? ex, CancellationToken cancellationToken = default) where TStep : IMessage;
     Task MarkAsFailed<TStep>(FailResponse fail, CancellationToken cancellationToken = default) where TStep : IMessage;

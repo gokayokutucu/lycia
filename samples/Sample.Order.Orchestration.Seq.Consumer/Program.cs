@@ -37,59 +37,39 @@ builder.Services
             tp.AddOtlpExporter(options => options.Endpoint = new Uri("http://localhost:4317"));
         });
 
-builder.Services
-    //.AddLycia(builder.Configuration)
-    // .AddLycia(o=>
-    // {
-    //     o.ConfigureRetry(r =>
-    //     {
-    //         r.MaxRetryAttempts = 5;
-    //         r.BackoffType      = DelayBackoffType.Exponential;
-    //         r.Delay            = TimeSpan.FromMilliseconds(500);
-    //         r.MaxDelay         = TimeSpan.FromSeconds(10);
-    //         r.UseJitter        = true;
-    //
-    //         r.ShouldHandle = new PredicateBuilder()
-    //             .Handle<TransientSagaException>()
-    //             .Handle<TimeoutException>();
-    //     });
-    //     o.ConfigureEventBus(b =>
-    //     {
-    //         b.WithOutbox<EfCoreOutboxStore>()
-    //             .WithRetryPolicy<PollyBasedRetry>();
-    //     });
-    // }, builder.Configuration)
-    .AddLycia(o=>
-    {
-        o.ConfigureLogging(l =>
-        {
-            l.MinimumLevel = LogLevel.Debug;
-            l.IncludeMessageHeaders = true;
-            l.IncludeMessagePayload = true;
-            l.PayloadMaxLength = 4096;
-            l.RedactedHeaderKeys = ["Authorization", "X-Api-Key"];
-            l.StartTemplate   = "Handling {MessageType}";
-            l.SuccessTemplate = "Handled {MessageType} successfully";
-            l.ErrorTemplate   = "Failed to handle {MessageType}";
-        });
-        o.UseLoggingMiddleware<SerilogLoggingMiddleware>();
-    }, builder.Configuration)
-    //.UseMessageSerializer<MyCustomSerializer>()
-    // .UseSagaMiddleware(opt =>
-    // {
-    //      opt.AddMiddleware<SerilogLoggingMiddleware>();
-    //     //opt.AddMiddleware<RetryMiddleware>();
-    // })
-    .AddSagasFromCurrentAssembly()
-    .Build();
-
-builder.Services.AddLyciaRabbitMq();
-
-builder.Services.AddLyciaScheduling(options =>
+builder.Services.AddLycia(builder.Configuration, lycia =>
 {
-    options.PreferNativeTransportScheduling = true;
-    options.AllowDynamicDelays = false;
-    options.Vacuum.ApplicationTopology.Mode = Lycia.Scheduling.VacuumMode.ReportOnly;
+    // Retry and event-bus outbox/retry-policy hooks (ConfigureRetry / ConfigureEventBus) remain available
+    // as-is inside this callback; omitted here since this sample doesn't need them.
+    lycia.ConfigureLogging(l =>
+    {
+        l.MinimumLevel = LogLevel.Debug;
+        l.IncludeMessageHeaders = true;
+        l.IncludeMessagePayload = true;
+        l.PayloadMaxLength = 4096;
+        l.RedactedHeaderKeys = ["Authorization", "X-Api-Key"];
+        l.StartTemplate = "Handling {MessageType}";
+        l.SuccessTemplate = "Handled {MessageType} successfully";
+        l.ErrorTemplate = "Failed to handle {MessageType}";
+    });
+
+    lycia
+        .AddSagas()
+            .FromCurrentAssembly();
+
+    lycia
+        .UseTransport()
+            .RabbitMq();
+
+    lycia
+        .AddScheduling()
+            .WithRedisStore()
+            .WithPredefinedDelays()
+            .WithVacuum(v => v.ApplicationTopology.Mode = Lycia.Scheduling.VacuumMode.ReportOnly);
+
+    lycia
+        .AddMiddleware()
+            .WithLogging<SerilogLoggingMiddleware>();
 });
 
 var host = builder.Build();
