@@ -16,9 +16,29 @@ public static class SqlServerSchemaMigrator
         if (options == null) throw new ArgumentNullException(nameof(options));
 
         var schema = options.SchemaName;
+
+        var scripts = new List<RelationalMigrationScript>
+        {
+            new("001_InitialSchema", ReadEmbeddedScript("001_InitialSchema.sql", schema))
+        };
+
+        return RelationalMigrationRunner.RunAsync(
+            () => new SqlConnection(options.ConnectionString),
+            scripts,
+            CreateDialect(schema),
+            options.SchemaManagement,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Builds the migration-tracking dialect shared by every SQL Server schema migrator in this package
+    /// (SagaStore, and separately Inbox/Outbox), so the tracking-table convention stays identical.
+    /// </summary>
+    internal static RelationalMigrationDialect CreateDialect(string schema)
+    {
         var trackingTable = $"{schema}.__LyciaSchemaMigrations";
 
-        var dialect = new RelationalMigrationDialect(
+        return new RelationalMigrationDialect(
             ensureTrackingTableSql:
             $"""
              IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = '{schema}')
@@ -32,21 +52,9 @@ public static class SqlServerSchemaMigrator
              """,
             selectAppliedNamesSql: $"SELECT Name FROM {trackingTable};",
             insertAppliedNameSql: $"INSERT INTO {trackingTable} (Name) VALUES (@name);");
-
-        var scripts = new List<RelationalMigrationScript>
-        {
-            new("001_InitialSchema", ReadEmbeddedScript("001_InitialSchema.sql", schema))
-        };
-
-        return RelationalMigrationRunner.RunAsync(
-            () => new SqlConnection(options.ConnectionString),
-            scripts,
-            dialect,
-            options.SchemaManagement,
-            cancellationToken);
     }
 
-    private static string ReadEmbeddedScript(string fileName, string schemaName)
+    internal static string ReadEmbeddedScript(string fileName, string schemaName)
     {
         var assembly = typeof(SqlServerSchemaMigrator).GetTypeInfo().Assembly;
         var resourceName = assembly.GetManifestResourceNames()
