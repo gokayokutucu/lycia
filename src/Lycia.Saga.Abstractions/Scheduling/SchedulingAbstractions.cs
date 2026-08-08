@@ -1,6 +1,7 @@
 // Copyright 2023 Lycia Contributors
 // Licensed under the Apache License, Version 2.0
 
+using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Messaging;
 
 namespace Lycia.Saga.Abstractions.Scheduling;
@@ -81,6 +82,14 @@ public interface ISchedulingSagaContext
     Task<bool> CancelScheduleAsync(Guid scheduleId, CancellationToken cancellationToken);
     /// <summary>Reschedules a pending context schedule.</summary>
     Task<bool> RescheduleAsync(Guid scheduleId, DateTimeOffset dueAtUtc, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Creates a deferred tracked schedule operation for a predefined delay bucket; the underlying schedule
+    /// call is not made until a terminal method on the returned <see cref="ISagaStepFluent"/> is awaited, at
+    /// which point the terminal method's <see cref="CancellationToken"/> governs the whole operation.
+    /// </summary>
+    ISagaStepFluent ScheduleWithTracking<TMessage>(TMessage message, ScheduleDelay delay,
+        CancellationToken cancellationToken = default) where TMessage : IMessage;
 }
 
 /// <summary>Dispatches a due durable record with its original Send, Publish, or Respond semantic.</summary>
