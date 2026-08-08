@@ -40,9 +40,12 @@ public class SqlServerOutboxStoreConformanceTests(SqlServerContainerFixture fixt
 
         var claimedIds = results.SelectMany(batch => batch.Select(m => m.MessageId)).ToList();
 
-        Assert.Equal(messageCount, claimedIds.Count);
-        Assert.Equal(messageCount, claimedIds.Distinct().Count());
-        Assert.Equal(messageIds.OrderBy(id => id), claimedIds.OrderBy(id => id));
+        // The conformance suite shares one physical table across all test methods in this class
+        // (unlike InMemory's per-test dictionary), so an unrelated Pending row left by another test
+        // can legitimately be swept up here too. What must hold regardless: no message is ever
+        // claimed by both callers, and every message this test inserted was claimed by exactly one.
+        Assert.Equal(claimedIds.Count, claimedIds.Distinct().Count());
+        Assert.True(messageIds.All(id => claimedIds.Contains(id)), "every inserted message must be claimed by exactly one caller");
     }
 
     [Fact]
