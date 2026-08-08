@@ -1,0 +1,49 @@
+// Copyright 2023 Lycia Contributors
+// Licensed under the Apache License, Version 2.0
+// https://www.apache.org/licenses/LICENSE-2.0
+using Lycia.Extensions;
+using Lycia.Saga.Abstractions;
+using Lycia.Saga.Abstractions.Scheduling;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+
+namespace Lycia.Persistence.PostgreSql;
+
+/// <summary>
+/// Contributes the PostgreSQL SagaStore provider to <see cref="LyciaPersistenceBuilder"/>. Lycia.Extensions
+/// defines the builder; this package only adds a provider method to it, so Lycia.Extensions never depends
+/// on Lycia.Persistence.PostgreSql.
+/// </summary>
+public static class PostgreSqlSagaStoreDslExtensions
+{
+    /// <summary>
+    /// Selects PostgreSQL as the SagaStore provider, applies its schema according to
+    /// <see cref="PostgreSqlSagaStoreOptions.SchemaManagement"/>, and registers <see cref="PostgreSqlSagaStore"/>.
+    /// </summary>
+    public static LyciaPersistenceBuilder WithPostgreSqlSagaStore(
+        this LyciaPersistenceBuilder persistence,
+        Action<PostgreSqlSagaStoreOptions>? configure = null)
+    {
+        if (persistence == null) throw new ArgumentNullException(nameof(persistence));
+
+        persistence.SelectProvider("PostgreSql");
+
+        var options = new PostgreSqlSagaStoreOptions();
+        configure?.Invoke(options);
+
+        if (string.IsNullOrWhiteSpace(options.ConnectionString))
+            throw new InvalidOperationException("PostgreSqlSagaStoreOptions.ConnectionString is required.");
+
+        PostgreSqlSchemaMigrator.RunAsync(options).GetAwaiter().GetResult();
+
+        persistence.Services.RemoveAll(typeof(ISagaStore));
+        persistence.Services.AddScoped<ISagaStore>(sp => new PostgreSqlSagaStore(
+            options,
+            sp.GetRequiredService<IEventBus>(),
+            sp.GetRequiredService<ISagaIdGenerator>(),
+            sp.GetRequiredService<ISagaCompensationCoordinator>(),
+            sp.GetService<IMessageScheduler>()));
+
+        return persistence;
+    }
+}
