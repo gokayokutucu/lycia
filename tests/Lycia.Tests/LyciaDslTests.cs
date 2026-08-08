@@ -164,6 +164,21 @@ public class LyciaDslTests
         Assert.DoesNotContain(services, sd => sd.ServiceType == typeof(ISagaMiddleware) && sd.ImplementationType == typeof(LoggingMiddleware));
     }
 
+    // 11: the persistence builder exists as its own concern-specific type (not scattered on the root
+    // LyciaBuilder) and registers the same ISagaStore the default bootstrap already provides, so future
+    // provider packages can extend LyciaPersistenceBuilder without touching LyciaBuilder itself.
+    [Fact]
+    public void UsePersistence_WithRedisSagaStore_Registers_ISagaStore()
+    {
+        var services = new ServiceCollection();
+        var builder = services.AddLycia(Configuration());
+
+        var persistence = builder.UsePersistence().WithRedisSagaStore();
+
+        Assert.IsType<LyciaPersistenceBuilder>(persistence);
+        Assert.Single(services, sd => sd.ServiceType == typeof(ISagaStore));
+    }
+
     // 9: legacy compatibility wrappers still work when kept.
     [Fact]
     public void Legacy_AddLyciaScheduling_And_AddLyciaInMemoryScheduling_Still_Work()

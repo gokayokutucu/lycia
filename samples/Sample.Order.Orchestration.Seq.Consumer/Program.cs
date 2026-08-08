@@ -62,6 +62,10 @@ builder.Services.AddLycia(builder.Configuration, lycia =>
             .RabbitMq();
 
     lycia
+        .UsePersistence()
+            .WithRedisSagaStore();
+
+    lycia
         .AddScheduling()
             .WithRedisStore()
             .WithPredefinedDelays()

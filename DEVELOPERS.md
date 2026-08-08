@@ -394,6 +394,16 @@ services.AddLycia(configuration, lycia =>
             .WithRedisSagaStore();
 
     lycia
+        .AddScheduling()
+            .WithRedisStore()
+            .WithPredefinedDelays()
+            .WithWorker(options =>
+            {
+                options.LeaseDuration = TimeSpan.FromSeconds(30);
+                options.LeaseRenewInterval = TimeSpan.FromSeconds(10);
+            });
+
+    lycia
         .AddMiddleware()
             .WithLogging()
             .WithRetry()
