@@ -24,7 +24,7 @@ public class ShippingSagaHandler :
         }
 
         // Shipping succeeded, complete the saga or trigger next step if needed
-        await Context.MarkAsComplete<PaymentProcessedEvent>();
+        await Context.MarkAsComplete<PaymentProcessedEvent>(cancellationToken);
     }
 
     public override async Task CompensateAsync(PaymentProcessedEvent message, CancellationToken cancellationToken = default)

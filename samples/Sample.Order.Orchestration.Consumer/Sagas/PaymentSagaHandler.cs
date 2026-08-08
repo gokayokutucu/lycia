@@ -33,7 +33,7 @@ public class PaymentSagaHandler :
         {
             OrderId = message.OrderId
         }, cancellationToken);
-        await Context.MarkAsComplete<ProcessPaymentCommand>();
+        await Context.MarkAsComplete<ProcessPaymentCommand>(cancellationToken);
     }
 
     public override Task CompensateAsync(ProcessPaymentCommand message, CancellationToken cancellationToken = default)
