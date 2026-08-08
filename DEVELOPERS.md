@@ -204,12 +204,39 @@ builder.Services.AddOpenTelemetry()
 
 ---
 
-## 🗃 InMemorySagaStore
+## 🗃 SagaStore Providers
 
-A lightweight, non-persistent store ideal for unit tests or in-memory dev scenarios.
+Four `ISagaStore` provider packages exist, each selected explicitly via
+`lycia.UsePersistence().With...SagaStore(...)` — never by a configuration string. Exactly one may be
+selected per application; a second selection throws `InvalidOperationException` at configuration
+time (`LyciaPersistenceBuilder.SelectProvider`).
 
-- **Keying**: Uses a composite key of `SagaId`, `MessageId`, and `HandlerType`. All step metadata is stored in memory dictionaries.
-- **Idempotency**: Prevents the same message/step from being reprocessed by enforcing uniqueness on keys.
+- **`Lycia.Persistence.InMemory`** (`InMemorySagaStore`, in the `Lycia` core package) — a
+  lightweight, non-persistent store for unit tests and local development. Uses a composite key of
+  `SagaId`, `MessageId`, and `HandlerType`; all step metadata is stored in memory dictionaries.
+  Not durable production storage.
+- **`Lycia.Persistence.Redis`** (`RedisSagaStore`) — the production Redis-backed store, moved out of
+  `Lycia.Extensions` into its own package so `Lycia.Extensions` never depends on a concrete
+  persistence provider.
+- **`Lycia.Persistence.SqlServer`** / **`Lycia.Persistence.PostgreSql`** — relational stores with an
+  embedded schema migration (`dbo.LyciaSagaData`/`dbo.LyciaSagaSteps`, or `lycia_saga_data`/
+  `lycia_saga_steps` for PostgreSQL), explicit `BIGINT`/`bigint` version columns, and
+  transactional, parameterized ADO.NET access (no `MERGE`, no opaque `rowversion`/`xmin` as the
+  public version).
+
+All four implement `IVersionedSagaStore` for explicit numeric optimistic concurrency:
+
+```csharp
+long newVersion = await versionedStore.SaveSagaDataAsync(sagaId, data, expectedVersion: currentVersion);
+```
+
+A mismatched `expectedVersion` throws `SagaConcurrencyException` (`Lycia.Saga.Exceptions`) instead of
+silently overwriting a concurrent writer's update. Redis implements this as a single atomic Lua
+`EVAL` (compare-and-set); SQL Server/PostgreSQL implement it as
+`UPDATE ... SET Version = Version + 1 WHERE SagaId = @id AND Version = @expected` plus a rows-affected
+check. All four providers run the same shared `Lycia.Persistence.TestKit` conformance suite
+(`tests/Lycia.Persistence.TestKit`), so step-transition validation, idempotency, and concurrency
+semantics are identical across providers.
 
 
 ## 🧪 Integration Tests
@@ -228,11 +255,9 @@ A lightweight, non-persistent store ideal for unit tests or in-memory dev scenar
   "ApplicationId": "SampleOrderApi",
   "Lycia": {
     "EventBus": {
-      "Provider": "RabbitMQ",
       "ConnectionString": "amqp://guest:guest@127.0.0.1:5672/"
     },
     "EventStore": {
-      "Provider": "Redis",
       "ConnectionString": "127.0.0.1:6379",
       "LogMaxRetryCount": 5
     },
@@ -242,6 +267,19 @@ A lightweight, non-persistent store ideal for unit tests or in-memory dev scenar
     "CommonTTL": 3600
   }
 }
+```
+
+Configuration only ever supplies values (connection strings, retry counts, TTLs). It never selects a
+transport or SagaStore provider by itself — the `EventBus`/`EventStore` sections above are bound into
+`EventBusOptions`/`SagaStoreOptions`, but the actual provider is chosen explicitly in code:
+
+```csharp
+services.AddLycia(configuration, lycia =>
+{
+    lycia.UseTransport().RabbitMq();
+    lycia.UsePersistence().WithRedisSagaStore(options =>
+        configuration.GetSection("Lycia:EventStore").Bind(options));
+});
 ```
 
 ---
@@ -418,12 +456,14 @@ Each nested builder is a small concern-specific type (`LyciaSagaBuilder`, `Lycia
 `Lycia.Extensions.Scheduling`), so IntelliSense after `UseTransport()` only shows the transport
 providers actually referenced (`RabbitMq()`, `Nats()`, `Kafka()`, `InMemory()`), not every Lycia
 method. `Lycia.Extensions` itself only defines `LyciaTransportBuilder`/`LyciaPersistenceBuilder`
-and the `InMemory()` provider — transport, scheduling, and (in the future) persistence-provider
-packages extend those builder types with their own extension methods, so `Lycia.Extensions` never
-takes a compile-time dependency on `Lycia.Extensions.RabbitMq`, `.Nats`, `.Kafka`, or
-`.Scheduling`. Selecting two different transport providers on one registration
-(`UseTransport().RabbitMq()` then `UseTransport().Nats()`) throws `InvalidOperationException`
-naming both providers, instead of the second call silently winning.
+(plus the transport-side `InMemory()` provider and each builder's duplicate-provider guard) —
+transport, scheduling, and persistence-provider packages (`Lycia.Persistence.InMemory`, `.Redis`,
+`.SqlServer`, `.PostgreSql`) extend those builder types with their own extension methods, so
+`Lycia.Extensions` never takes a compile-time dependency on `Lycia.Extensions.RabbitMq`, `.Nats`,
+`.Kafka`, `.Scheduling`, or any concrete persistence-provider package. Selecting two different
+transport providers on one registration (`UseTransport().RabbitMq()` then `UseTransport().Nats()`)
+throws `InvalidOperationException` naming both providers, instead of the second call silently
+winning — `UsePersistence()` enforces the same rule for SagaStore providers.
 
 - Builder APIs (`LyciaBuilder`, still available directly for callers that don't use the nested
   form): `UseMessageSerializer<T>()`, `UseEventBus<T>()`, `UseSagaStore<T>()`,

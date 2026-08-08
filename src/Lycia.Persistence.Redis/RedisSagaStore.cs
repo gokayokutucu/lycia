@@ -1,4 +1,4 @@
-﻿// Copyright 2023 Lycia Contributors
+// Copyright 2023 Lycia Contributors
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 using Newtonsoft.Json;
@@ -6,8 +6,8 @@ using Lycia.Common.Enums;
 using Lycia.Common.Helpers;
 using Lycia.Common.SagaSteps;
 using StackExchange.Redis;
+using Lycia.Extensions;
 using Lycia.Extensions.Configurations;
-using Lycia.Extensions.Helpers;
 using Lycia.Helpers;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Contexts;
@@ -17,7 +17,7 @@ using Lycia.Saga.Exceptions;
 using Lycia.Saga.Helpers;
 using Lycia.Saga.Abstractions.Scheduling;
 
-namespace Lycia.Extensions.Stores;
+namespace Lycia.Persistence.Redis;
 
 /// <summary>
 /// Redis-backed implementation of ISagaStore for distributed environments.
@@ -29,12 +29,32 @@ public class RedisSagaStore(
     ISagaCompensationCoordinator sagaCompensationCoordinator,
     SagaStoreOptions? options,
     IMessageScheduler? messageScheduler = null)
-    : ISagaStore, ISagaStoreHealthCheck
+    : ISagaStore, ISagaStoreHealthCheck, IVersionedSagaStore
 {
     private readonly SagaStoreOptions _options = options ?? new SagaStoreOptions();
 
     private static string SagaDataKey(Guid sagaId) => $"saga:data:{sagaId}";
     private static string StepLogKey(Guid sagaId) => $"saga:steps:{sagaId}";
+
+    // Atomically saves the saga-data blob only if the currently stored Version equals expectedVersion.
+    // Returns the new version on success, or -1 (with the actual stored version) on mismatch.
+    private static readonly string AtomicSaveWithVersionScript = @"
+local current = redis.call('get', KEYS[1])
+local currentVersion = 0
+if current then
+  local ok, decoded = pcall(cjson.decode, current)
+  if ok and decoded and decoded.Version then
+    currentVersion = decoded.Version
+  end
+end
+if currentVersion ~= tonumber(ARGV[1]) then
+  return {-1, currentVersion}
+end
+redis.call('set', KEYS[1], ARGV[2])
+if ARGV[3] ~= '' then
+  redis.call('expire', KEYS[1], ARGV[3])
+end
+return {1, tonumber(ARGV[1]) + 1}";
 
     /// <inheritdoc />
     public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
@@ -233,7 +253,7 @@ public class RedisSagaStore(
                 var key = (string)entry.Name!;
                 var (stepTypeName, _, _) = SagaStoreLogicHelper.ParseStepKey(key);
                 if (stepTypeName != stepType.GetSimplifiedQualifiedName()) continue;
-                
+
                 var meta = JsonConvert.DeserializeObject<SagaStepMetadata>(entry.Value!)!;
                 var payloadType = Type.GetType(meta.MessageTypeName);
                 if (payloadType == null) continue;
@@ -262,7 +282,7 @@ public class RedisSagaStore(
                 var key = (string)entry.Name!;
                 var (_, _, msgId) = SagaStoreLogicHelper.ParseStepKey(key);
                 if (msgId != messageId.ToString()) continue;
-                
+
                 var meta = JsonConvert.DeserializeObject<SagaStepMetadata>(entry.Value!)!;
                 var payloadType = Type.GetType(meta.MessageTypeName);
                 if (payloadType == null) continue;
@@ -298,6 +318,42 @@ public class RedisSagaStore(
         data.SagaId = sagaId;
         // Set the saga data in Redis, applying TTL/expiration if configured in options
         await redisDb.StringSetAsync(SagaDataKey(sagaId), JsonHelper.SerializeSafe(data), _options.StepLogTtl);
+    }
+
+    /// <inheritdoc />
+    public async Task<long> SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData data, long expectedVersion)
+        where TSagaData : SagaData
+    {
+        data.SagaId = sagaId;
+        data.Version = expectedVersion + 1;
+        var newDataJson = JsonHelper.SerializeSafe(data);
+        var ttlSeconds = _options.StepLogTtl.HasValue
+            ? ((long)_options.StepLogTtl.Value.TotalSeconds).ToString()
+            : "";
+
+        var result = (RedisResult[])(await redisDb.ScriptEvaluateAsync(
+            AtomicSaveWithVersionScript,
+            [SagaDataKey(sagaId)],
+            [expectedVersion, newDataJson, ttlSeconds]))!;
+
+        var success = (long)result[0] == 1;
+        var versionOrActual = (long)result[1];
+
+        if (!success)
+            throw new SagaConcurrencyException(sagaId, expectedVersion, versionOrActual);
+
+        return versionOrActual;
+    }
+
+    /// <inheritdoc />
+    public async Task<(TSagaData Data, long Version)> LoadSagaDataWithVersionAsync<TSagaData>(Guid sagaId)
+        where TSagaData : SagaData, new()
+    {
+        var dataJson = await redisDb.StringGetAsync(SagaDataKey(sagaId));
+        if (!dataJson.HasValue) return (new TSagaData(), 0);
+
+        var data = JsonConvert.DeserializeObject<TSagaData>(dataJson!)!;
+        return (data, data.Version);
     }
 
     /// <inheritdoc />

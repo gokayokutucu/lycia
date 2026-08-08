@@ -32,6 +32,7 @@
       <ProjectReference Include="..\..\src\Lycia.Extensions.Scheduling\Lycia.Extensions.Scheduling.csproj" />
       <ProjectReference Include="..\..\src\Lycia.Extensions.Nats\Lycia.Extensions.Nats.csproj" />
       <ProjectReference Include="..\..\src\Lycia.Extensions.Kafka\Lycia.Extensions.Kafka.csproj" />
+      <ProjectReference Include="..\..\src\Lycia.Persistence.Redis\Lycia.Persistence.Redis.csproj" />
 
       <ProjectReference Include="..\Lycia.Tests.Helpers\Lycia.Tests.Helpers.csproj" />
     </ItemGroup>

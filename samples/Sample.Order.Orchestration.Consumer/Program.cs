@@ -4,6 +4,7 @@
 using Lycia.Extensions.Logging;
 using Lycia.Extensions;
 using Lycia.Extensions.RabbitMq;
+using Lycia.Persistence.Redis;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -16,6 +17,10 @@ builder.Services.AddLycia(builder.Configuration, lycia =>
     lycia
         .UseTransport()
             .RabbitMq();
+
+    lycia
+        .UsePersistence()
+            .WithRedisSagaStore();
 
     lycia
         .AddMiddleware()

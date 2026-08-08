@@ -10,7 +10,7 @@ using StackExchange.Redis;
 using Lycia.Extensions.Configurations;
 using Lycia.Extensions.Eventing;
 using Lycia.Extensions.Serialization;
-using Lycia.Extensions.Stores;
+using Lycia.Persistence.Redis;
 using Lycia.Helpers;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Handlers;

@@ -40,16 +40,24 @@ Lycia is split into focused packages.
 | Package | Purpose |
 | --- | --- |
 | `Lycia` | Core saga abstractions, handlers, dispatching, compensation and saga context |
-| `Lycia.Extensions` | Transport-independent registration, configuration, middleware, serialization, logging, retry and the current Redis SagaStore integration |
+| `Lycia.Extensions` | Transport- and persistence-independent registration, configuration, middleware, serialization, logging, retry |
 | `Lycia.Extensions.RabbitMq` | RabbitMQ EventBus, topology, queues, exchanges, bindings, DLQ behavior and RabbitMQ TTL/DLX scheduling strategy |
 | `Lycia.Extensions.Scheduling` | Durable transport-independent scheduling, scheduler workers, Redis schedule storage, manifests, leases and vacuum workers |
 | `Lycia.Extensions.Nats` | NATS Core and JetStream transport integration |
 | `Lycia.Extensions.Kafka` | Kafka transport integration |
 | `Lycia.Extensions.OpenTelemetry` | OpenTelemetry tracing and propagation integration |
+| `Lycia.Persistence.InMemory` | In-memory `ISagaStore` provider. Tests and local development only — not durable production storage |
+| `Lycia.Persistence.Redis` | Redis-backed `ISagaStore` provider with atomic optimistic concurrency |
+| `Lycia.Persistence.SqlServer` | SQL Server-backed `ISagaStore` provider with embedded schema migration |
+| `Lycia.Persistence.PostgreSql` | PostgreSQL-backed `ISagaStore` provider with embedded schema migration |
 
 RabbitMQ and scheduling are intentionally separate packages.
 
 `Lycia.Extensions.Scheduling` does not depend on RabbitMQ. Transport-specific scheduling strategies remain inside their transport packages.
+
+`Lycia.Extensions` does not depend on any concrete persistence-provider package. Each
+`Lycia.Persistence.*` package contributes its own `With...SagaStore()` method to the shared
+`LyciaPersistenceBuilder` DSL type, the same way transport packages extend `LyciaTransportBuilder`.
 
 ---
 
@@ -66,6 +74,13 @@ Install one transport package:
 
 ```bash
 dotnet add package Lycia.Extensions.RabbitMq
+```
+
+Install exactly one SagaStore persistence provider:
+
+```bash
+dotnet add package Lycia.Persistence.Redis
+# or: Lycia.Persistence.InMemory / Lycia.Persistence.SqlServer / Lycia.Persistence.PostgreSql
 ```
 
 Optional packages:
@@ -99,16 +114,33 @@ services.AddLycia(configuration, lycia =>
     lycia
         .UseTransport()
             .RabbitMq();
+
+    lycia
+        .UsePersistence()
+            .WithRedisSagaStore(options =>
+            {
+                options.ConnectionString = configuration.GetConnectionString("Redis");
+            });
 });
 ```
 
 The DSL is nested by concern but stays fluent: `AddSagas()` starts saga discovery,
-`UseTransport()` selects a transport provider, `UsePersistence()` selects saga-store/persistence
-providers, `AddScheduling()` (from `Lycia.Extensions.Scheduling`) configures durable scheduling,
-and `AddMiddleware()` configures the logging/retry/tracing pipeline. Transport registration is
-explicit — `AddLycia` does not pick a transport for you, and selecting two different transport
-providers on the same registration (for example `UseTransport().RabbitMq()` followed by
-`UseTransport().Nats()`) fails clearly instead of silently letting the second call win.
+`UseTransport()` selects a transport provider, `UsePersistence()` selects the SagaStore provider,
+`AddScheduling()` (from `Lycia.Extensions.Scheduling`) configures durable scheduling, and
+`AddMiddleware()` configures the logging/retry/tracing pipeline. Transport and persistence
+registration are both explicit — `AddLycia` does not pick a transport or a SagaStore for you.
+Selecting two different transport providers on the same registration (for example
+`UseTransport().RabbitMq()` followed by `UseTransport().Nats()`) fails clearly instead of silently
+letting the second call win, and the same guard applies to `UsePersistence()`:
+`.WithRedisSagaStore(...)` followed by `.WithPostgreSqlSagaStore(...)` throws
+`"Multiple SagaStore providers were configured..."` rather than silently keeping the last one.
+Exactly one SagaStore provider is required; if none is selected, resolving `ISagaStore` throws a
+clear configuration error naming the missing provider packages, instead of silently falling back
+to an in-memory store.
+
+Provider selection is always an explicit method call — never a configuration string. Configuration
+(`IConfiguration`/`IOptions`) may still supply provider *values* such as connection strings, schema
+names, timeouts, and credentials, as shown above.
 
 `Lycia.Extensions` never depends on a transport, scheduling, or persistence-provider package.
 Each package contributes its own methods to the shared `LyciaTransportBuilder` /
@@ -739,10 +771,12 @@ Applications and extension packages may provide custom implementations of:
 
 Transport-specific behavior remains outside the core package.
 
-`lycia.UsePersistence().WithRedisSagaStore()` exposes today's persistence provider (Redis) through
-the same nested DSL; future provider packages (PostgreSQL Inbox/Outbox, split-store, ...) extend
-`LyciaPersistenceBuilder` with their own `With...()` methods the same way transport packages extend
-`LyciaTransportBuilder` — no such providers exist yet.
+`lycia.UsePersistence()` exposes the SagaStore providers through the same nested DSL —
+`WithInMemorySagaStore()`, `WithRedisSagaStore(...)`, `WithSqlServerSagaStore(...)`, and
+`WithPostgreSqlSagaStore(...)` — each contributed by its own package. `Lycia.Extensions` itself only
+defines `LyciaPersistenceBuilder` and its duplicate-provider guard; it never depends on a concrete
+provider package. Future work (Inbox, Outbox, split-store, strong-consistency atomic boundaries) will
+extend `LyciaPersistenceBuilder` the same way, without changing this dependency direction.
 
 ---
 
@@ -811,23 +845,29 @@ Current architectural priorities include:
 
 ### Persistence Providers
 
-Planned provider packages:
+Implemented today (SagaStore only):
 
 - `Lycia.Persistence.InMemory`
 - `Lycia.Persistence.Redis`
 - `Lycia.Persistence.SqlServer`
 - `Lycia.Persistence.PostgreSql`
 
-The target architecture includes:
+All four implement `ISagaStore` against one shared conformance test suite and provide explicit
+numeric optimistic concurrency (`IVersionedSagaStore`) — `SaveSagaDataAsync(id, data, expectedVersion)`
+throws `SagaConcurrencyException` when the stored version has moved on, the same relational
+`UPDATE ... WHERE Version = @expected` pattern for SQL Server/PostgreSQL and an atomic Lua
+compare-and-set for Redis. Exactly one SagaStore provider may be selected per application;
+selecting a second throws immediately at configuration time. SQL Server and PostgreSQL manage their
+own schema via an embedded migration (`ApplyMigrations` by default).
 
-- mandatory explicit SagaStore selection
-- optional Inbox and Outbox
-- strong-consistency relational mode
-- split-store Redis mode
-- optimistic concurrency
-- provider capabilities
-- health diagnostics
-- schema migration support
+Not yet built — still future work, not implemented and not to be assumed available:
+
+- optional Inbox and Outbox providers
+- strong-consistency relational mode (`WithStrongConsistency()` / `RequireAtomicBoundary()`)
+- split-store Redis + relational mode (`WithSplitStore()`)
+- deterministic replay / Redis rebuild from canonical history
+- reconciliation workers, leases and fencing
+- provider capability reporting and persistence health checks beyond `ISagaStoreHealthCheck`
 
 ### Inbox and Outbox
 

@@ -1,0 +1,96 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFrameworks>netstandard2.0;net8.0;net9.0</TargetFrameworks>
+        <LangVersion>preview</LangVersion>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <RepositoryUrl>https://github.com/gokayokutucu/lycia</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+
+        <!-- Prevent writing project references as dependencies in nuspec -->
+        <SuppressProjectReferenceDependenciesWhenPacking>true</SuppressProjectReferenceDependenciesWhenPacking>
+
+        <!-- During pack, we will use package references for Lycia and Lycia.Extensions -->
+        <UsePackageRefForLyciaOnPack>false</UsePackageRefForLyciaOnPack>
+
+        <!-- For XMLs (optional) -->
+        <AllowedOutputExtensionsInPackageBuildOutputFolder>
+            $(AllowedOutputExtensionsInPackageBuildOutputFolder);.xml
+        </AllowedOutputExtensionsInPackageBuildOutputFolder>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <Authors>M. Gokay Okutucu</Authors>
+        <Description>Lycia.Persistence.Redis provides the Redis-backed SagaStore for the Lycia Saga framework:
+            - RedisSagaStore implementing ISagaStore (step log, saga data) and IVersionedSagaStore (optimistic concurrency)
+            - Atomic Redis Lua-script based CAS for saga step transitions and versioned saga-data writes
+            - Redis connection registration driven by explicit DSL configuration (WithRedisSagaStore)
+        </Description>
+        <Copyright>Copyright (c) 2025 M. Gokay Okutucu</Copyright>
+        <PackageProjectUrl>https://github.com/gokayokutucu/lycia</PackageProjectUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <PackageTags>saga distributed-transaction redis persistence saga-store optimistic-concurrency microservices event-driven</PackageTags>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Remove="README.md" />
+        <None Include="README.md" Pack="true" PackagePath="/" />
+    </ItemGroup>
+
+    <!-- Local development: project-to-project -->
+    <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' != 'true'">
+        <ProjectReference Include="..\Lycia\Lycia.csproj" PrivateAssets="All" />
+        <ProjectReference Include="..\Lycia.Saga\Lycia.Saga.csproj" PrivateAssets="All" />
+        <ProjectReference Include="..\Lycia.Saga.Abstractions\Lycia.Saga.Abstractions.csproj" PrivateAssets="All" />
+        <ProjectReference Include="..\Lycia.Common\Lycia.Common.csproj" PrivateAssets="All" />
+        <ProjectReference Include="..\Lycia.Extensions\Lycia.Extensions.csproj" PrivateAssets="All" />
+    </ItemGroup>
+
+    <!-- Pack/CI: depend only on Lycia and Lycia.Extensions packages -->
+    <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' == 'true'">
+        <PackageReference Include="Lycia" Version="[$(LyciaPackageVersion)]" />
+        <PackageReference Include="Lycia.Extensions" Version="[$(LyciaPackageVersion)]" />
+        <ProjectReference Remove="..\Lycia\Lycia.csproj" />
+        <ProjectReference Remove="..\Lycia.Saga\Lycia.Saga.csproj" />
+        <ProjectReference Remove="..\Lycia.Saga.Abstractions\Lycia.Saga.Abstractions.csproj" />
+        <ProjectReference Remove="..\Lycia.Common\Lycia.Common.csproj" />
+        <ProjectReference Remove="..\Lycia.Extensions\Lycia.Extensions.csproj" />
+    </ItemGroup>
+
+    <Target Name="ValidateLyciaPackageVersion" BeforeTargets="CollectPackageReferences"
+            Condition="'$(UsePackageRefForLyciaOnPack)' == 'true' and '$(LyciaPackageVersion)' == ''">
+        <Error Text="LyciaPackageVersion must be the exact version produced for Lycia when pack mode is enabled." />
+    </Target>
+
+    <!-- Common packages for all target frameworks -->
+    <ItemGroup>
+        <PackageReference Include="Nerdbank.GitVersioning" Version="3.*" PrivateAssets="all" />
+        <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+        <PackageReference Include="StackExchange.Redis" Version="2.8.37" />
+    </ItemGroup>
+
+    <!-- netstandard2.0 specific packages -->
+    <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="6.0.0" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="6.0.0" />
+        <PackageReference Include="Microsoft.Extensions.Options" Version="6.0.0" />
+    </ItemGroup>
+
+    <!-- net8.0 specific packages -->
+    <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0" />
+        <PackageReference Include="Microsoft.Extensions.Options" Version="8.0.0" />
+    </ItemGroup>
+
+    <!-- net9.0 specific packages -->
+    <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.9" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.9" />
+        <PackageReference Include="Microsoft.Extensions.Options" Version="9.0.9" />
+    </ItemGroup>
+
+</Project>

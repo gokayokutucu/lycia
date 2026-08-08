@@ -4,7 +4,7 @@
 using Lycia.Common.Enums;
 using Lycia.Common.SagaSteps;
 using Lycia.Extensions.Configurations;
-using Lycia.Extensions.Stores;
+using Lycia.Persistence.Redis;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Exceptions;
 using Lycia.Stores;

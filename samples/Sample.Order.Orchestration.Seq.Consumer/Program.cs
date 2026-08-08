@@ -7,6 +7,7 @@ using Lycia.Extensions.RabbitMq;
 using Lycia.Extensions.Logging;
 using Lycia.Extensions.OpenTelemetry;
 using Lycia.Extensions.Scheduling;
+using Lycia.Persistence.Redis;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Serilog;

@@ -26,10 +26,14 @@ public class InMemorySagaStore(
     IEventBus eventBus,
     ISagaIdGenerator sagaIdGenerator,
     ISagaCompensationCoordinator compensationCoordinator,
-    IMessageScheduler? messageScheduler = null) : ISagaStore
+    IMessageScheduler? messageScheduler = null) : ISagaStore, IVersionedSagaStore
 {
     // Stores saga data per sagaId
     private readonly ConcurrentDictionary<Guid, object> _sagaData = new();
+
+    // Tracks the explicit optimistic-concurrency version per sagaId, independent of _sagaData's object identity.
+    private readonly ConcurrentDictionary<Guid, long> _sagaVersions = new();
+    private readonly object _versionLock = new();
 
     // Stores step logs per sagaId with a composite key "stepTypeName_handlerTypeFullName"
     private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<string, SagaStepMetadata>> _stepLogs = new();
@@ -290,5 +294,40 @@ public class InMemorySagaStore(
         );
 
         return Task.FromResult(context);
+    }
+
+    /// <inheritdoc />
+    public Task<long> SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData data, long expectedVersion)
+        where TSagaData : SagaData
+    {
+        if (data is null) throw new ArgumentNullException(nameof(data));
+
+        lock (_versionLock)
+        {
+            if (!_sagaVersions.TryGetValue(sagaId, out var currentVersion)) currentVersion = 0L;
+            if (currentVersion != expectedVersion)
+                throw new SagaConcurrencyException(sagaId, expectedVersion, currentVersion);
+
+            var newVersion = currentVersion + 1;
+            data.SagaId = sagaId;
+            data.Version = newVersion;
+            _sagaData[sagaId] = data;
+            _sagaVersions[sagaId] = newVersion;
+            return Task.FromResult(newVersion);
+        }
+    }
+
+    /// <inheritdoc />
+    public Task<(TSagaData Data, long Version)> LoadSagaDataWithVersionAsync<TSagaData>(Guid sagaId)
+        where TSagaData : SagaData, new()
+    {
+        lock (_versionLock)
+        {
+            if (!_sagaVersions.TryGetValue(sagaId, out var version)) version = 0L;
+            if (_sagaData.TryGetValue(sagaId, out var data))
+                return Task.FromResult(((TSagaData)data, version));
+
+            return Task.FromResult((new TSagaData(), 0L));
+        }
     }
 }

@@ -6,6 +6,7 @@ using Lycia.Extensions.Nats;
 using Lycia.Extensions.RabbitMq;
 using Lycia.Extensions.Scheduling;
 using Lycia.Middleware;
+using Lycia.Persistence.Redis;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Contexts;
 using Lycia.Saga.Abstractions.Middlewares;

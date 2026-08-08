@@ -30,6 +30,7 @@
       <ProjectReference Include="..\..\src\Lycia.Extensions.RabbitMq\Lycia.Extensions.RabbitMq.csproj" />
       <ProjectReference Include="..\..\src\Lycia.Extensions.Scheduling\Lycia.Extensions.Scheduling.csproj" />
       <ProjectReference Include="..\..\src\Lycia.Extensions.Nats\Lycia.Extensions.Nats.csproj" />
+      <ProjectReference Include="..\..\src\Lycia.Persistence.Redis\Lycia.Persistence.Redis.csproj" />
       <ProjectReference Include="..\Lycia.Tests.Helpers\Lycia.Tests.Helpers.csproj" />
       <ProjectReference Include="..\Lycia.Tests\Lycia.Tests.csproj" />
     </ItemGroup>
