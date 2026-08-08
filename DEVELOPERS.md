@@ -239,9 +239,10 @@ check. All four providers run the same shared `Lycia.Persistence.TestKit` confor
 semantics are identical across providers.
 
 
-## 📥📤 Inbox / Outbox Foundation
+## 📥📤 Inbox / Outbox
 
-Architectural foundation only — see the Roadmap section of README.md for what's still planned.
+Durable providers exist for InMemory, Redis, SQL Server, and PostgreSQL — see the Roadmap section of
+README.md for what's still planned beyond this.
 
 - **`IInboxStore`** (`Lycia.Saga.Abstractions.Inbox`) — tracks committed processing identity of
   incoming messages, keyed by `(MessageId, HandlerType)`. Distinct from `ISagaStore`'s per-step
@@ -254,18 +255,63 @@ Architectural foundation only — see the Roadmap section of README.md for what'
   — when nothing is registered, dispatch behaves exactly as it did before Inbox existed.
 - **`IOutboxStore`** (`Lycia.Saga.Abstractions.Outbox`) — durably captures outgoing message intent
   (`AddAsync`, idempotent on `MessageId`) with an explicit lifecycle
-  (`Pending → Claimed → Publishing → Published/ConfirmationUnknown/Failed`) for a future publisher
-  worker. No publisher, retry policy, or broker-confirmation wiring exists yet — this phase only
-  provides the durable-capture contract and status bookkeeping.
-- **`Lycia.Persistence.InMemory`** implements both (`InMemoryInboxStore`, `InMemoryOutboxStore`) —
-  deterministic, in-memory, for tests/local development only.
-- **DSL**: `UsePersistence().WithInbox<T>()` / `.WithOutbox<T>()` are generic escape hatches on
-  `LyciaPersistenceBuilder` (same shape as `LyciaBuilder.UseSagaStore<T>()`), each with its own
-  duplicate-provider guard (`SelectInboxProvider`/`SelectOutboxProvider`, mirroring
-  `SelectProvider`'s marker-in-`IServiceCollection` pattern). `Lycia.Persistence.InMemory` adds sugar:
-  `.WithInMemoryInbox()`/`.WithInMemoryOutbox()`. Both remain optional and disabled by default; no
-  `.WithPostgreSqlInbox()`/`.WithSqlServerOutbox()`/etc. exist yet because no such implementation
-  exists yet — the DSL only exposes what's actually built.
+  (`Pending → Claimed → Publishing → Published/ConfirmationUnknown/Failed`), plus `ClaimPendingBatchAsync`
+  for a publisher to atomically take ownership of a batch without another worker claiming the same rows.
+
+### Durable providers
+
+- **`Lycia.Persistence.InMemory`**: `InMemoryInboxStore`/`InMemoryOutboxStore` — deterministic,
+  in-memory, tests/local development only.
+- **`Lycia.Persistence.Redis`**: `RedisInboxStore` claims via an atomic `SETNX` on a per
+  `(HandlerType, MessageId)` key; `RedisOutboxStore` uses Lua scripts for idempotent `AddAsync`
+  (`SETNX` + pending-set add in one `EVAL`) and atomic `ClaimPendingBatchAsync` (pop-from-sorted-set +
+  status update in one `EVAL`, so concurrent claimers can never race). Targets standalone/non-clustered
+  Redis — the Lua scripts touch multiple keys (`outbox:msg:{id}`, `outbox:pending`) that are not
+  guaranteed to hash to the same slot in a real Redis Cluster without hash-tag key naming, which is
+  not implemented here.
+- **`Lycia.Persistence.SqlServer`**: `LyciaInbox`/`LyciaOutbox` tables (`002_InboxOutboxSchema.sql`,
+  applied only when Inbox/Outbox is actually enabled, not by `WithSqlServerSagaStore` alone).
+  `SqlServerInboxStore.TryBeginAsync` reuses `SqlServerSagaStore`'s insert-then-catch-unique-violation
+  idiom. `SqlServerOutboxStore.ClaimPendingBatchAsync` uses
+  `UPDATE TOP (@n) ... OUTPUT INSERTED.* WHERE Status = Pending`, safe under concurrent callers via
+  SQL Server's normal row locking during the `UPDATE`.
+- **`Lycia.Persistence.PostgreSql`**: `lycia_inbox`/`lycia_outbox` tables with `jsonb` payload/failure
+  columns (`002_InboxOutboxSchema.sql`, same enable-only-when-used rule).
+  `PostgreSqlOutboxStore.ClaimPendingBatchAsync` uses the classic
+  `SELECT ... FOR UPDATE SKIP LOCKED` pattern so two concurrent claimers never select the same row.
+
+### DSL
+
+`UsePersistence().WithInbox<T>()` / `.WithOutbox<T>()` are generic escape hatches on
+`LyciaPersistenceBuilder` (same shape as `LyciaBuilder.UseSagaStore<T>()`), each with its own
+duplicate-provider guard (`SelectInboxProvider`/`SelectOutboxProvider`, mirroring `SelectProvider`'s
+marker-in-`IServiceCollection` pattern). Provider packages add named sugar instead of calling the
+generic method directly, mirroring their SagaStore DSL exactly: `.WithInMemoryInbox()`/`.WithInMemoryOutbox()`,
+`.WithRedisInbox()`/`.WithRedisOutbox()`, `.WithSqlServerInbox()`/`.WithSqlServerOutbox()`,
+`.WithPostgreSqlInbox()`/`.WithPostgreSqlOutbox()`. Both remain optional and disabled by default.
+
+### Outbox dispatcher
+
+`IOutboxDispatcher`/`OutboxDispatcher` (project `Lycia`, namespace `Lycia.Outbox`) claims a pending
+batch and publishes each message through `IEventBus.Publish<TEvent>` (resolved via reflection since
+the message type is only known at runtime from `OutboxMessage.MessageTypeName`). Registered
+automatically (`TryAddScoped`) whenever any `.With...Outbox()` is called. Status classification on
+publish:
+- no exception → `Published` (the transport call completed; this is **not** a verified broker
+  acknowledgment — there is no publisher-confirms wiring yet)
+- exception during the publish call → `ConfirmationUnknown` (the message may have reached the broker
+  before the exception; Lycia never guesses either way)
+- exception before anything left the process (unresolvable `MessageTypeName`, bad payload, or the
+  resolved type isn't an `IEvent`) → `Failed`
+
+Remaining integration boundary, explicitly not done: no background hosted-service loop invokes
+`IOutboxDispatcher` automatically (callers/a future worker call `DispatchPendingBatchAsync` directly);
+nothing intercepts `Context.Publish()`/`Send()` to populate the Outbox automatically — callers call
+`IOutboxStore.AddAsync` themselves; only `IEvent`-typed messages can be redispatched (Send/Respond
+routing through the Outbox is not implemented).
+
+### Persistence session
+
 - **`ILyciaPersistenceSession`/`ILyciaPersistenceSessionFactory`** (`Lycia.Saga.Abstractions.Persistence`)
   — a provider-neutral transaction boundary, prepared for a future atomic Saga+Inbox+Outbox commit.
   `RelationalPersistenceSession`/`RelationalPersistenceSessionFactory`
@@ -324,9 +370,10 @@ services.AddLycia(configuration, lycia =>
 
 ## 🔮 Roadmap
 
-- Inbox/Outbox architectural foundation done (contracts, in-memory implementation, DSL, dispatcher
-  integration); durable provider stores, a publisher worker, and atomic Saga+Inbox+Outbox
-  transactions via `ILyciaPersistenceSession` remain to be built
+- Inbox/Outbox durable providers done for InMemory/Redis/SQL Server/PostgreSQL, plus a pull-based
+  `IOutboxDispatcher`; a background hosted-service loop, `Context.Publish()` interception, real
+  broker publisher-confirms, and atomic Saga+Inbox+Outbox transactions via `ILyciaPersistenceSession`
+  remain to be built
 - Add support for Avro / Protobuf with Schema Registry (including the built‑in `AvroSchemaConverter`)
 - Finalize `IRetryPolicy` (done) and extend `Lycia.Scheduling` module for delayed retries
 - Improve distributed tracing and observability
