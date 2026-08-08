@@ -24,12 +24,13 @@ public class InventorySagaHandler :
         }
         
         // Inventory reserved; demonstrate durable, transport-independent deferred command delivery.
-        await Context.Schedule(new ProcessPaymentCommand
-        {
-            OrderId = message.OrderId,
-            ParentMessageId = message.MessageId
-        }, ScheduleDelay.FiveSeconds, cancellationToken);
-        await Context.MarkAsComplete<ReserveInventoryCommand>(cancellationToken);
+        await Context
+            .ScheduleWithTracking(new ProcessPaymentCommand
+            {
+                OrderId = message.OrderId,
+                ParentMessageId = message.MessageId
+            }, ScheduleDelay.FiveSeconds)
+            .ThenMarkAsComplete<ReserveInventoryCommand>(cancellationToken);
     }
 
     public override async Task CompensateAsync(ReserveInventoryCommand message, CancellationToken cancellationToken = default)
