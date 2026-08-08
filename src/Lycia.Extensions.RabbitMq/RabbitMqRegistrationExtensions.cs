@@ -21,7 +21,15 @@ public static class RabbitMqRegistrationExtensions
     /// Registers the RabbitMQ event bus and background listener. Call after <c>AddLycia(...)</c>;
     /// connection settings are read from <c>Lycia:EventBus</c> (<see cref="EventBusOptions"/>).
     /// </summary>
+    [Obsolete("Use AddLycia(configuration, lycia => lycia.UseTransport().RabbitMq()) instead.")]
     public static IServiceCollection AddLyciaRabbitMq(this IServiceCollection services)
+    {
+        RegisterRabbitMq(services);
+        return services;
+    }
+
+    /// <summary>Shared registration logic used by both the obsolete direct API and the transport DSL.</summary>
+    internal static void RegisterRabbitMq(IServiceCollection services)
     {
         if (services == null) throw new ArgumentNullException(nameof(services));
 
@@ -72,6 +80,5 @@ public static class RabbitMqRegistrationExtensions
             return listener;
         });
 #endif
-        return services;
     }
 }

@@ -2,43 +2,45 @@
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 
-
-using Lycia.Saga.Abstractions.Handlers;
 using Lycia.Saga.Messaging.Handlers;
 using Sample.Shared.Messages.Events;
 using Sample.Shared.Services;
 
 namespace Sample.Order.Choreography.Consumer.Sagas;
 
-public class ShippingSagaHandler :
-    ReactiveSagaHandler<PaymentSucceededEvent>,
-    ISagaCompensationHandler<OrderShippingFailedEvent>
+public sealed class ShippingSagaHandler :
+    ReactiveSagaHandler<PaymentSucceededEvent>
 {
-    public override async Task HandleAsync(PaymentSucceededEvent evt, CancellationToken cancellationToken = default)
+    protected override bool EnforceIdempotency => true;
+
+    public override async Task HandleAsync(
+        PaymentSucceededEvent message,
+        CancellationToken cancellationToken = default)
     {
-        // Try to ship
-        var shipped = ShippingService.TryShip(evt.OrderId, !SampleScenario.FailShipping);
+        var shipped = ShippingService.TryShip(message.OrderId);
+
         if (!shipped)
         {
-            // Broadcast failure so *interested* parties can react
-            await Context.Publish(new OrderShippingFailedEvent
-            {
-                OrderId = evt.OrderId
-            }, cancellationToken);
-            await Context.MarkAsFailed<PaymentSucceededEvent>(cancellationToken);
+            await Context.Publish(
+                new OrderShippingFailedEvent
+                {
+                    OrderId = message.OrderId
+                },
+                cancellationToken);
+
+            await Context.MarkAsFailed<PaymentSucceededEvent>(
+                cancellationToken);
+
             return;
         }
 
-        await Context.Publish(new OrderShippedEvent
-        {
-            OrderId = evt.OrderId
-        }, cancellationToken);
-        await Context.MarkAsComplete<PaymentSucceededEvent>();
-    }
+        await Context.Publish(
+            new OrderShippedEvent
+            {
+                OrderId = message.OrderId
+            },
+            cancellationToken);
 
-    public Task CompensateAsync(OrderShippingFailedEvent failed, CancellationToken cancellationToken = default)
-    {
-        // Undo or no-op (often nothing to undo if shipping didn’t happen)
-        return Task.CompletedTask;
+        await Context.MarkAsComplete<PaymentSucceededEvent>(cancellationToken);
     }
 }

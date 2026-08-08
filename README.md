@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/transparent_logo.png" alt="Lycia Logo" width="220">
+</p>
+
 # Lycia
 
 [![NuGet](https://img.shields.io/nuget/v/Lycia.svg)](https://www.nuget.org/packages/Lycia)
@@ -7,82 +11,250 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![GitHub release](https://img.shields.io/github/v/release/gokayokutucu/lycia)](https://github.com/gokayokutucu/lycia/releases)
 
-**Lycia** is the **main package** of the Lycia framework.  
-It provides the saga infrastructure, orchestration, and choreography support.  
-Extensions are published separately under `Lycia.Extensions.*`:
+**Lycia** is a message-driven saga framework for .NET applications.
 
-| Package | Contents |
+It provides:
+
+- coordinated sagas for orchestration
+- reactive sagas for choreography
+- durable saga state and compensation tracking
+- strongly typed command ownership
+- asynchronous targeted responses
+- configurable middleware
+- transport-independent scheduling
+- RabbitMQ, NATS and Kafka integrations
+- OpenTelemetry tracing hooks
+
+Lycia is designed for distributed systems where workflows span multiple services, messages may be delivered more than once, replicas process work concurrently and failures can occur between individual steps.
+
+The framework follows **at-least-once delivery semantics**. It does not claim exactly-once application processing. Handlers and external side effects must remain idempotent.
+
+For implementation details, compensation behavior, transport topology and integration-test strategies, see [DEVELOPERS.md](DEVELOPERS.md).
+
+---
+
+## Packages
+
+Lycia is split into focused packages.
+
+| Package | Purpose |
 | --- | --- |
-| `Lycia.Extensions` | Transport-independent registration, middleware, logging, retry, Redis saga store |
-| `Lycia.Extensions.RabbitMq` | RabbitMQ transport, topology, DLQ, native TTL+DLX scheduling strategy |
-| `Lycia.Extensions.Scheduling` | Durable transport-independent scheduling (SchedulerWorker, Redis store, vacuum) |
-| `Lycia.Extensions.Nats` | NATS JetStream / Core NATS transport |
-| `Lycia.Extensions.Kafka` | Kafka transport |
-| `Lycia.Extensions.OpenTelemetry` | Tracing integration |
+| `Lycia` | Core saga abstractions, handlers, dispatching, compensation and saga context |
+| `Lycia.Extensions` | Transport-independent registration, configuration, middleware, serialization, logging, retry and the current Redis SagaStore integration |
+| `Lycia.Extensions.RabbitMq` | RabbitMQ EventBus, topology, queues, exchanges, bindings, DLQ behavior and RabbitMQ TTL/DLX scheduling strategy |
+| `Lycia.Extensions.Scheduling` | Durable transport-independent scheduling, scheduler workers, Redis schedule storage, manifests, leases and vacuum workers |
+| `Lycia.Extensions.Nats` | NATS Core and JetStream transport integration |
+| `Lycia.Extensions.Kafka` | Kafka transport integration |
+| `Lycia.Extensions.OpenTelemetry` | OpenTelemetry tracing and propagation integration |
 
-**Lycia** began with a vision on *May 28, 2023*.  
-Our motto: *“Turning difficult paths into joyful simplicity.”* Inspired by the ancient *Lycian Way*, we set out to build a framework that makes complex saga workflows easy to manage — supported by strong documentation and aligned with modern software practices.
+RabbitMQ and scheduling are intentionally separate packages.
 
-Lycia is a messaging framework (Message-oriented Middleware, MoM) built for .NET applications, supporting .NET Standard 2.0 and higher. It provides a robust foundation for distributed systems where reliable message flow and state coordination are essential.
-
-For architectural deep-dive, compensation coordination, and integration test strategies, see [DEVELOPERS.md](DEVELOPERS.md).
- 
----
-
-## Getting Started / Samples
-
-Explore the [samples/](samples) folder for real-world usage:  
-- **Sample.Order.Api** – API entrypoint  
-- **Sample.Order.Orchestration.Consumer** – Coordinated Responsive Saga (asynchronous request–response orchestration using `CoordinatedResponsiveSagaHandler`)  
-- **Sample.Order.Choreography.Consumer** – Reactive Saga (stateless event-driven choreography using `ReactiveSagaHandler`)  
-- **Sample.Order.Orchestration.Seq.Consumer** – Coordinated Saga (stateful sequential orchestration using `CoordinatedSagaHandler`, with compensation flows)  
+`Lycia.Extensions.Scheduling` does not depend on RabbitMQ. Transport-specific scheduling strategies remain inside their transport packages.
 
 ---
 
-## Our Mission
+## Installation
 
-- **Simplicity**: Define complex orchestration flows with ease.  
-- **Flexibility**: Support both orchestration (which we call *Coordinated Saga*) and choreography (our term: *Reactive Saga*) patterns.  
-- **Portability**: Work out of the box with popular infrastructures like RabbitMQ and Redis.  
-- **Robust Documentation**: Step-by-step guides, code samples, and best practices to lead the way.
+Install the core and shared extensions packages:
 
----
-
-## What Makes Lycia Different
-
-Unlike other frameworks, Lycia offers:
-
-- **Minimal Setup** – Start with a single line:
-
-```csharp
-services.AddLycia(Configuration)
-        .AddSagasFromCurrentAssembly()
-        .Build();
-
-services.AddLyciaRabbitMq(); // transport package, e.g. Lycia.Extensions.RabbitMq
+```bash
+dotnet add package Lycia
+dotnet add package Lycia.Extensions
 ```
 
-- **Clear Naming and Semantics**:  
-  - *Coordinated Saga* → central orchestrator-based saga management  
-  - *Reactive Saga* → event-driven choreography approach  
+Install one transport package:
 
-- Built-in support for **idempotency**, **timeouts**, and **in-process retries with Polly, Ack/Nack + DLQ support on RabbitMQ**  
-- **Default Middleware Pipeline (Logging + Tracing + Retry, replaceable via UseSagaMiddleware)**  
-- **Extensibility**: Easily plug in custom implementations of `IMessageSerializer`, `IEventBus`, or `ISagaStore`.
+```bash
+dotnet add package Lycia.Extensions.RabbitMq
+```
+
+Optional packages:
+
+```bash
+dotnet add package Lycia.Extensions.Scheduling
+dotnet add package Lycia.Extensions.OpenTelemetry
+```
+
+NATS and Kafka transports are available separately:
+
+```bash
+dotnet add package Lycia.Extensions.Nats
+dotnet add package Lycia.Extensions.Kafka
+```
+
+---
+
+## Minimal Setup
+
+Register Lycia, discover saga handlers and select a transport with the nested fluent DSL. The
+callback boundary itself finalizes registration, so there is no separate `.Build()` call:
+
+```csharp
+services.AddLycia(configuration, lycia =>
+{
+    lycia
+        .AddSagas()
+            .FromCurrentAssembly();
+
+    lycia
+        .UseTransport()
+            .RabbitMq();
+});
+```
+
+The DSL is nested by concern but stays fluent: `AddSagas()` starts saga discovery,
+`UseTransport()` selects a transport provider, `UsePersistence()` selects saga-store/persistence
+providers, `AddScheduling()` (from `Lycia.Extensions.Scheduling`) configures durable scheduling,
+and `AddMiddleware()` configures the logging/retry/tracing pipeline. Transport registration is
+explicit — `AddLycia` does not pick a transport for you, and selecting two different transport
+providers on the same registration (for example `UseTransport().RabbitMq()` followed by
+`UseTransport().Nats()`) fails clearly instead of silently letting the second call win.
+
+`Lycia.Extensions` never depends on a transport, scheduling, or persistence-provider package.
+Each package contributes its own methods to the shared `LyciaTransportBuilder` /
+`LyciaPersistenceBuilder` / `LyciaBuilder` DSL types instead (for example
+`Lycia.Extensions.RabbitMq` adds `.RabbitMq()` to `UseTransport()`), so IntelliSense stays scoped
+to what is actually installed.
+
+<details>
+<summary>Migrating from the older direct APIs</summary>
+
+The previous flat form still compiles and is now a thin, `[Obsolete]`-marked wrapper around the
+same registration logic:
+
+```csharp
+services
+    .AddLycia(configuration)
+    .AddSagasFromCurrentAssembly()
+    .Build();
+
+services.AddLyciaRabbitMq();
+```
+
+`AddLyciaRabbitMq()`, `AddLyciaNats(...)`, `AddLyciaKafka(...)`, `AddLyciaScheduling(...)`, and
+`AddLyciaInMemoryScheduling(...)` continue to work unchanged; each obsolete warning names its DSL
+replacement.
+
+</details>
+
+---
+
+## Saga Models
+
+Lycia supports two saga models.
+
+### Coordinated Saga
+
+A coordinated saga uses a central orchestrator and durable `TSagaData`.
+
+Use it when:
+
+- workflow order must be explicit
+- responses determine subsequent commands
+- compensation must follow a controlled path
+- workflow state must survive process restarts
+- multiple replicas may continue the same saga
+
+### Reactive Saga
+
+A reactive saga implements choreography.
+
+Each handler reacts independently to an event without a central orchestrator or cross-step `TSagaData`.
+
+Use it when:
+
+- services should remain autonomous
+- multiple independent subscribers react to the same fact
+- no central component should own the complete workflow
+- eventual consistency is acceptable
+
+---
+
+## Coordinated Saga Example
+
+```csharp
+public sealed class CreateInvoiceSagaHandler
+    : StartCoordinatedSagaHandler<CreateInvoiceCommand, CreateInvoiceSagaData>
+{
+    public override async Task HandleAsync(
+        CreateInvoiceCommand command,
+        CancellationToken cancellationToken = default)
+    {
+        await Context.Send(
+            new ReserveCreditCommand
+            {
+                InvoiceId = command.InvoiceId
+            },
+            cancellationToken);
+
+        await Context.MarkAsComplete<CreateInvoiceCommand>(
+            cancellationToken);
+    }
+}
+```
+
+Coordinated sagas persist state between message deliveries. The next step may execute on another process, container or Kubernetes replica.
+
+---
+
+## Reactive Saga Example
+
+```csharp
+public sealed class InventorySagaHandler
+    : ReactiveSagaHandler<OrderCreatedEvent>,
+      ISagaCompensationHandler<PaymentFailedEvent>
+{
+    public override async Task HandleAsync(
+        OrderCreatedEvent message,
+        CancellationToken cancellationToken = default)
+    {
+        await Context.Publish(
+            new InventoryReservedEvent
+            {
+                OrderId = message.OrderId
+            },
+            cancellationToken);
+
+        await Context.MarkAsComplete<OrderCreatedEvent>(
+            cancellationToken);
+    }
+
+    public Task CompensateAsync(
+        PaymentFailedEvent message,
+        CancellationToken cancellationToken = default)
+    {
+        InventoryService.ReleaseStock(message.OrderId);
+        return Task.CompletedTask;
+    }
+}
+```
+
+Reactive sagas are stateless at the Lycia saga-data level. Each event is processed independently.
+
+---
 
 ## Strongly Typed Command Ownership
 
-Commands declare their one logical owner in the contract. No destination string or handler name is
-passed to `Send`:
+Commands declare one logical owner through an endpoint marker.
+
+No queue name, destination string or handler class name is passed to `Send`.
 
 ```csharp
-public interface IStockServiceCommand : ICommandEndpoint { }
+public interface IStockServiceCommand : ICommandEndpoint
+{
+}
 
-public sealed class ReserveStockCommand : CommandBase, IStockServiceCommand
+public sealed class ReserveStockCommand
+    : CommandBase,
+      IStockServiceCommand
 {
     public Guid OrderId { get; init; }
 }
+```
 
+The command handler belongs to the application that owns the endpoint:
+
+```csharp
 public sealed class ReserveStockHandler
     : CoordinatedSagaHandler<ReserveStockCommand, StockSagaData>
 {
@@ -90,293 +262,627 @@ public sealed class ReserveStockHandler
         ReserveStockCommand command,
         CancellationToken cancellationToken = default)
     {
-        // The handler contains business logic only; transport routing stays unchanged.
-        return Context.MarkAsComplete<ReserveStockCommand>(cancellationToken);
+        return Context.MarkAsComplete<ReserveStockCommand>(
+            cancellationToken);
     }
 }
-
-await sagaContext.Send(new ReserveStockCommand { OrderId = orderId }, cancellationToken);
 ```
 
-`IStockServiceCommand` deterministically resolves to the owner `StockService`. The owning host must use
-`ApplicationId = StockService` (comparison is ordinal and case-insensitive). Startup fails when a command
-has no owner marker, more than one owner marker, a handler in the wrong application, or more than one
-handler type in that application.
+Send the command without transport-specific routing information:
 
-The generated topology is transport-specific but semantically equivalent:
-
-| Kind | RabbitMQ | NATS | Kafka |
-|---|---|---|---|
-| Command | direct `command.ReserveStockCommand`, queue `command.ReserveStockCommand.StockService`, key `StockService` | subject `command.StockService.ReserveStockCommand`, one durable consumer | topic `lycia.command.StockService.ReserveStockCommand`, one owner consumer group |
-| Event | fanout `event.StockReservedEvent`, one queue per handler/application | subject `event.StockReservedEvent`, one durable consumer per subscription | topic `lycia.event.StockReservedEvent`, one group per subscription |
-| Response | direct requester key and shared requester queue | `response.{Requester}.{Type}` | `lycia.response.{Requester}.{Type}` |
-
-Responses carry `RequestId` and canonical `ResponseEndpoint` (`ReplyTo` remains an obsolete alias);
-`CorrelationId` and `SagaId` correlate workflow state inside
-the requester’s shared response queue. Lycia never creates a queue or topic per saga instance.
-
-### Replicas are competing consumers
-
-A replica is another running copy of the same logical application: another Kubernetes pod, Docker
-container, process, or host. Every replica of a service must use the same `ApplicationId`:
-
-```text
-Correct:
-StockService replica 1 -> ApplicationId = StockService
-StockService replica 2 -> ApplicationId = StockService
-StockService replica 3 -> ApplicationId = StockService
-
-Incorrect:
-StockService replica 1 -> ApplicationId = StockService-1
-StockService replica 2 -> ApplicationId = StockService-2
-StockService replica 3 -> ApplicationId = StockService-3
+```csharp
+await Context.Send(
+    new ReserveStockCommand
+    {
+        OrderId = orderId
+    },
+    cancellationToken);
 ```
 
-Correctly configured replicas share one queue, durable consumer, or consumer group, and compete for
-work. Under normal broker operation one delivery is handled by one replica. The incorrect form creates
-independent logical consumers and can create extra queues or duplicate event processing.
+`IStockServiceCommand` resolves deterministically to the logical owner `StockService`.
 
-The invariant is **one handler type, many runtime handler instances**. One command owner and one command
-handler keep bounded-context ownership clear, prevent accidental command broadcasts, and keep command
-addresses stable when implementation classes are renamed. Commands are intentions; publish an event when
-multiple independent components must react to a fact.
+The owning host must use an equivalent canonical `ApplicationId`.
 
-RabbitMQ, JetStream, and Kafka use at-least-once delivery patterns in failure scenarios. Lycia does not
-claim exactly-once application processing; handlers must remain idempotent. Kafka ordering is scoped to a
-partition, and replicas beyond the partition count cannot consume concurrently.
+Startup validation rejects:
 
-Transport packages are `Lycia.Extensions.RabbitMq`, `Lycia.Extensions.Nats`, and
-`Lycia.Extensions.Kafka`; each registers itself after `AddLycia(...)` (`AddLyciaRabbitMq()`,
-`AddLyciaNats(...)`, `AddLyciaKafka(...)`). JetStream is the durable NATS default; Core NATS is an
-explicit ephemeral mode.
+- commands without an owner endpoint
+- commands with multiple owner endpoints
+- handlers registered in the wrong logical application
+- multiple handler types claiming the same owned command in one application
+
+Commands represent intentions and have one logical owner. Events represent facts and may have multiple subscribers.
 
 ---
 
-## Durable message scheduling
+## Canonical Application Identity
 
-Reference `Lycia.Extensions.Scheduling`, register Redis-backed scheduling once, and schedule commands,
-events, or targeted responses from any saga context:
+Application identities are normalized using invariant lowercase rules.
+
+The following values are equivalent:
+
+```text
+StockService
+stock-service
+stock_service
+STOCK.SERVICE
+stock service
+```
+
+They normalize to:
+
+```text
+stockservice
+```
+
+Dashes, underscores, dots and whitespace are ignored. Values must contain at least one alphanumeric character.
+
+Every replica of the same logical application must use the same `ApplicationId`.
+
+```text
+Correct:
+
+StockService replica 1 -> StockService
+StockService replica 2 -> StockService
+StockService replica 3 -> StockService
+```
+
+Do not encode replica identity into `ApplicationId`:
+
+```text
+Incorrect:
+
+StockService-1
+StockService-2
+StockService-3
+```
+
+Correctly configured replicas share the same queue, durable consumer or consumer group and compete for work.
+
+The invariant is:
+
+> One logical handler type, many runtime handler instances.
+
+---
+
+## Transport Semantics
+
+Lycia exposes the same messaging semantics across transports while allowing each transport package to implement its native topology.
+
+| Message kind | RabbitMQ | NATS | Kafka |
+| --- | --- | --- | --- |
+| Command | Direct exchange and one logical owner queue | Owner subject and one durable consumer | Owner topic and one consumer group |
+| Event | Fan-out to one queue per subscription | One durable consumer per subscription | One consumer group per subscription |
+| Response | Targeted requester queue | Targeted response subject | Targeted response topic/group |
+
+Example command topology:
+
+| Transport | Address |
+| --- | --- |
+| RabbitMQ | Exchange `command.ReserveStockCommand`, queue `command.ReserveStockCommand.StockService`, routing key `StockService` |
+| NATS | Subject `command.StockService.ReserveStockCommand` |
+| Kafka | Topic `lycia.command.StockService.ReserveStockCommand` |
+
+Lycia does not create one queue, subject, topic or consumer group per saga instance.
+
+---
+
+## Asynchronous Targeted Responses
+
+Lycia does not use synchronous RPC-style waiting for saga steps.
+
+Responses are asynchronous messages targeted to the logical application that is waiting for them.
 
 ```csharp
-services.AddLyciaScheduling(options =>
-{
-    options.AllowDynamicDelays = false;
-    options.Worker.LeaseDuration = TimeSpan.FromSeconds(30);
-    options.Worker.LeaseRenewInterval = TimeSpan.FromSeconds(10);
-    options.Vacuum.ApplicationTopology.Mode = VacuumMode.ReportOnly;
-});
+await Context.Respond(
+    request,
+    new InventoryReservedResponse
+    {
+        OrderId = request.OrderId
+    },
+    cancellationToken);
+```
 
+A response:
+
+- has its own `MessageId`
+- preserves the workflow `CorrelationId`
+- preserves the durable `SagaId`
+- uses `RequestId` to identify the request it answers
+- uses `ResponseEndpoint` to route back to the requester
+- may be consumed by any replica of the requester application
+
+Responses must be sent with `Respond`.
+
+Publishing an `IResponse` through `Context.Publish` fails explicitly because responses are targeted continuations, not broadcast facts.
+
+`ReplyTo` remains an obsolete compatibility alias for `ResponseEndpoint`.
+
+---
+
+## Message Identity
+
+Lycia separates concrete message identity, request-response identity, workflow correlation and compensation lineage.
+
+| Field | Meaning |
+| --- | --- |
+| `MessageId` | Unique identity and idempotency key of the concrete message |
+| `RequestId` | Identifies the request answered by a response |
+| `CorrelationId` | Groups the complete business workflow |
+| `CausationId` | Identifies the direct message that caused this message |
+| `ParentMessageId` | Defines saga-step and compensation lineage |
+| `SagaId` | Identifies the durable saga instance |
+| `ResponseEndpoint` | Identifies the logical requester application |
+
+Example:
+
+```text
+CreateOrderCommand
+MessageId        = M1
+RequestId        = M1
+CorrelationId    = C1
+CausationId      = null
+ParentMessageId  = empty
+SagaId           = S1
+```
+
+```text
+OrderCreatedResponse
+MessageId        = M2
+RequestId        = M1
+CorrelationId    = C1
+CausationId      = M1
+ParentMessageId  = M1
+SagaId           = S1
+```
+
+```text
+ReserveInventoryCommand
+MessageId        = M3
+RequestId        = M3
+CorrelationId    = C1
+CausationId      = M2
+ParentMessageId  = M2
+SagaId           = S1
+```
+
+Compensation traverses `ParentMessageId`.
+
+`CausationId` is used for direct causal tracing and does not replace the compensation lineage.
+
+---
+
+## Replica-Safe Continuation
+
+A saga step does not depend on the process that sent the preceding message remaining alive.
+
+```text
+Replica A
+  -> sends ReserveInventoryCommand
+  -> process stops
+
+Replica B
+  -> receives InventoryReservedResponse
+  -> loads SagaId from the SagaStore
+  -> continues the workflow
+```
+
+This is one of the central differences between Lycia’s asynchronous response model and process-local request-response implementations that keep pending requests in memory.
+
+---
+
+## RabbitMQ
+
+Install:
+
+```bash
+dotnet add package Lycia.Extensions.RabbitMq
+```
+
+Register:
+
+```csharp
+services.AddLycia(configuration, lycia =>
+{
+    lycia
+        .AddSagas()
+            .FromCurrentAssembly();
+
+    lycia
+        .UseTransport()
+            .RabbitMq(); // or .RabbitMq(options => { ... }) for code-first overrides
+});
+```
+
+The RabbitMQ package owns:
+
+- `RabbitMqEventBus`
+- queue and exchange declaration
+- command/event/response routing
+- dead-letter behavior
+- RabbitMQ message-header normalization
+- RabbitMQ scheduling topology
+- fixed TTL and DLX scheduling buckets
+
+### Consumer readiness
+
+RabbitMQ consumers expose an explicit readiness signal once their mapped queues, bindings and consumers have been registered.
+
+This avoids startup and integration-test races where a message could be published before its binding exists.
+
+Consumer readiness is a lifecycle signal. Applications should not wait for it before every individual publish.
+
+---
+
+## Durable Message Scheduling
+
+Install:
+
+```bash
+dotnet add package Lycia.Extensions.Scheduling
+```
+
+Register Redis-backed scheduling as part of the same `AddLycia` DSL:
+
+```csharp
+lycia
+    .AddScheduling()
+        .WithRedisStore()
+        .WithPredefinedDelays()
+        .WithWorker(options =>
+        {
+            options.LeaseDuration = TimeSpan.FromSeconds(30);
+            options.LeaseRenewInterval = TimeSpan.FromSeconds(10);
+        })
+        .WithVacuum(options =>
+        {
+            options.ApplicationTopology.Mode = VacuumMode.ReportOnly;
+        });
+```
+
+`WithPredefinedDelays()` sets `AllowDynamicDelays = false`; use `WithDynamicDelays()` for
+`AllowDynamicDelays = true`. Both are semantic aliases over the same `SchedulingOptions` property —
+nothing was removed, so code that still sets `options.AllowDynamicDelays` directly keeps working.
+
+Schedule a message:
+
+```csharp
 var scheduleId = await Context.Schedule(
-    new CancelOrderCommand { OrderId = orderId },
+    new CancelOrderCommand
+    {
+        OrderId = orderId
+    },
     ScheduleDelay.ThirtySeconds,
     cancellationToken);
 ```
 
-`ScheduleId` identifies the scheduling operation and is deliberately different from `MessageId`. Pass a stable
-`ScheduleId` when retrying schedule creation. `ScheduleAt` accepts an absolute UTC instant; enum months are fixed
-30-day durations and `OneYear` is 365 days, so calendar-aware rules should calculate an instant and use `ScheduleAt`.
-Pending schedules can be cancelled idempotently or rescheduled before dispatch.
+`ScheduleId` identifies the scheduling operation and is intentionally different from `MessageId`.
 
-RabbitMQ predefined buckets use one fixed-TTL queue per destination and bucket, then dead-letter to the final
-exchange without a plugin. Arbitrary RabbitMQ buckets are opt-in because they create dynamic queues. Kafka always
-uses the durable `SchedulerWorker`; Kafka retention is not delayed delivery. The validated NATS 2.11 baseline also
-falls back to `SchedulerWorker`, and `NativeOnly` fails at startup. Dispatch is at least once around crash windows,
-so handlers must be idempotent.
+Pass a stable `ScheduleId` when retrying schedule creation.
 
-Dynamic resource cleanup requires exact registry provenance, retention, no active manifest or schedule, an empty and
-unused broker resource, a fenced lease, and conditional deletion. Predefined buckets are retained. Ordinary topology
-defaults to `ReportOnly`, requires quarantine, and needs a second destructive opt-in. Scheduling exposes the
-`Lycia.Scheduling` activity source and meter plus the `LyciaScheduling` health check.
+Pending schedules may be cancelled or rescheduled idempotently before dispatch.
+
+### Fixed and dynamic delays
+
+Predefined RabbitMQ delay buckets use one fixed-TTL queue per destination and delay bucket, then dead-letter the message to its final destination.
+
+This does not require the `x-delayed-message` plugin.
+
+Dynamic RabbitMQ delay buckets are opt-in because arbitrary durations may create additional queues.
+
+Kafka uses the durable `SchedulerWorker`; Kafka retention is not treated as delayed delivery.
+
+The current validated NATS baseline also uses `SchedulerWorker` for durable scheduling.
+
+### Scheduling reliability
+
+Scheduling dispatch follows at-least-once semantics around crash and confirmation windows.
+
+Consumers must remain idempotent.
+
+Dynamic resource cleanup requires:
+
+- exact registry provenance
+- no active schedule or manifest
+- empty and unused broker resources
+- lease ownership
+- fencing protection
+- explicit cleanup policy
+
+Predefined delay buckets are retained.
+
+Ordinary application topology defaults to report-only inspection and requires explicit destructive opt-in before deletion.
 
 ---
 
-## Quick Start
+## Middleware
 
-**Coordinated Saga**: Uses a central orchestrator to manage the full lifecycle of a saga. This handler starts a saga, executes the business logic step-by-step, and coordinates the flow by publishing commands/events. Ideal when you need deterministic, centralized control.
-
-**Stateful Model**: Coordinated sagas always use `TSagaData` to maintain saga state across all steps.
-
-**Coordinated Saga (Orchestration)**
+Lycia includes a replaceable middleware pipeline, configured through the same `AddLycia` DSL:
 
 ```csharp
-public class CreateInvoiceSagaHandler :
-    StartCoordinatedSagaHandler<CreateInvoiceCommand, CreateInvoiceSagaData>
-{
-    public override async Task HandleAsync(CreateInvoiceCommand cmd, CancellationToken ct = default)
-    {
-        // business logic
-        await Context.Publish(new InvoiceStartedEvent { InvoiceId = cmd.InvoiceId }, ct);
-        await Context.MarkAsComplete<CreateInvoiceCommand>(ct);
-    }
-}
+lycia
+    .AddMiddleware()
+        .WithLogging()
+        .WithRetry(options => options.MaxRetryAttempts = 5)
+        .WithTracing();
 ```
 
-**Reactive Saga**: Implements event-driven choreography. Each handler reacts only to the event it subscribes to. There is no central orchestrator; instead, services collaborate by emitting events. Ideal for loosely coupled systems and autonomous microservices.
+Default middleware slots include:
 
-**Stateless Model**: Reactive sagas do not use saga state (`TSagaData`); each event is handled independently without maintaining cross-step state.
+- logging
+- retry
+- tracing
 
-**Reactive Saga (Choreography)**
+Implementations may be replaced through the generic form of each method
+(`WithLogging<TMiddleware>()`, `WithRetry<TMiddleware>()`, `WithTracing<TMiddleware>()`), which
+drives the same three interfaces the pipeline has always used:
 
-```csharp
-public class InventorySagaHandler :
-    ReactiveSagaHandler<OrderCreatedEvent>,
-    ISagaCompensationHandler<PaymentFailedEvent>
-{
-    public override async Task HandleAsync(OrderCreatedEvent evt, CancellationToken ct = default)
-    {
-        // Reserve inventory
-        await Context.Publish(new InventoryReservedEvent { OrderId = evt.OrderId }, ct);
-        await Context.MarkAsComplete<OrderCreatedEvent>(ct);
-    }
+- `ILoggingSagaMiddleware`
+- `IRetrySagaMiddleware`
+- `ITracingSagaMiddleware`
 
-    public Task CompensateAsync(PaymentFailedEvent failed, CancellationToken ct = default)
-    {
-        // Release reserved stock
-        InventoryService.ReleaseStock(failed.OrderId);
-        return Task.CompletedTask;
-    }
-}
+The default tracing implementation uses `ActivityTracingMiddleware`.
+
+Retry behavior is provided through `IRetryPolicy`, with a Polly-based default implementation supporting:
+
+- bounded retries
+- exponential backoff
+- jitter
+- exception-specific policies
+
+Retries do not replace Inbox, Outbox or idempotency guarantees.
+
+---
+
+## OpenTelemetry Tracing
+
+Install:
+
+```bash
+dotnet add package OpenTelemetry
+dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
+dotnet add package Lycia.Extensions.OpenTelemetry
 ```
 
-### Additional Saga Handler Examples
-
-**Coordinated Responsive Saga**: Similar to a coordinated saga, but also handles direct responses (e.g., request/response patterns). Useful when the saga step must wait for a specific success or failure message before moving forward.
-
-Like all coordinated sagas, this pattern is **stateful** and requires a `TSagaData` object to track progress across asynchronous request–response steps.
-
-**CoordinatedResponsiveSagaHandler**
+Configure tracing:
 
 ```csharp
-public class CreateOrderSagaHandler :
-    StartCoordinatedResponsiveSagaHandler<CreateOrderCommand, OrderCreatedResponse, CreateOrderSagaData>
-{
-    public override async Task HandleAsync(CreateOrderCommand cmd, CancellationToken ct = default)
+services
+    .AddOpenTelemetry()
+    .AddLyciaTracing()
+    .WithTracing(tracing =>
     {
-        // Business logic
-        await Context.Respond(cmd, new OrderCreatedResponse { OrderId = cmd.OrderId }, ct);
-        await Context.MarkAsComplete<CreateOrderCommand>(ct);
-    }
-    
-    public override async Task HandleSuccessResponseAsync(OrderCreatedResponse response, CancellationToken cancellationToken = default)
-    {
-        // Order created, reserve inventory
-        await Context.Send(new ReserveInventoryCommand
+        tracing.AddAspNetCoreInstrumentation();
+
+        tracing.AddOtlpExporter(options =>
         {
-            OrderId = response.OrderId
-        }, cancellationToken);
-        await Context.MarkAsComplete<OrderCreatedResponse>();
-    }
-}
+            options.Endpoint =
+                new Uri("http://otel-collector:4317");
+        });
+    });
 ```
 
----
+Lycia emits tracing data for saga and messaging operations without requiring tracing code inside saga handlers.
 
-### What Lycia Emits
+Typical attributes include:
 
-- A span per saga step (`Saga.<HandlerName>`)
-- Attributes:
-  - `lycia.saga.id`
-  - `lycia.message.id`
-  - `lycia.correlation.id`
-  - `lycia.application.id`
-  - `lycia.saga.step.status`
-- Automatic W3C trace propagation through messages (RabbitMQ / EventBus)
+```text
+lycia.saga.id
+lycia.message.id
+lycia.request.id
+lycia.correlation.id
+lycia.causation.id
+lycia.parent_message.id
+lycia.application.id
+lycia.saga.step.status
+```
 
-### How It Works
+W3C `traceparent` and `tracestate` headers are propagated through supported message transports.
 
-Tracing is added without requiring any saga code changes:
-- The middleware creates spans around each handler invocation.
-- `LyciaTracePropagation` injects `traceparent`/`tracestate` into message headers.
-- The listener extracts headers and restores parent-child relationships.
+The resulting traces may be exported through OpenTelemetry Collector to systems such as:
 
-This produces a full cross-service trace chain in Grafana Tempo or Jaeger.
+- Grafana Tempo
+- Jaeger
+- another OpenTelemetry-compatible backend
 
----
+OpenTelemetry provides instrumentation, propagation and export. The selected tracing backend provides storage, querying and visualization.
 
-## Timeline
-
-- **May 28, 2023** – The idea was born.  
-- **Initial Goal** – To provide a saga framework that avoids complexity and is easy to use by anyone.  
-- **Today** – Development accelerated by "vibe-coding"; includes tests, integrations, and real-world usage scenarios.
+Long-running asynchronous workflows should continue to rely on Lycia’s durable identifiers such as `CorrelationId`, `SagaId`, `CausationId` and `ParentMessageId`, rather than assuming that one indefinitely open trace span represents the complete business workflow.
 
 ---
 
-## What's Next
+## Idempotency and Concurrency
 
-- **Native Inbox / Outbox Guarantees**
-  - State-consistency
-  - Cross-service delivery reliability
-  - Message replay safety
-  
-- **Distributed Delayed Message Scheduling**
-  - Compensation timers
-  - Cron-like orchestration intervals
-  - Durable timing guarantees
+Lycia treats idempotency and concurrency as separate concerns.
 
-- **Schema Intelligence**
-  - Avro/Protobuf registry integration (including the built‑in `AvroSchemaConverter`)
-  - Backward/forward compatibility detection
-  - Contract-driven saga evolution
+### Idempotency
 
-## Durable request-response identity
+Idempotency prevents duplicate handling of the same logical message.
 
-Responses are targeted saga continuations, never broadcast events. Use
-`Context.Respond(request, response, cancellationToken)` to send through the broker to the canonical
-`ResponseEndpoint` owned by the waiting saga application. `ReplyTo` is an obsolete alias for the same
-value. `Context.Publish(response)` fails explicitly.
+```text
+Same MessageId delivered twice
+-> committed business effect executes once
+```
 
-| Field | Meaning |
+### Optimistic concurrency
+
+Optimistic concurrency prevents different valid messages from overwriting the same saga state.
+
+```text
+Saga version = 7
+
+Replica A processes InventoryReservedResponse
+Replica B processes PaymentTimeoutEvent
+
+Both load version 7.
+Only one may commit version 8.
+```
+
+At-least-once transport delivery means duplicate delivery remains possible.
+
+Handlers and external integrations must use stable message identities and idempotent business operations.
+
+---
+
+## Extensibility
+
+Lycia’s core abstractions are replaceable.
+
+Applications and extension packages may provide custom implementations of:
+
+- `IEventBus`
+- `ISagaStore`
+- `IMessageSerializer`
+- middleware slots
+- retry policies
+- tracing integrations
+- scheduling storage and strategies
+
+Transport-specific behavior remains outside the core package.
+
+`lycia.UsePersistence().WithRedisSagaStore()` exposes today's persistence provider (Redis) through
+the same nested DSL; future provider packages (PostgreSQL Inbox/Outbox, split-store, ...) extend
+`LyciaPersistenceBuilder` with their own `With...()` methods the same way transport packages extend
+`LyciaTransportBuilder` — no such providers exist yet.
+
+---
+
+## Samples
+
+The [samples/](samples) directory contains runnable examples.
+
+| Sample | Purpose |
 | --- | --- |
-| `MessageId` | Identity and idempotency key of this concrete message |
-| `RequestId` | Request answered by a response; a new request uses its own `MessageId` |
-| `CorrelationId` | Complete business workflow |
-| `CausationId` | Direct causing message |
-| `ParentMessageId` | Saga-step and compensation parent |
-| `SagaId` | Durable saga instance |
-| `ResponseEndpoint` | Logical application waiting for the response |
+| `Sample.Order.Api` | API entry point and initial command submission |
+| `Sample.Order.Orchestration.Consumer` | Stateful coordinated saga with asynchronous targeted responses |
+| `Sample.Order.Choreography.Consumer` | Stateless event-driven reactive saga |
+| `Sample.Order.Orchestration.Seq.Consumer` | Sequential coordinated saga with compensation |
 
-In the M1–M5 flow, request M1 has `RequestId=M1`; response M2 has a distinct identity and
-`RequestId=CausationId=ParentMessageId=M1`; child request M3 has `RequestId=M3` and is caused by M2;
-response M4 answers M3; request M5 is caused by M4. Correlation and saga IDs remain stable.
-Compensation walks only `ParentMessageId`.
+Samples demonstrate:
 
-`OrderCreatedResponse` intentionally crosses the broker even when order creation is local. The durable,
-observable transition lets another replica reload Redis state and continue, tolerates failure between
-steps, and preserves idempotent redelivery.
+- strongly typed command ownership
+- canonical `ApplicationId`
+- replica-safe response consumption
+- RabbitMQ transport registration
+- saga persistence
+- compensation
+- scheduling
+- OpenTelemetry integration
 
-### Canonical application identities and migration
+---
 
-Topology keys use invariant lowercase and ignore `-`, `_`, `.`, and whitespace. `StockService`,
-`stock-service`, `stock_service`, and `STOCK.SERVICE` all become `stockservice`; other characters and
-values without an alphanumeric character are rejected. Equivalent replicas share one queue/group.
+## Current Reliability Model
 
-Canonicalization can rename broker resources. Drain old RabbitMQ queues and stop old consumers; validate
-NATS stream retention before replacing old durables/groups; choose Kafka starting offsets deliberately
-for the new canonical group. Remove old resources only after validation. Lycia never deletes production
-resources or dual-binds old and new names automatically.
+Lycia currently provides and prepares for:
 
-Typed endpoints, discovery, startup validation, and canonical matching enforce ownership inside Lycia,
-not globally at the broker. Another RabbitMQ queue, NATS group/durable, or Kafka group can receive the
-same logical message. Delivery follows at-least-once patterns, not exactly once; handlers must be
-idempotent.
+- at-least-once message delivery
+- message identity propagation
+- handler idempotency
+- saga-state persistence
+- optimistic concurrency
+- compensation traversal
+- broker acknowledgement handling
+- RabbitMQ DLQ behavior
+- bounded retry policies
+- publisher confirmation integration where supported
+- durable scheduling
+
+Native provider-based Inbox and Outbox persistence is planned as a separate persistence architecture.
+
+The intended model distinguishes:
+
+```text
+Saga state
+-> workflow and compensation state
+
+Inbox
+-> committed processing identity of incoming messages
+
+Outbox
+-> durable publication lifecycle of outgoing messages
+```
+
+The saga state machine does not replace Inbox or Outbox.
+
+---
+
+## Roadmap
+
+Current architectural priorities include:
+
+### Persistence Providers
+
+Planned provider packages:
+
+- `Lycia.Persistence.InMemory`
+- `Lycia.Persistence.Redis`
+- `Lycia.Persistence.SqlServer`
+- `Lycia.Persistence.PostgreSql`
+
+The target architecture includes:
+
+- mandatory explicit SagaStore selection
+- optional Inbox and Outbox
+- strong-consistency relational mode
+- split-store Redis mode
+- optimistic concurrency
+- provider capabilities
+- health diagnostics
+- schema migration support
+
+### Inbox and Outbox
+
+Planned reliability work includes:
+
+- canonical incoming and outgoing journals
+- idempotent consumers
+- transactional Outbox
+- publisher confirmation tracking
+- reconciliation workers
+- fail-closed processing
+- bounded recovery
+- Redis saga-state rebuild from canonical relational history
+
+### Workflow Visualization
+
+A future Lycia workflow explorer may combine:
+
+- OpenTelemetry spans
+- Lycia message identities
+- saga state
+- Inbox and Outbox lifecycle data
+
+to visualize commands, responses, service boundaries, compensation paths and cross-saga relationships as an interactive workflow graph.
+
+A graph database is not required for the initial implementation. The canonical relational journal and OpenTelemetry metadata provide the necessary lineage.
+
+---
+
+## Design Principles
+
+Lycia follows these principles:
+
+- commands have one logical owner
+- events may have multiple subscribers
+- responses are targeted, not broadcast
+- workflows continue asynchronously
+- replicas share logical application identity
+- process memory is never the durable workflow boundary
+- delivery is at least once
+- handlers remain idempotent
+- retries are bounded
+- transport behavior stays outside the core
+- operational guarantees are documented without exactly-once claims
+
+---
+
+## Project History
+
+Lycia began on **May 28, 2023** with the goal of making distributed saga workflows easier to model, operate and understand.
+
+The name is inspired by the Lycian Way and the idea of turning difficult paths into understandable routes.
+
+---
 
 ## License
 
-This project is licensed under the [Apache 2.0 License](LICENSE).
----
-
-## Why Lycia? (Deep Dive Highlights)
-
-In addition to minimal setup and clear semantics, Lycia offers:
-
-- **SagaDispatcher** and **CompensationCoordinator** core components  
-- **Built-in Idempotency** and cancellation flow (`MarkAsCancelled<T>()`)  
-- **Custom Retry Hooks** finalized via `IRetryPolicy` (with Polly-based default implementation, configurable via `ConfigureRetry`), supporting exponential backoff, jitter, and per-exception retry strategies  
-- **Choreography & Orchestration** support via `ReactiveSagaHandler<T>` and `CoordinatedSagaHandler<T>`  
-- **RedisSagaStore** built-in extension support with TTL, CAS, parent-child message tracing  
-- **RabbitMQ EventBus** built-in extension support with Dead Letter Queue (DLQ) and header normalization  
-- **ISagaContextAccessor** for contextual saga state access  
-- **Fluent Middleware Pipeline**: Default logging, retry, and tracing middleware (via `ActivityTracingMiddleware`), all replaceable via middleware slots (`ILoggingSagaMiddleware`, `IRetrySagaMiddleware`, `ITracingSagaMiddleware`)  
-- **Fluent Configuration API**: Easily plug your custom serializers, stores and buses  
-- **Detailed Integration Tests** for Redis, RabbitMQ (including Ack/Nack/DLQ behavior), Compensation logic  
-- **Appsettings.json Support**: Environment-based saga configuration
+Lycia is licensed under the [Apache License 2.0](LICENSE).

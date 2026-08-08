@@ -141,7 +141,7 @@ public class SagaContext<TInitialMessage>(
         return Task.CompletedTask;
     }
 
-    public virtual Task MarkAsComplete<TStep>() where TStep : IMessage
+    public virtual Task MarkAsComplete<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage
     {
         return SagaStore.LogStepAsync(SagaId, CurrentStep.MessageId, CurrentStep.ParentMessageId, CurrentStep.GetType(),
             StepStatus.Completed, HandlerTypeOfCurrentStep, CurrentStep, (Exception?)null);
@@ -270,7 +270,7 @@ public class SagaContext<TInitialMessage, TSagaData> : SagaContext<TInitialMessa
         Task Operation() => Send(nextCommand, cancellationToken); // Explicitly call base
     }
 
-    public override async Task MarkAsComplete<TStep>()
+    public override async Task MarkAsComplete<TStep>(CancellationToken cancellationToken = default)
     {
         await _sagaStore.SaveSagaDataAsync(SagaId, Data);
         await _sagaStore.LogStepAsync(SagaId, CurrentStep.MessageId, CurrentStep.ParentMessageId, CurrentStep.GetType(),
@@ -460,7 +460,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
         return eventBus.Publish(@event, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 
-    public Task MarkAsComplete<TAdapterStep>() where TAdapterStep : IMessage
+    public Task MarkAsComplete<TAdapterStep>(CancellationToken cancellationToken = default) where TAdapterStep : IMessage
     {
         return sagaStore.LogStepAsync(SagaId, CurrentStep.MessageId, CurrentStep.ParentMessageId, CurrentStep.GetType(),
             StepStatus.Completed, HandlerTypeOfCurrentStep, CurrentStep, (SagaStepFailureInfo?)null);
@@ -711,7 +711,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
         return eventBus.Publish(@event, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 
-    public async Task MarkAsComplete<TMarkStep>()
+    public async Task MarkAsComplete<TMarkStep>(CancellationToken cancellationToken = default)
         where TMarkStep : IMessage
     {
         await sagaStore.SaveSagaDataAsync(SagaId, Data);

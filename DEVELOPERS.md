@@ -374,23 +374,55 @@ builder.Services
     });
 ```
 
-```csharp
-services.AddLycia(configuration)
-        .UseMessageSerializer<CustomSerializer>()
-        .UseSagaStore<RedisSagaStore>()
-        .AddSagasFromAssemblies(typeof(SomeHandler).Assembly)
-        .Build();
+The canonical registration entry point nests configuration by concern while staying fluent. The
+callback boundary itself finalizes registration (`Build()` runs internally), so no separate
+`.Build()` call is needed:
 
-// Transport registration comes from a transport package
-// (Lycia.Extensions.RabbitMq here; Nats/Kafka expose equivalents):
-services.AddLyciaRabbitMq();
-// A custom bus can still be plugged in with .UseEventBus<TEventBus>().
+```csharp
+services.AddLycia(configuration, lycia =>
+{
+    lycia
+        .AddSagas()
+            .FromAssemblies(typeof(SomeHandler).Assembly);
+
+    lycia
+        .UseTransport()
+            .RabbitMq(); // Nats()/Kafka()/InMemory() are equivalent alternatives
+
+    lycia
+        .UsePersistence()
+            .WithRedisSagaStore();
+
+    lycia
+        .AddMiddleware()
+            .WithLogging()
+            .WithRetry()
+            .WithTracing();
+
+    lycia.UseMessageSerializer<CustomSerializer>();
+});
 ```
 
-- Builder APIs:
-  - `UseMessageSerializer<T>()`, `UseEventBus<T>()`, `UseSagaStore<T>()`
-  - `AddSagasFromCurrentAssembly()`, `AddSagasFromAssemblies(...)`
-  - `ConfigureSaga(...)`, etc.
+Each nested builder is a small concern-specific type (`LyciaSagaBuilder`, `LyciaTransportBuilder`,
+`LyciaPersistenceBuilder`, `LyciaMiddlewareBuilder`; `LyciaSchedulingBuilder` is contributed by
+`Lycia.Extensions.Scheduling`), so IntelliSense after `UseTransport()` only shows the transport
+providers actually referenced (`RabbitMq()`, `Nats()`, `Kafka()`, `InMemory()`), not every Lycia
+method. `Lycia.Extensions` itself only defines `LyciaTransportBuilder`/`LyciaPersistenceBuilder`
+and the `InMemory()` provider — transport, scheduling, and (in the future) persistence-provider
+packages extend those builder types with their own extension methods, so `Lycia.Extensions` never
+takes a compile-time dependency on `Lycia.Extensions.RabbitMq`, `.Nats`, `.Kafka`, or
+`.Scheduling`. Selecting two different transport providers on one registration
+(`UseTransport().RabbitMq()` then `UseTransport().Nats()`) throws `InvalidOperationException`
+naming both providers, instead of the second call silently winning.
+
+- Builder APIs (`LyciaBuilder`, still available directly for callers that don't use the nested
+  form): `UseMessageSerializer<T>()`, `UseEventBus<T>()`, `UseSagaStore<T>()`,
+  `AddSagasFromCurrentAssembly()`, `AddSagasFromAssemblies(...)`, `ConfigureSaga(...)`, etc.
+- The older flat form (`services.AddLycia(configuration).AddSagasFromCurrentAssembly().Build();`
+  followed by `services.AddLyciaRabbitMq();`) still compiles; `AddLyciaRabbitMq()`,
+  `AddLyciaNats(...)`, `AddLyciaKafka(...)`, `AddLyciaScheduling(...)`, and
+  `AddLyciaInMemoryScheduling(...)` are now `[Obsolete]`-marked thin wrappers around the same
+  registration logic the DSL calls, each naming its DSL replacement in the warning.
 
 ### Queue Type Map
 

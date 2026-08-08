@@ -2,7 +2,6 @@
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 
-
 using Lycia.Saga.Abstractions.Handlers;
 using Lycia.Saga.Messaging.Handlers;
 using Sample.Shared.Messages.Commands;
@@ -10,54 +9,72 @@ using Sample.Shared.Messages.Events;
 
 namespace Sample.Order.Choreography.Consumer.Sagas;
 
-public class CreateOrderSagaHandler :
+public sealed class CreateOrderSagaHandler :
     StartReactiveSagaHandler<CreateOrderCommand>,
     ISagaCompensationHandler<PaymentFailedEvent>,
     ISagaCompensationHandler<OrderShippingFailedEvent>
 {
-    // Use this to enforce idempotency if needed
-    // Uncomment if you want to enforce idempotency for this saga
-    //protected override bool EnforceIdempotency => true;
+    protected override bool EnforceIdempotency => true;
 
-    public override async Task HandleStartAsync(CreateOrderCommand cmd, CancellationToken cancellationToken = default)
+    public override async Task HandleStartAsync(
+        CreateOrderCommand command,
+        CancellationToken cancellationToken = default)
     {
-        await Context.Publish(new OrderCreatedEvent
-        {
-            OrderId = cmd.OrderId
-        }, cancellationToken);
+        // Create the order in Pending state.
+
+        await Context.Publish(
+            new OrderCreatedEvent
+            {
+                OrderId = command.OrderId
+            },
+            cancellationToken);
+
         await Context.MarkAsComplete<CreateOrderCommand>();
     }
 
-    public override async Task CompensateStartAsync(CreateOrderCommand message, CancellationToken cancellationToken = default)
+    public override async Task CompensateStartAsync(
+        CreateOrderCommand command,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            // Compensation logic
+            // Cancel or remove the initially created order.
+
             await Context.MarkAsCompensated<CreateOrderCommand>();
         }
-        catch (Exception ex)
+        catch
         {
-            // Log, notify, halt chain, etc.
-            Console.WriteLine($"❌ Compensation failed: {ex.Message}");
-            
             await Context.MarkAsCompensationFailed<CreateOrderCommand>();
-            // Optionally: rethrow or store for manual retry
-            throw; // Or suppress and log for a retry system
+
+            throw;
         }
     }
 
-    // Optional – compensate on payment failure (reactive, not orchestration)
-    public async Task CompensateAsync(PaymentFailedEvent failed, CancellationToken cancellationToken = default)
+    public async Task CompensateAsync(
+        PaymentFailedEvent failed,
+        CancellationToken cancellationToken = default)
     {
-        // Use IsAlreadyCompleted for idempotency check in side-compensation methods (that implement ISagaCompensationHandler interface)
-        // If the saga is already completed, skip compensation
-        if (await Context.IsAlreadyCompleted<PaymentFailedEvent>()) return;
-        // e.g., notify user / mark order canceled / audit
+        if (await Context.IsAlreadyCompleted<PaymentFailedEvent>())
+        {
+            return;
+        }
+
+        // Mark the order as cancelled because payment failed.
+
+        await Context.MarkAsCompensated<PaymentFailedEvent>();
     }
 
-    public Task CompensateAsync(OrderShippingFailedEvent failed, CancellationToken cancellationToken = default)
+    public async Task CompensateAsync(
+        OrderShippingFailedEvent failed,
+        CancellationToken cancellationToken = default)
     {
-        // e.g., refund or notify depending on your business
-        return Task.CompletedTask;
+        if (await Context.IsAlreadyCompleted<OrderShippingFailedEvent>())
+        {
+            return;
+        }
+
+        // Mark the order as cancelled because shipping failed.
+
+        await Context.MarkAsCompensated<OrderShippingFailedEvent>();
     }
 }
