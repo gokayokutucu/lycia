@@ -28,28 +28,22 @@ Git rules. Agents must update this file as phases move through the milestone.
 
 # ACTIVE
 
-## Phase 4 — Atomic Persistence Boundary
+## Phase 5 — Split Store + Reconciliation
 
-- Resolve the persistence topology automatically with default `Auto` behavior.
-- Provide `RequireAtomicBoundary()` and `UseIndependentTransactions()` as the explicit overrides.
-- Share one local transaction for SQL Server and PostgreSQL when the participating stores are compatible.
-- Make the service-local Inbox + SagaStore + Outbox boundary atomic where that local transaction is available.
-- Do not introduce cross-service transactions or an exactly-once delivery claim.
+- Define the supported Redis operational/materialized-state and relational canonical-persistence model.
+- Remove unsafe request-path dual-write assumptions.
+- Commit relational canonical state first, then reconcile into Redis in a controlled way.
+- Make operational-state and canonical-state ownership explicit.
+- Do not implement replay beyond what the split-store design requires.
 
 # NEXT
 
-1. **Phase 5 — Split Store + Reconciliation**
-   - Define the supported Redis operational/materialized-state and relational canonical-persistence model.
-   - Remove unsafe request-path dual-write assumptions.
-   - Commit relational canonical state first, then reconcile into Redis in a controlled way.
-   - Make operational-state and canonical-state ownership explicit.
-   - Do not implement replay beyond what the split-store design requires.
-2. **Phase 6 — Canonical Journal + Replay / Rebuild**
+1. **Phase 6 — Canonical Journal + Replay / Rebuild**
    - Introduce a canonical immutable transition/history model with deterministic per-saga ordering.
    - Define a deterministic reducer and replay/rebuild that does not invoke business handlers.
    - Rebuild Redis/materialized state while preserving message identity and saga-version semantics.
    - Broker delivery is not the canonical journal.
-3. **Phase 7 — Reliability Hardening**
+2. **Phase 7 — Reliability Hardening**
    - Address remaining persistence-recovery edge cases, including unknown outcomes and stale ownership
      where still applicable.
    - Add leases/fencing only where actually required, plus recovery coordination.
@@ -81,6 +75,12 @@ Git rules. Agents must update this file as phases move through the milestone.
   milestone-only workflow was adopted; it does not authorize future per-phase `main` merges.
 - **Roadmap maintenance:** aligned this milestone with the Atomic Persistence Boundary phase model.
   Feature commit `9e5fee3`; merged into `dev` as `56e60db`.
+- **Phase 4 — Atomic Persistence Boundary:** automatic topology resolution with default `Auto`,
+  `RequireAtomicBoundary()`/`UseIndependentTransactions()` policy overrides, safe normalized database
+  identities, and a service-local shared SQL Server/PostgreSQL Inbox + SagaStore + Outbox transaction.
+  Rollback fault windows, indeterminate commit handling, provider regressions, and package consumers
+  were validated without cross-service or exactly-once claims. Feature commit `3ce6eaf`; merged into
+  `dev` as `a0ab41e`.
 
 # FINALIZATION
 
@@ -90,8 +90,8 @@ Status: NOT READY
 
 Required before `dev` -> `main`:
 
-- Phase 4 Atomic Persistence Boundary — PENDING
-- Phase 5 Split Store + Reconciliation — PENDING
+- Phase 4 Atomic Persistence Boundary — COMPLETE
+- Phase 5 Split Store + Reconciliation — ACTIVE
 - Phase 6 Canonical Journal + Replay / Rebuild — PENDING
 - Phase 7 Reliability Hardening — PENDING
 - Full regression validation — PENDING
