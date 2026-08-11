@@ -105,4 +105,46 @@ public abstract class OutboxStoreConformanceTests
         Assert.Equal(OutboxMessageStatus.Failed, loaded!.Status);
         Assert.Equal("broker unreachable", loaded.FailureInfo?.Reason);
     }
+
+    [Fact]
+    public async Task ConfirmationUnknown_Is_Reclaimable_Until_MaxAttempts()
+    {
+        var store = CreateStore();
+        var message = NewMessage();
+        await store.AddAsync(message);
+
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            Assert.Equal(message.MessageId, Assert.Single(await store.ClaimPendingBatchAsync(1, maxAttempts: 3)).MessageId);
+            await store.MarkPublishingAsync(message.MessageId);
+            await store.MarkConfirmationUnknownAsync(message.MessageId);
+            Assert.Equal(attempt, (await store.GetByMessageIdAsync(message.MessageId))!.RetryCount);
+        }
+
+        Assert.Empty(await store.ClaimPendingBatchAsync(1, maxAttempts: 3));
+        Assert.Equal(OutboxMessageStatus.ConfirmationUnknown,
+            (await store.GetByMessageIdAsync(message.MessageId))!.Status);
+    }
+
+    [Fact]
+    public async Task Expired_Claimed_And_Publishing_Records_Are_Recovered_After_Worker_Restart()
+    {
+        var store = CreateStore();
+        var message = NewMessage();
+        var recoveryTimeout = TimeSpan.FromMilliseconds(10);
+        await store.AddAsync(message);
+        Assert.Contains(await store.ClaimPendingBatchAsync(10_000, recoveryTimeout: recoveryTimeout),
+            candidate => candidate.MessageId == message.MessageId);
+
+        await Task.Delay(50);
+        Assert.Equal(message.MessageId,
+            Assert.Single(await store.ClaimPendingBatchAsync(10_000, recoveryTimeout: recoveryTimeout),
+                candidate => candidate.MessageId == message.MessageId).MessageId);
+
+        await store.MarkPublishingAsync(message.MessageId);
+        await Task.Delay(50);
+        Assert.Equal(message.MessageId,
+            Assert.Single(await store.ClaimPendingBatchAsync(10_000, recoveryTimeout: recoveryTimeout),
+                candidate => candidate.MessageId == message.MessageId).MessageId);
+    }
 }

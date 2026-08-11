@@ -85,11 +85,17 @@ local maxCount = tonumber(ARGV[1])
 local msgPrefix = ARGV[2]
 local pendingStatus = tonumber(ARGV[3])
 local claimedStatus = tonumber(ARGV[4])
+local unknownStatus = tonumber(ARGV[5])
+local maxAttempts = tonumber(ARGV[6])
+local publishingStatus = tonumber(ARGV[7])
+local nowScore = tonumber(ARGV[8])
+local recoveryMilliseconds = tonumber(ARGV[9])
+local nowIso = ARGV[10]
 local results = {}
 if maxCount <= 0 then
   return results
 end
-local ids = redis.call('zrange', pendingKey, 0, maxCount - 1)
+local ids = redis.call('zrangebyscore', pendingKey, '-inf', nowScore, 'LIMIT', 0, maxCount)
 for i = 1, #ids do
   local id = ids[i]
   if redis.call('zrem', pendingKey, id) == 1 then
@@ -97,10 +103,14 @@ for i = 1, #ids do
     local json = redis.call('get', msgKey)
     if json then
       local decoded = cjson.decode(json)
-      if decoded['Status'] == pendingStatus then
+      local retryCount = tonumber(decoded['RetryCount'] or 0)
+      if (decoded['Status'] == pendingStatus or decoded['Status'] == unknownStatus or
+          decoded['Status'] == claimedStatus or decoded['Status'] == publishingStatus) and retryCount < maxAttempts then
         decoded['Status'] = claimedStatus
+        decoded['UpdatedAtUtc'] = nowIso
         local newJson = cjson.encode(decoded)
         redis.call('set', msgKey, newJson)
+        redis.call('zadd', pendingKey, nowScore + recoveryMilliseconds, id)
         table.insert(results, newJson)
       end
     end
@@ -128,12 +138,18 @@ return results";
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<OutboxMessage>> ClaimPendingBatchAsync(int maxCount, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<OutboxMessage>> ClaimPendingBatchAsync(int maxCount,
+        CancellationToken cancellationToken = default, int maxAttempts = 5, TimeSpan? recoveryTimeout = null)
     {
+        var now = DateTime.UtcNow;
         var result = (RedisResult[])(await redisDb.ScriptEvaluateAsync(
             ClaimPendingBatchScript,
             [_pendingKey],
-            [maxCount, _messageKeyPrefix, (int)OutboxMessageStatus.Pending, (int)OutboxMessageStatus.Claimed]))!;
+            [maxCount, _messageKeyPrefix, (int)OutboxMessageStatus.Pending, (int)OutboxMessageStatus.Claimed,
+                (int)OutboxMessageStatus.ConfirmationUnknown, maxAttempts, (int)OutboxMessageStatus.Publishing,
+                new DateTimeOffset(now).ToUnixTimeMilliseconds(),
+                (long)(recoveryTimeout ?? TimeSpan.FromMinutes(1)).TotalMilliseconds,
+                now.ToString("O")]))!;
 
         return result
             .Select(r => JsonConvert.DeserializeObject<OutboxMessage>((string)r!)!)
@@ -142,7 +158,8 @@ return results";
 
     /// <inheritdoc />
     public Task MarkPublishingAsync(Guid messageId, CancellationToken cancellationToken = default) =>
-        SetStatusAsync(messageId, OutboxMessageStatus.Publishing, setFailureInfo: false, null, applyRetentionTtl: false);
+        SetStatusAsync(messageId, OutboxMessageStatus.Publishing, setFailureInfo: false, null,
+            applyRetentionTtl: false, incrementRetry: true);
 
     /// <inheritdoc />
     public Task MarkPublishedAsync(Guid messageId, CancellationToken cancellationToken = default) =>
@@ -159,7 +176,8 @@ return results";
     // Only the single worker that owns a message post-claim is expected to call these, so a plain
     // read-modify-write (rather than a CAS/Lua script) is sufficient here by construction of the
     // calling contract.
-    private async Task SetStatusAsync(Guid messageId, OutboxMessageStatus status, bool setFailureInfo, SagaStepFailureInfo? failureInfo, bool applyRetentionTtl)
+    private async Task SetStatusAsync(Guid messageId, OutboxMessageStatus status, bool setFailureInfo,
+        SagaStepFailureInfo? failureInfo, bool applyRetentionTtl, bool incrementRetry = false)
     {
         var key = MessageKey(messageId);
         var json = await redisDb.StringGetAsync(key);
@@ -167,10 +185,21 @@ return results";
 
         var message = JsonConvert.DeserializeObject<OutboxMessage>(json!)!;
         message.Status = status;
+        if (incrementRetry) message.RetryCount++;
         if (setFailureInfo) message.FailureInfo = failureInfo;
         message.UpdatedAtUtc = DateTime.UtcNow;
 
         await redisDb.StringSetAsync(key, JsonConvert.SerializeObject(message));
+
+        if (status == OutboxMessageStatus.ConfirmationUnknown)
+        {
+            var sequence = await redisDb.StringIncrementAsync(_seqKey);
+            await redisDb.SortedSetAddAsync(_pendingKey, messageId.ToString(), sequence);
+        }
+        else if (status == OutboxMessageStatus.Published || status == OutboxMessageStatus.Failed)
+        {
+            await redisDb.SortedSetRemoveAsync(_pendingKey, messageId.ToString());
+        }
 
         if (applyRetentionTtl && _options.RetentionPeriod.HasValue)
             await redisDb.KeyExpireAsync(key, _options.RetentionPeriod.Value);

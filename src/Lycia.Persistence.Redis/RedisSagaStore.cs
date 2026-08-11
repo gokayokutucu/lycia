@@ -16,6 +16,7 @@ using Lycia.Saga.Contexts;
 using Lycia.Saga.Exceptions;
 using Lycia.Saga.Helpers;
 using Lycia.Saga.Abstractions.Scheduling;
+using Lycia.Saga.Abstractions.Outbox;
 
 namespace Lycia.Persistence.Redis;
 
@@ -28,7 +29,8 @@ public class RedisSagaStore(
     ISagaIdGenerator sagaIdGenerator,
     ISagaCompensationCoordinator sagaCompensationCoordinator,
     SagaStoreOptions? options,
-    IMessageScheduler? messageScheduler = null)
+    IMessageScheduler? messageScheduler = null,
+    IOutgoingMessagePipeline? outgoingMessagePipeline = null)
     : ISagaStore, ISagaStoreHealthCheck, IVersionedSagaStore
 {
     private readonly SagaStoreOptions _options = options ?? new SagaStoreOptions();
@@ -384,7 +386,8 @@ return {1, tonumber(ARGV[1]) + 1}";
             sagaStore: this,
             sagaIdGenerator: sagaIdGenerator,
             compensationCoordinator: sagaCompensationCoordinator,
-            messageScheduler: messageScheduler
+            messageScheduler: messageScheduler,
+            outgoingMessagePipeline: outgoingMessagePipeline
         );
         return context;
     }

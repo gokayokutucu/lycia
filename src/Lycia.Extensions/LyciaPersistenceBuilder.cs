@@ -121,7 +121,24 @@ public sealed class LyciaPersistenceBuilder
         SelectOutboxProvider(typeof(TOutbox).Name);
         Services.RemoveAll(typeof(IOutboxStore));
         Services.AddSingleton<IOutboxStore, TOutbox>();
+        return ActivateOutboxPipeline();
+    }
+
+    /// <summary>Activates durable outgoing capture and the hosted dispatcher for a selected provider.</summary>
+    public LyciaPersistenceBuilder ActivateOutboxPipeline()
+    {
         Services.TryAddScoped<IOutboxDispatcher, OutboxDispatcher>();
+        Services.RemoveAll(typeof(IOutgoingMessagePipeline));
+        Services.AddScoped<IOutgoingMessagePipeline, OutboxOutgoingMessagePipeline>();
+        Services.TryAddEnumerable(ServiceDescriptor.Singleton<Microsoft.Extensions.Hosting.IHostedService, OutboxWorker>());
+        return this;
+    }
+
+    /// <summary>Configures the hosted Outbox worker registered with the selected Outbox provider.</summary>
+    public LyciaPersistenceBuilder WithOutboxWorker(Action<OutboxWorkerOptions> configure)
+    {
+        if (configure == null) throw new ArgumentNullException(nameof(configure));
+        Services.Configure(configure);
         return this;
     }
 }

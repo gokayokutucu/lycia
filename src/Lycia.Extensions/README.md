@@ -3,8 +3,8 @@
 Transport-independent building blocks for the Lycia Saga framework: fluent dependency-injection
 registration (`AddLycia` with `ConfigureSaga`, `ConfigureEventBus`, `ConfigureRetry`,
 `ConfigureLogging`), the middleware pipeline slots (logging, tracing, retry, custom middlewares),
-Polly-based retry policies, the Newtonsoft JSON serializer, the Redis saga store, outbox-aware
-event-bus decoration, and health checks.
+Polly-based retry policies, the Newtonsoft JSON serializer, the transport-neutral outgoing
+direct/Outbox pipeline, and health checks.
 
 ## Registration
 

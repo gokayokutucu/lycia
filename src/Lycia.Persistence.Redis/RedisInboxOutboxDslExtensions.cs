@@ -68,9 +68,7 @@ public static class RedisInboxOutboxDslExtensions
             var redis = sp.GetRequiredService<IDatabase>();
             return new RedisOutboxStore(redis, opts);
         });
-        persistence.Services.TryAddScoped<IOutboxDispatcher, OutboxDispatcher>();
-
-        return persistence;
+        return persistence.ActivateOutboxPipeline();
     }
 
     // Bypasses the generic WithInbox<T>()/WithOutbox<T>() escape hatches (which would re-derive provider
@@ -92,7 +90,7 @@ public static class RedisInboxOutboxDslExtensions
             var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("Lycia.Persistence.Redis");
             try
             {
-                return ConnectionMultiplexer.Connect(connectionString);
+                return ConnectionMultiplexer.Connect(connectionString!);
             }
             catch (Exception ex)
             {

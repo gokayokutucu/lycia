@@ -32,12 +32,17 @@ public class InMemoryOutboxStore : IOutboxStore
     }
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<OutboxMessage>> ClaimPendingBatchAsync(int maxCount, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<OutboxMessage>> ClaimPendingBatchAsync(int maxCount,
+        CancellationToken cancellationToken = default, int maxAttempts = 5, TimeSpan? recoveryTimeout = null)
     {
         lock (_claimLock)
         {
+            var staleBefore = DateTime.UtcNow.Subtract(recoveryTimeout ?? TimeSpan.FromMinutes(1));
             var claimed = _messages.Values
-                .Where(m => m.Status == OutboxMessageStatus.Pending)
+                .Where(m => (m.Status == OutboxMessageStatus.Pending ||
+                             m.Status == OutboxMessageStatus.ConfirmationUnknown ||
+                             ((m.Status == OutboxMessageStatus.Claimed || m.Status == OutboxMessageStatus.Publishing) &&
+                              m.UpdatedAtUtc <= staleBefore)) && m.RetryCount < maxAttempts)
                 .OrderBy(m => m.CreatedAtUtc)
                 .Take(maxCount)
                 .ToList();
@@ -53,8 +58,11 @@ public class InMemoryOutboxStore : IOutboxStore
     }
 
     /// <inheritdoc />
-    public Task MarkPublishingAsync(Guid messageId, CancellationToken cancellationToken = default) =>
-        SetStatus(messageId, OutboxMessageStatus.Publishing);
+    public Task MarkPublishingAsync(Guid messageId, CancellationToken cancellationToken = default)
+    {
+        if (_messages.TryGetValue(messageId, out var message)) message.RetryCount++;
+        return SetStatus(messageId, OutboxMessageStatus.Publishing);
+    }
 
     /// <inheritdoc />
     public Task MarkPublishedAsync(Guid messageId, CancellationToken cancellationToken = default) =>

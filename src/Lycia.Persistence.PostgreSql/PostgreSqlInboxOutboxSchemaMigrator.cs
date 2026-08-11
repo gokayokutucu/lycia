@@ -14,6 +14,7 @@ namespace Lycia.Persistence.PostgreSql;
 /// </summary>
 public static class PostgreSqlInboxOutboxSchemaMigrator
 {
+    /// <summary>Applies pending Inbox/Outbox migrations without recreating existing tables.</summary>
     public static Task RunAsync(string connectionString, string schemaName, SchemaManagementMode schemaManagement,
         CancellationToken cancellationToken = default)
     {

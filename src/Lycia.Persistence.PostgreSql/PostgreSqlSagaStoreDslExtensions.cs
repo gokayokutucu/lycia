@@ -5,6 +5,7 @@ using Lycia.Extensions;
 using Lycia.Persistence.Relational.Internal.Sessions;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Persistence;
+using Lycia.Saga.Abstractions.Outbox;
 using Lycia.Saga.Abstractions.Scheduling;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -45,7 +46,8 @@ public static class PostgreSqlSagaStoreDslExtensions
             sp.GetRequiredService<IEventBus>(),
             sp.GetRequiredService<ISagaIdGenerator>(),
             sp.GetRequiredService<ISagaCompensationCoordinator>(),
-            sp.GetService<IMessageScheduler>()));
+            sp.GetService<IMessageScheduler>(),
+            sp.GetService<IOutgoingMessagePipeline>()));
 
         // Prepares the relational transaction boundary for a future atomic Saga+Inbox+Outbox commit.
         // Not yet wired into SagaStore/Inbox/Outbox operations - see the Strong Consistency roadmap item.

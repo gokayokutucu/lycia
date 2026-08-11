@@ -32,7 +32,8 @@ public interface IOutboxStore
     /// messages, transitioning them to <see cref="OutboxMessageStatus.Claimed"/> so a publisher
     /// worker can dispatch them without another worker claiming the same rows.
     /// </summary>
-    Task<IReadOnlyList<OutboxMessage>> ClaimPendingBatchAsync(int maxCount, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<OutboxMessage>> ClaimPendingBatchAsync(int maxCount, CancellationToken cancellationToken = default,
+        int maxAttempts = 5, TimeSpan? recoveryTimeout = null);
 
     Task MarkPublishingAsync(Guid messageId, CancellationToken cancellationToken = default);
 

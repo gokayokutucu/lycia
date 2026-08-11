@@ -4,6 +4,7 @@ using Lycia.Common.Messaging;
 using Lycia.Messaging;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Messaging;
+using Lycia.Saga.Abstractions.Outbox;
 using Lycia.Saga.Abstractions.Serializers;
 using Lycia.Saga.Extensions;
 using Lycia.Saga.Abstractions.Scheduling;
@@ -18,7 +19,7 @@ namespace Lycia.Extensions.Nats;
 /// Lycia NATS transport. JetStream is the default for durable saga delivery; Core NATS is an
 /// explicitly selected ephemeral mode for workloads that tolerate subscriber absence.
 /// </summary>
-public sealed class NatsEventBus : IEventBus, INativeSchedulingTransport, IAsyncDisposable
+public sealed class NatsEventBus : IEventBus, IConfirmedEventBus, INativeSchedulingTransport, IAsyncDisposable
 {
     private readonly IDictionary<string, (Type MessageType, Type HandlerType)> _queueTypeMap;
     private readonly NatsEventBusOptions _options;
@@ -98,6 +99,37 @@ public sealed class NatsEventBus : IEventBus, INativeSchedulingTransport, IAsync
             throw new InvalidOperationException(
                 $"Response '{@event.GetType().FullName}' cannot be published. Use Respond(request, response)." );
         return PublishMessageAsync(@event, sagaId, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task SendConfirmed<TCommand>(TCommand command, Type? handlerType, Guid? sagaId,
+        CancellationToken cancellationToken = default) where TCommand : ICommand
+    {
+        RequireJetStreamConfirmation();
+        await Send(command, handlerType, sagaId, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task PublishConfirmed<TEvent>(TEvent message, Type? handlerType, Guid? sagaId,
+        CancellationToken cancellationToken = default) where TEvent : IEvent
+    {
+        RequireJetStreamConfirmation();
+        await Publish(message, handlerType, sagaId, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task RespondConfirmed<TRequest, TResponse>(TRequest request, TResponse response, Type? handlerType,
+        Guid? sagaId, CancellationToken cancellationToken = default)
+        where TRequest : IMessage where TResponse : IResponse<TRequest>
+    {
+        RequireJetStreamConfirmation();
+        await Respond(request, response, handlerType, sagaId, cancellationToken).ConfigureAwait(false);
+    }
+
+    private void RequireJetStreamConfirmation()
+    {
+        if (!_options.UseJetStream)
+            throw new InvalidOperationException("Core NATS does not provide a durable broker publish acknowledgement; use JetStream for Outbox confirmation.");
     }
 
     /// <inheritdoc />

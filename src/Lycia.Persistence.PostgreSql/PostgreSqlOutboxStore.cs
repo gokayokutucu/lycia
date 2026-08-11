@@ -88,7 +88,8 @@ public class PostgreSqlOutboxStore(PostgreSqlOutboxOptions options) : IOutboxSto
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<OutboxMessage>> ClaimPendingBatchAsync(int maxCount, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<OutboxMessage>> ClaimPendingBatchAsync(int maxCount,
+        CancellationToken cancellationToken = default, int maxAttempts = 5, TimeSpan? recoveryTimeout = null)
     {
         using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
@@ -98,7 +99,9 @@ public class PostgreSqlOutboxStore(PostgreSqlOutboxOptions options) : IOutboxSto
             SET status = @claimedStatus, updated_at_utc = now()
             WHERE message_id IN (
                 SELECT message_id FROM {OutboxTable}
-                WHERE status = @pendingStatus
+                WHERE (status = @pendingStatus OR status = @unknownStatus OR
+                      ((status = @claimedStatus OR status = @publishingStatus) AND updated_at_utc <= @staleBefore))
+                  AND retry_count < @maxAttempts
                 ORDER BY created_at_utc
                 LIMIT @maxCount
                 FOR UPDATE SKIP LOCKED
@@ -107,7 +110,12 @@ public class PostgreSqlOutboxStore(PostgreSqlOutboxOptions options) : IOutboxSto
             """);
         command.Parameters.AddWithValue("claimedStatus", (int)OutboxMessageStatus.Claimed);
         command.Parameters.AddWithValue("pendingStatus", (int)OutboxMessageStatus.Pending);
+        command.Parameters.AddWithValue("unknownStatus", (int)OutboxMessageStatus.ConfirmationUnknown);
+        command.Parameters.AddWithValue("publishingStatus", (int)OutboxMessageStatus.Publishing);
         command.Parameters.AddWithValue("maxCount", maxCount);
+        command.Parameters.AddWithValue("maxAttempts", maxAttempts);
+        command.Parameters.AddWithValue("staleBefore",
+            DateTime.UtcNow.Subtract(recoveryTimeout ?? TimeSpan.FromMinutes(1)));
 
         var claimed = new List<OutboxMessage>();
         using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -121,7 +129,7 @@ public class PostgreSqlOutboxStore(PostgreSqlOutboxOptions options) : IOutboxSto
 
     /// <inheritdoc />
     public Task MarkPublishingAsync(Guid messageId, CancellationToken cancellationToken = default) =>
-        UpdateStatusAsync(messageId, OutboxMessageStatus.Publishing, null, cancellationToken);
+        UpdateStatusAsync(messageId, OutboxMessageStatus.Publishing, null, cancellationToken, incrementRetry: true);
 
     /// <inheritdoc />
     public Task MarkPublishedAsync(Guid messageId, CancellationToken cancellationToken = default) =>
@@ -136,18 +144,20 @@ public class PostgreSqlOutboxStore(PostgreSqlOutboxOptions options) : IOutboxSto
         UpdateStatusAsync(messageId, OutboxMessageStatus.Failed, failureInfo, cancellationToken);
 
     private async Task UpdateStatusAsync(Guid messageId, OutboxMessageStatus status, SagaStepFailureInfo? failureInfo,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool incrementRetry = false)
     {
         using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         using var command = CreateCommand(connection, $"""
             UPDATE {OutboxTable}
-            SET status = @status, failure_info_json = COALESCE(@failureInfo, failure_info_json), updated_at_utc = now()
+            SET status = @status, failure_info_json = COALESCE(@failureInfo, failure_info_json),
+                retry_count = retry_count + @retryIncrement, updated_at_utc = now()
             WHERE message_id = @messageId;
             """);
         command.Parameters.AddWithValue("messageId", messageId);
         command.Parameters.AddWithValue("status", (int)status);
+        command.Parameters.AddWithValue("retryIncrement", incrementRetry ? 1 : 0);
         AddNullableJsonb(command, "failureInfo", failureInfo != null ? JsonHelper.SerializeSafe(failureInfo) : null);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -167,6 +177,7 @@ public class PostgreSqlOutboxStore(PostgreSqlOutboxOptions options) : IOutboxSto
         var message = new OutboxMessage(messageId, messageTypeName, payload, applicationId, sagaId)
         {
             Status = status,
+            RetryCount = reader.GetInt32(6),
             FailureInfo = failureInfoJson == null ? null : JsonConvert.DeserializeObject<SagaStepFailureInfo>(failureInfoJson),
             UpdatedAtUtc = updatedAtUtc
         };

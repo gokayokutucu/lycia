@@ -70,7 +70,7 @@ public class SqlServerOutboxStore(SqlServerOutboxOptions options) : IOutboxStore
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         using var command = CreateCommand(connection, $"""
-            SELECT MessageId, MessageTypeName, Payload, ApplicationId, SagaId, Status, FailureInfoJson, CreatedAtUtc, UpdatedAtUtc
+            SELECT MessageId, MessageTypeName, Payload, ApplicationId, SagaId, Status, FailureInfoJson, RetryCount, CreatedAtUtc, UpdatedAtUtc
             FROM {OutboxTable}
             WHERE MessageId = @messageId;
             """);
@@ -83,7 +83,8 @@ public class SqlServerOutboxStore(SqlServerOutboxOptions options) : IOutboxStore
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<OutboxMessage>> ClaimPendingBatchAsync(int maxCount, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<OutboxMessage>> ClaimPendingBatchAsync(int maxCount,
+        CancellationToken cancellationToken = default, int maxAttempts = 5, TimeSpan? recoveryTimeout = null)
     {
         using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
@@ -95,17 +96,25 @@ public class SqlServerOutboxStore(SqlServerOutboxOptions options) : IOutboxStore
             UPDATE claimed
             SET Status = @claimedStatus, UpdatedAtUtc = SYSUTCDATETIME()
             OUTPUT INSERTED.MessageId, INSERTED.MessageTypeName, INSERTED.Payload, INSERTED.ApplicationId,
-                   INSERTED.SagaId, INSERTED.Status, INSERTED.FailureInfoJson, INSERTED.CreatedAtUtc, INSERTED.UpdatedAtUtc
+                   INSERTED.SagaId, INSERTED.Status, INSERTED.FailureInfoJson, INSERTED.RetryCount,
+                   INSERTED.CreatedAtUtc, INSERTED.UpdatedAtUtc
             FROM (
                 SELECT TOP (@maxCount) *
                 FROM {OutboxTable} WITH (ROWLOCK, READPAST)
-                WHERE Status = @pendingStatus
+                WHERE (Status = @pendingStatus OR Status = @unknownStatus OR
+                      ((Status = @claimedStatus OR Status = @publishingStatus) AND UpdatedAtUtc <= @staleBefore))
+                  AND RetryCount < @maxAttempts
                 ORDER BY CreatedAtUtc
             ) AS claimed;
             """);
         command.Parameters.AddWithValue("@maxCount", maxCount);
         command.Parameters.AddWithValue("@pendingStatus", (int)OutboxMessageStatus.Pending);
+        command.Parameters.AddWithValue("@unknownStatus", (int)OutboxMessageStatus.ConfirmationUnknown);
         command.Parameters.AddWithValue("@claimedStatus", (int)OutboxMessageStatus.Claimed);
+        command.Parameters.AddWithValue("@publishingStatus", (int)OutboxMessageStatus.Publishing);
+        command.Parameters.AddWithValue("@maxAttempts", maxAttempts);
+        command.Parameters.AddWithValue("@staleBefore",
+            DateTime.UtcNow.Subtract(recoveryTimeout ?? TimeSpan.FromMinutes(1)));
 
         var claimed = new List<OutboxMessage>();
         using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -126,11 +135,13 @@ public class SqlServerOutboxStore(SqlServerOutboxOptions options) : IOutboxStore
         var sagaId = reader.IsDBNull(4) ? (Guid?)null : reader.GetGuid(4);
         var status = (OutboxMessageStatus)reader.GetInt32(5);
         var failureInfoJson = reader.IsDBNull(6) ? null : reader.GetString(6);
-        var updatedAtUtc = reader.GetDateTime(8);
+        var retryCount = reader.GetInt32(7);
+        var updatedAtUtc = reader.GetDateTime(9);
 
         var message = new OutboxMessage(messageId, messageTypeName, payload, applicationId, sagaId)
         {
             Status = status,
+            RetryCount = retryCount,
             FailureInfo = failureInfoJson == null ? null : JsonConvert.DeserializeObject<SagaStepFailureInfo>(failureInfoJson),
             UpdatedAtUtc = updatedAtUtc
         };
@@ -140,7 +151,7 @@ public class SqlServerOutboxStore(SqlServerOutboxOptions options) : IOutboxStore
 
     /// <inheritdoc />
     public Task MarkPublishingAsync(Guid messageId, CancellationToken cancellationToken = default) =>
-        UpdateStatusAsync(messageId, OutboxMessageStatus.Publishing, null, cancellationToken);
+        UpdateStatusAsync(messageId, OutboxMessageStatus.Publishing, null, cancellationToken, incrementRetry: true);
 
     /// <inheritdoc />
     public Task MarkPublishedAsync(Guid messageId, CancellationToken cancellationToken = default) =>
@@ -155,18 +166,20 @@ public class SqlServerOutboxStore(SqlServerOutboxOptions options) : IOutboxStore
         UpdateStatusAsync(messageId, OutboxMessageStatus.Failed, failureInfo, cancellationToken);
 
     private async Task UpdateStatusAsync(Guid messageId, OutboxMessageStatus status, SagaStepFailureInfo? failureInfo,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool incrementRetry = false)
     {
         using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         using var command = CreateCommand(connection, $"""
             UPDATE {OutboxTable}
-            SET Status = @status, FailureInfoJson = @failureInfo, UpdatedAtUtc = SYSUTCDATETIME()
+            SET Status = @status, FailureInfoJson = @failureInfo,
+                RetryCount = RetryCount + @retryIncrement, UpdatedAtUtc = SYSUTCDATETIME()
             WHERE MessageId = @messageId;
             """);
         command.Parameters.AddWithValue("@messageId", messageId);
         command.Parameters.AddWithValue("@status", (int)status);
+        command.Parameters.AddWithValue("@retryIncrement", incrementRetry ? 1 : 0);
         command.Parameters.AddWithValue("@failureInfo",
             (object?)(failureInfo != null ? JsonHelper.SerializeSafe(failureInfo) : null) ?? DBNull.Value);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);

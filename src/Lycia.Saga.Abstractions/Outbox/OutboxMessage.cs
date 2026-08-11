@@ -23,6 +23,12 @@ public class OutboxMessage
     /// <summary>Stable identity of the outgoing message. Must remain the same value across retries/recovery.</summary>
     public Guid MessageId { get; }
 
+    /// <summary>
+    /// Stable identity of the durable Outbox record. Lycia deliberately uses the message identity as
+    /// the idempotency key so retry and recovery cannot create a second durable intent.
+    /// </summary>
+    public Guid OutboxId => MessageId;
+
     /// <summary>CLR type name of the captured message, used to deserialize <see cref="Payload"/> on publish.</summary>
     public string MessageTypeName { get; }
 
@@ -34,6 +40,9 @@ public class OutboxMessage
     public Guid? SagaId { get; }
 
     public OutboxMessageStatus Status { get; set; }
+
+    /// <summary>Number of transport dispatch attempts made with this stable <see cref="MessageId"/>.</summary>
+    public int RetryCount { get; set; }
 
     public SagaStepFailureInfo? FailureInfo { get; set; }
 

@@ -13,6 +13,7 @@ using Lycia.Saga.Contexts;
 using Lycia.Saga.Exceptions;
 using Lycia.Saga.Helpers;
 using Lycia.Saga.Abstractions.Scheduling;
+using Lycia.Saga.Abstractions.Outbox;
 using Newtonsoft.Json;
 using System.Collections.Concurrent;
 
@@ -26,7 +27,8 @@ public class InMemorySagaStore(
     IEventBus eventBus,
     ISagaIdGenerator sagaIdGenerator,
     ISagaCompensationCoordinator compensationCoordinator,
-    IMessageScheduler? messageScheduler = null) : ISagaStore, IVersionedSagaStore
+    IMessageScheduler? messageScheduler = null,
+    IOutgoingMessagePipeline? outgoingMessagePipeline = null) : ISagaStore, IVersionedSagaStore
 {
     // Stores saga data per sagaId
     private readonly ConcurrentDictionary<Guid, object> _sagaData = new();
@@ -290,7 +292,8 @@ public class InMemorySagaStore(
             sagaStore: this,
             sagaIdGenerator: sagaIdGenerator, // Use the injected field
             compensationCoordinator: compensationCoordinator,
-            messageScheduler: messageScheduler
+            messageScheduler: messageScheduler,
+            outgoingMessagePipeline: outgoingMessagePipeline
         );
 
         return Task.FromResult(context);

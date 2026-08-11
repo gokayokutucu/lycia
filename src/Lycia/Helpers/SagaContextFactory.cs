@@ -9,6 +9,7 @@ using Lycia.Saga.Abstractions.Contexts;
 using Lycia.Saga.Contexts;
 using Lycia.Saga.Helpers;
 using Lycia.Saga.Abstractions.Scheduling;
+using Lycia.Saga.Abstractions.Outbox;
 using Microsoft.Extensions.Options;
 
 namespace Lycia.Helpers;
@@ -38,6 +39,7 @@ public static class SagaContextFactory
 
         var handlerType = handler.GetType();
         var messageScheduler = serviceProvider.GetService(typeof(IMessageScheduler)) as IMessageScheduler;
+        var outgoingMessagePipeline = serviceProvider.GetService(typeof(IOutgoingMessagePipeline)) as IOutgoingMessagePipeline;
 
         // Prefer the overload Initialize(ISagaContext<...>, IOptions&lt;SagaOptions&gt;) if available,
         // otherwise fall back to Initialize(ISagaContext&lt;...&gt;)
@@ -80,7 +82,8 @@ public static class SagaContextFactory
                 sagaStore,
                 sagaIdGenerator,
                 compensationCoordinator,
-                messageScheduler
+                messageScheduler,
+                outgoingMessagePipeline
             );
         }
         else if (initParamType.IsGenericType && initParamType.GetGenericTypeDefinition() == typeof(ISagaContext<>))
@@ -98,7 +101,8 @@ public static class SagaContextFactory
                 sagaStore,
                 sagaIdGenerator,
                 compensationCoordinator,
-                messageScheduler
+                messageScheduler,
+                outgoingMessagePipeline
             );
         }
         else

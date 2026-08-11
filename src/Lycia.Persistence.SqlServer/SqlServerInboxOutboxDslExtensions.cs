@@ -61,8 +61,6 @@ public static class SqlServerInboxOutboxDslExtensions
 
         persistence.Services.RemoveAll(typeof(IOutboxStore));
         persistence.Services.AddScoped<IOutboxStore>(_ => new SqlServerOutboxStore(options));
-        persistence.Services.TryAddScoped<IOutboxDispatcher, OutboxDispatcher>();
-
-        return persistence;
+        return persistence.ActivateOutboxPipeline();
     }
 }
