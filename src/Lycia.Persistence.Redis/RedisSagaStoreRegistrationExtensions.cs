@@ -4,6 +4,8 @@
 using Lycia.Extensions.Configurations;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Persistence;
+using Lycia.Saga.Abstractions.Outbox;
+using Lycia.Saga.Abstractions.Scheduling;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -36,7 +38,7 @@ internal static class RedisSagaStoreRegistrationExtensions
             var logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("Lycia.Persistence.Redis");
             try
             {
-                return ConnectionMultiplexer.Connect(connectionString);
+                return ConnectionMultiplexer.Connect(connectionString!);
             }
             catch (Exception ex)
             {
@@ -59,7 +61,8 @@ internal static class RedisSagaStoreRegistrationExtensions
             var idGen = sp.GetRequiredService<ISagaIdGenerator>();
             var compCoord = sp.GetRequiredService<ISagaCompensationCoordinator>();
             var redis = sp.GetRequiredService<IDatabase>();
-            return new RedisSagaStore(redis, eventBus, idGen, compCoord, storeOpts);
+            return new RedisSagaStore(redis, eventBus, idGen, compCoord, storeOpts,
+                sp.GetService<IMessageScheduler>(), sp.GetService<IOutgoingMessagePipeline>());
         });
 
         // Redis cannot join a real cross-store transaction; register the non-atomic default so

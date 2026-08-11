@@ -8,6 +8,7 @@ using Lycia.Common.SagaSteps;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Contexts;
 using Lycia.Saga.Abstractions.Messaging;
+using Lycia.Saga.Abstractions.Outbox;
 using Lycia.Saga.Abstractions.Scheduling;
 using Lycia.Saga.Extensions;
 
@@ -21,7 +22,8 @@ public class SagaContext<TInitialMessage>(
     ISagaStore sagaStore,
     ISagaIdGenerator sagaIdGenerator,
     ISagaCompensationCoordinator compensationCoordinator,
-    IMessageScheduler? messageScheduler = null) : ISagaContext<TInitialMessage>, ISchedulingSagaContext
+    IMessageScheduler? messageScheduler = null,
+    IOutgoingMessagePipeline? outgoingMessagePipeline = null) : ISagaContext<TInitialMessage>, ISchedulingSagaContext
     where TInitialMessage : IMessage
 {
     public ISagaStore SagaStore { get; } = sagaStore;
@@ -29,6 +31,8 @@ public class SagaContext<TInitialMessage>(
     public Guid SagaId { get; } = sagaId == Guid.Empty ? sagaIdGenerator.Generate() : sagaId;
     public Type HandlerTypeOfCurrentStep { get; } = handlerTypeOfCurrentStep;
     protected IMessageScheduler? MessageScheduler { get; } = messageScheduler;
+    protected IOutgoingMessagePipeline OutgoingMessagePipeline { get; } =
+        outgoingMessagePipeline ?? new DirectOutgoingMessagePipeline(eventBus);
 
     /// <inheritdoc />
     public Task<Guid> ScheduleMessageAsync(IMessage message, ScheduleDelay delay, Guid? scheduleId,
@@ -60,7 +64,7 @@ public class SagaContext<TInitialMessage>(
     public Task Send<T>(T command, CancellationToken cancellationToken = default) where T : ICommand
     {
         command.PrepareCommand(CurrentStep, SagaId, eventBus.ApplicationId);
-        return eventBus.Send(command, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
+        return OutgoingMessagePipeline.Send(command, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 
     public Task Respond<TRequest, TResponse>(TRequest request, TResponse response,
@@ -69,19 +73,19 @@ public class SagaContext<TInitialMessage>(
         where TResponse : IResponse<TRequest>
     {
         response.PrepareResponse(request, SagaId, eventBus.ApplicationId);
-        return eventBus.Respond(request, response, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
+        return OutgoingMessagePipeline.Respond(request, response, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 
     public Task Publish<T>(T @event, CancellationToken cancellationToken = default) where T : IEvent
     {
         @event.PrepareEvent(CurrentStep, SagaId);
-        return eventBus.Publish(@event, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
+        return OutgoingMessagePipeline.Publish(@event, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 
     public Task Publish<T>(T @event, Type? handlerType, CancellationToken cancellationToken = default) where T : IEvent
     {
         @event.PrepareEvent(CurrentStep, SagaId);
-        return eventBus.Publish(@event, handlerType, SagaId, cancellationToken);
+        return OutgoingMessagePipeline.Publish(@event, handlerType, SagaId, cancellationToken);
     }
 
     public ISagaStepFluent PublishWithTracking<TNextStep>(TNextStep nextEvent,
@@ -95,7 +99,7 @@ public class SagaContext<TInitialMessage>(
 
         var adapterContext =
             new StepSpecificSagaContextAdapter<TInitialMessage>(SagaId, CurrentStep, HandlerTypeOfCurrentStep, eventBus,
-                SagaStore, compensationCoordinator, MessageScheduler);
+                SagaStore, compensationCoordinator, MessageScheduler, OutgoingMessagePipeline);
 
         return (ISagaStepFluent)ReactiveSagaStepFluent<TInitialMessage>.Create(
             CurrentStep.GetType(),
@@ -114,7 +118,7 @@ public class SagaContext<TInitialMessage>(
 
         var adapterContext =
             new StepSpecificSagaContextAdapter<TInitialMessage>(SagaId, CurrentStep, HandlerTypeOfCurrentStep, eventBus,
-                SagaStore, compensationCoordinator, MessageScheduler);
+                SagaStore, compensationCoordinator, MessageScheduler, OutgoingMessagePipeline);
 
         return (ISagaStepFluent)ReactiveSagaStepFluent<TInitialMessage>.Create(
             CurrentStep.GetType(),
@@ -131,7 +135,7 @@ public class SagaContext<TInitialMessage>(
     {
         var adapterContext =
             new StepSpecificSagaContextAdapter<TInitialMessage>(SagaId, CurrentStep, HandlerTypeOfCurrentStep, eventBus,
-                SagaStore, compensationCoordinator, MessageScheduler);
+                SagaStore, compensationCoordinator, MessageScheduler, OutgoingMessagePipeline);
 
         return (ISagaStepFluent)ReactiveSagaStepFluent<TInitialMessage>.Create(
             CurrentStep.GetType(),
@@ -148,7 +152,7 @@ public class SagaContext<TInitialMessage>(
     {
         var adapterContext =
             new StepSpecificSagaContextAdapter<TInitialMessage>(SagaId, CurrentStep, HandlerTypeOfCurrentStep, eventBus,
-                SagaStore, compensationCoordinator, MessageScheduler);
+                SagaStore, compensationCoordinator, MessageScheduler, OutgoingMessagePipeline);
 
         return (ISagaStepFluent)ReactiveSagaStepFluent<TInitialMessage>.Create(
             CurrentStep.GetType(),
@@ -161,7 +165,7 @@ public class SagaContext<TInitialMessage>(
     public Task Compensate<T>(T @event, CancellationToken cancellationToken = default) where T : IFailedEventBase
     {
         @event.PrepareEvent(CurrentStep, SagaId);
-        return eventBus.Publish(@event, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
+        return OutgoingMessagePipeline.Publish(@event, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 
     public virtual Task MarkAsCompensated<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage
@@ -245,9 +249,10 @@ public class SagaContext<TInitialMessage, TSagaData> : SagaContext<TInitialMessa
 
     public SagaContext(Guid sagaId, TInitialMessage currentStep, Type handlerTypeOfCurrentStep, TSagaData data,
         IEventBus eventBus, ISagaStore sagaStore, ISagaIdGenerator sagaIdGenerator,
-        ISagaCompensationCoordinator compensationCoordinator, IMessageScheduler? messageScheduler = null)
+        ISagaCompensationCoordinator compensationCoordinator, IMessageScheduler? messageScheduler = null,
+        IOutgoingMessagePipeline? outgoingMessagePipeline = null)
         : base(sagaId, currentStep, handlerTypeOfCurrentStep, eventBus, sagaStore, sagaIdGenerator,
-            compensationCoordinator, messageScheduler)
+            compensationCoordinator, messageScheduler, outgoingMessagePipeline)
     {
         Data = data;
         _eventBus = eventBus;
@@ -271,7 +276,7 @@ public class SagaContext<TInitialMessage, TSagaData> : SagaContext<TInitialMessa
                 Data.GetType(),
                 SagaId, CurrentStep,
                 HandlerTypeOfCurrentStep, Data, _eventBus,
-                _sagaStore, _compensationCoordinator, MessageScheduler);
+                _sagaStore, _compensationCoordinator, MessageScheduler, OutgoingMessagePipeline);
 
         return (ISagaStepFluent)CoordinatedSagaStepFluent<TInitialMessage, TSagaData>.Create(
             CurrentStep.GetType(),
@@ -296,7 +301,7 @@ public class SagaContext<TInitialMessage, TSagaData> : SagaContext<TInitialMessa
                 Data.GetType(),
                 SagaId, CurrentStep,
                 HandlerTypeOfCurrentStep, Data, _eventBus,
-                _sagaStore, _compensationCoordinator, MessageScheduler);
+                _sagaStore, _compensationCoordinator, MessageScheduler, OutgoingMessagePipeline);
 
         return (ISagaStepFluent)CoordinatedSagaStepFluent<TInitialMessage, TSagaData>.Create(
             CurrentStep.GetType(),
@@ -318,7 +323,7 @@ public class SagaContext<TInitialMessage, TSagaData> : SagaContext<TInitialMessa
                 Data.GetType(),
                 SagaId, CurrentStep,
                 HandlerTypeOfCurrentStep, Data, _eventBus,
-                _sagaStore, _compensationCoordinator, MessageScheduler);
+                _sagaStore, _compensationCoordinator, MessageScheduler, OutgoingMessagePipeline);
 
         return (ISagaStepFluent)CoordinatedSagaStepFluent<TInitialMessage, TSagaData>.Create(
             CurrentStep.GetType(),
@@ -338,7 +343,7 @@ public class SagaContext<TInitialMessage, TSagaData> : SagaContext<TInitialMessa
                 Data.GetType(),
                 SagaId, CurrentStep,
                 HandlerTypeOfCurrentStep, Data, _eventBus,
-                _sagaStore, _compensationCoordinator, MessageScheduler);
+                _sagaStore, _compensationCoordinator, MessageScheduler, OutgoingMessagePipeline);
 
         return (ISagaStepFluent)CoordinatedSagaStepFluent<TInitialMessage, TSagaData>.Create(
             CurrentStep.GetType(),
@@ -425,10 +430,13 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
     IEventBus eventBus,
     ISagaStore sagaStore,
     ISagaCompensationCoordinator compensationCoordinator,
-    IMessageScheduler? messageScheduler = null)
+    IMessageScheduler? messageScheduler = null,
+    IOutgoingMessagePipeline? outgoingMessagePipeline = null)
     : ISagaContext<TCurrentStepAdapter>, ISchedulingSagaContext
     where TCurrentStepAdapter : IMessage
 {
+    private IOutgoingMessagePipeline OutgoingMessagePipeline { get; } =
+        outgoingMessagePipeline ?? new DirectOutgoingMessagePipeline(eventBus);
     public Guid SagaId => sagaId;
     private TCurrentStepAdapter CurrentStep { get; } = currentStep;
     public ISagaStore SagaStore => sagaStore;
@@ -453,7 +461,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
     public Task Send<T>(T command, CancellationToken cancellationToken = default) where T : ICommand
     {
         command.PrepareCommand(CurrentStep, SagaId, eventBus.ApplicationId);
-        return eventBus.Send(command, HandlerTypeOfCurrentStep, sagaId, cancellationToken);
+        return OutgoingMessagePipeline.Send(command, HandlerTypeOfCurrentStep, sagaId, cancellationToken);
     }
 
     public Task Respond<TRequest, TResponse>(TRequest request, TResponse response,
@@ -462,19 +470,19 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
         where TResponse : IResponse<TRequest>
     {
         response.PrepareResponse(request, SagaId, eventBus.ApplicationId);
-        return eventBus.Respond(request, response, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
+        return OutgoingMessagePipeline.Respond(request, response, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 
     public Task Publish<T>(T @event, CancellationToken cancellationToken = default) where T : IEvent
     {
         @event.PrepareEvent(CurrentStep, SagaId);
-        return eventBus.Publish(@event, HandlerTypeOfCurrentStep, sagaId, cancellationToken);
+        return OutgoingMessagePipeline.Publish(@event, HandlerTypeOfCurrentStep, sagaId, cancellationToken);
     }
 
     public Task Publish<T>(T @event, Type? handlerType, CancellationToken cancellationToken = default) where T : IEvent
     {
         @event.PrepareEvent(CurrentStep, SagaId);
-        return eventBus.Publish(@event, handlerType, SagaId, cancellationToken);
+        return OutgoingMessagePipeline.Publish(@event, handlerType, SagaId, cancellationToken);
     }
 
     /// <summary>
@@ -494,7 +502,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
         var nextStepContext =
             new StepSpecificSagaContextAdapter<TCurrentStepAdapter>(sagaId, CurrentStep, HandlerTypeOfCurrentStep,
                 eventBus,
-                SagaStore, compensationCoordinator, messageScheduler);
+                SagaStore, compensationCoordinator, messageScheduler, OutgoingMessagePipeline);
 
         return (ISagaStepFluent)ReactiveSagaStepFluent<TCurrentStepAdapter>.Create(
             CurrentStep.GetType(),
@@ -524,7 +532,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
             CurrentStep.GetType(),
             sagaId, CurrentStep,
             HandlerTypeOfCurrentStep, eventBus,
-            SagaStore, compensationCoordinator, messageScheduler);
+            SagaStore, compensationCoordinator, messageScheduler, OutgoingMessagePipeline);
 
         return (ISagaStepFluent)ReactiveSagaStepFluent<TCurrentStepAdapter>.Create(
             CurrentStep.GetType(),
@@ -543,7 +551,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
         var nextStepContext =
             new StepSpecificSagaContextAdapter<TCurrentStepAdapter>(sagaId, CurrentStep, HandlerTypeOfCurrentStep,
                 eventBus,
-                SagaStore, compensationCoordinator, messageScheduler);
+                SagaStore, compensationCoordinator, messageScheduler, OutgoingMessagePipeline);
 
         return (ISagaStepFluent)ReactiveSagaStepFluent<TCurrentStepAdapter>.Create(
             CurrentStep.GetType(),
@@ -561,7 +569,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
         var nextStepContext =
             new StepSpecificSagaContextAdapter<TCurrentStepAdapter>(sagaId, CurrentStep, HandlerTypeOfCurrentStep,
                 eventBus,
-                SagaStore, compensationCoordinator, messageScheduler);
+                SagaStore, compensationCoordinator, messageScheduler, OutgoingMessagePipeline);
 
         return (ISagaStepFluent)ReactiveSagaStepFluent<TCurrentStepAdapter>.Create(
             CurrentStep.GetType(),
@@ -575,7 +583,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
     public Task Compensate<T>(T @event, CancellationToken cancellationToken = default) where T : IFailedEventBase
     {
         @event.PrepareEvent(CurrentStep, SagaId);
-        return eventBus.Publish(@event, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
+        return OutgoingMessagePipeline.Publish(@event, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 
     public Task MarkAsComplete<TAdapterStep>(CancellationToken cancellationToken = default) where TAdapterStep : IMessage
@@ -653,7 +661,8 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
         IEventBus eventBus,
         ISagaStore sagaStore,
         ISagaCompensationCoordinator compensationCoordinator,
-        IMessageScheduler? messageScheduler = null)
+        IMessageScheduler? messageScheduler = null,
+        IOutgoingMessagePipeline? outgoingMessagePipeline = null)
     {
         var adapterOpen = typeof(StepSpecificSagaContextAdapter<>);
         var adapterClosed = adapterOpen.MakeGenericType(messageType);
@@ -666,7 +675,8 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
             eventBus,
             sagaStore,
             compensationCoordinator,
-            messageScheduler
+            messageScheduler,
+            outgoingMessagePipeline
         )!;
     }
 }
@@ -679,12 +689,15 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
     IEventBus eventBus,
     ISagaStore sagaStore,
     ISagaCompensationCoordinator compensationCoordinator,
-    IMessageScheduler? messageScheduler = null)
+    IMessageScheduler? messageScheduler = null,
+    IOutgoingMessagePipeline? outgoingMessagePipeline = null)
     : ISagaContext<TCurrentStepAdapter, TSagaDataAdapter>, ISchedulingSagaContext
     where TCurrentStepAdapter : IMessage
     where TSagaDataAdapter : SagaData
 {
     // Not used by ISagaContext methods but part of constructor signature
+    private IOutgoingMessagePipeline OutgoingMessagePipeline { get; } =
+        outgoingMessagePipeline ?? new DirectOutgoingMessagePipeline(eventBus);
 
     public Guid SagaId => sagaId;
     private TCurrentStepAdapter StepAdapter { get; } = stepAdapter; //Message adapter
@@ -711,7 +724,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
     public Task Send<T>(T command, CancellationToken cancellationToken = default) where T : ICommand
     {
         command.PrepareCommand(StepAdapter, SagaId, eventBus.ApplicationId);
-        return eventBus.Send(command, HandlerTypeOfCurrentStep, sagaId, cancellationToken);
+        return OutgoingMessagePipeline.Send(command, HandlerTypeOfCurrentStep, sagaId, cancellationToken);
     }
 
     public Task Respond<TRequest, TResponse>(TRequest request, TResponse response,
@@ -720,19 +733,19 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
         where TResponse : IResponse<TRequest>
     {
         response.PrepareResponse(request, SagaId, eventBus.ApplicationId);
-        return eventBus.Respond(request, response, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
+        return OutgoingMessagePipeline.Respond(request, response, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 
     public Task Publish<T>(T @event, CancellationToken cancellationToken = default) where T : IEvent
     {
         @event.PrepareEvent(StepAdapter, SagaId);
-        return eventBus.Publish(@event, HandlerTypeOfCurrentStep, sagaId, cancellationToken);
+        return OutgoingMessagePipeline.Publish(@event, HandlerTypeOfCurrentStep, sagaId, cancellationToken);
     }
 
     public Task Publish<T>(T @event, Type? handlerType, CancellationToken cancellationToken = default) where T : IEvent
     {
         @event.PrepareEvent(StepAdapter, SagaId);
-        return eventBus.Publish(@event, handlerType, sagaId, cancellationToken);
+        return OutgoingMessagePipeline.Publish(@event, handlerType, sagaId, cancellationToken);
     }
 
     // Explicit interface implementation for ISagaContext<TStepAdapter>'s tracking methods
@@ -746,7 +759,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
             StepAdapter.GetType(),
             sagaId, StepAdapter,
             HandlerTypeOfCurrentStep, eventBus,
-            SagaStore, compensationCoordinator, messageScheduler);
+            SagaStore, compensationCoordinator, messageScheduler, OutgoingMessagePipeline);
 
         return (ISagaStepFluent)ReactiveSagaStepFluent<TCurrentStepAdapter>.Create(
             StepAdapter.GetType(),
@@ -767,7 +780,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
             StepAdapter.GetType(),
             sagaId, StepAdapter,
             HandlerTypeOfCurrentStep, eventBus,
-            SagaStore, compensationCoordinator, messageScheduler);
+            SagaStore, compensationCoordinator, messageScheduler, OutgoingMessagePipeline);
 
         return (ISagaStepFluent)ReactiveSagaStepFluent<TCurrentStepAdapter>.Create(
             StepAdapter.GetType(),
@@ -785,7 +798,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
             StepAdapter.GetType(),
             sagaId, StepAdapter,
             HandlerTypeOfCurrentStep, eventBus,
-            SagaStore, compensationCoordinator, messageScheduler);
+            SagaStore, compensationCoordinator, messageScheduler, OutgoingMessagePipeline);
 
         return (ISagaStepFluent)ReactiveSagaStepFluent<TCurrentStepAdapter>.Create(
             StepAdapter.GetType(),
@@ -809,7 +822,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
             Data.GetType(),
             sagaId, StepAdapter,
             HandlerTypeOfCurrentStep, Data, eventBus,
-            SagaStore, compensationCoordinator, messageScheduler);
+            SagaStore, compensationCoordinator, messageScheduler, OutgoingMessagePipeline);
 
         return (ISagaStepFluent)CoordinatedSagaStepFluent<TCurrentStepAdapter, TSagaDataAdapter>.Create(
             StepAdapter.GetType(),
@@ -832,7 +845,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
             Data.GetType(),
             sagaId, StepAdapter,
             HandlerTypeOfCurrentStep, Data, eventBus,
-            SagaStore, compensationCoordinator, messageScheduler);
+            SagaStore, compensationCoordinator, messageScheduler, OutgoingMessagePipeline);
 
         return (ISagaStepFluent)CoordinatedSagaStepFluent<TCurrentStepAdapter, TSagaDataAdapter>.Create(
             StepAdapter.GetType(),
@@ -854,7 +867,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
             Data.GetType(),
             sagaId, StepAdapter,
             HandlerTypeOfCurrentStep, Data, eventBus,
-            SagaStore, compensationCoordinator, messageScheduler);
+            SagaStore, compensationCoordinator, messageScheduler, OutgoingMessagePipeline);
 
         return (ISagaStepFluent)CoordinatedSagaStepFluent<TCurrentStepAdapter, TSagaDataAdapter>.Create(
             StepAdapter.GetType(),
@@ -875,7 +888,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
             Data.GetType(),
             sagaId, StepAdapter,
             HandlerTypeOfCurrentStep, Data, eventBus,
-            SagaStore, compensationCoordinator, messageScheduler);
+            SagaStore, compensationCoordinator, messageScheduler, OutgoingMessagePipeline);
 
         return (ISagaStepFluent)CoordinatedSagaStepFluent<TCurrentStepAdapter, TSagaDataAdapter>.Create(
             StepAdapter.GetType(),
@@ -891,7 +904,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
     public Task Compensate<T>(T @event, CancellationToken cancellationToken = default) where T : IFailedEventBase
     {
         @event.PrepareEvent(StepAdapter, SagaId);
-        return eventBus.Publish(@event, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
+        return OutgoingMessagePipeline.Publish(@event, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
     }
 
     public async Task MarkAsComplete<TMarkStep>(CancellationToken cancellationToken = default)
@@ -987,7 +1000,8 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
         IEventBus eventBus,
         ISagaStore sagaStore,
         ISagaCompensationCoordinator compensationCoordinator,
-        IMessageScheduler? messageScheduler = null)
+        IMessageScheduler? messageScheduler = null,
+        IOutgoingMessagePipeline? outgoingMessagePipeline = null)
     {
         var adapterOpen = typeof(StepSpecificSagaContextAdapter<,>);
         var adapterClosed = adapterOpen.MakeGenericType(messageType, sagaDataType);
@@ -1001,7 +1015,8 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
             eventBus,
             sagaStore,
             compensationCoordinator,
-            messageScheduler
+            messageScheduler,
+            outgoingMessagePipeline
         )!;
     }
 }

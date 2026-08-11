@@ -7,8 +7,11 @@ using Lycia.Extensions.Helpers;
 using Lycia.Extensions.Kafka;
 using Lycia.Extensions.Nats;
 using Lycia.Extensions.Serialization;
+using Lycia.Outbox;
+using Lycia.Persistence.InMemory;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Messaging;
+using Lycia.Saga.Abstractions.Outbox;
 using Lycia.Saga.Abstractions.Scheduling;
 using Lycia.Saga.Messaging;
 using Lycia.Scheduling;
@@ -197,6 +200,38 @@ public sealed class SchedulingTests
         Assert.Equal(current.MessageId, targeted.Request.MessageId);
         Assert.Equal(response.MessageId, targeted.Response.MessageId);
         Assert.Equal("requesterservice", ((IRequestRoutingMetadata)targeted.Response).ResponseEndpoint);
+    }
+
+    [Fact]
+    public async Task Due_schedule_hands_off_once_to_the_configured_outbox_pipeline()
+    {
+        var serializer = new NewtonsoftJsonMessageSerializer();
+        var outbox = new InMemoryOutboxStore();
+        var pipeline = new OutboxOutgoingMessagePipeline(outbox, serializer);
+        var command = new TestCommand();
+        var (_, context) = serializer.CreateContextFor(typeof(TestCommand));
+        var (body, headers) = serializer.Serialize(command, context);
+        var record = new ScheduleRecord
+        {
+            ScheduleId = Guid.NewGuid(),
+            MessageId = command.MessageId,
+            MessageType = typeof(TestCommand).AssemblyQualifiedName!,
+            MessageKind = ScheduledMessageKind.Command,
+            Destination = "command.stockservice",
+            DueAtUtc = DateTimeOffset.UtcNow,
+            ScheduledAtUtc = DateTimeOffset.UtcNow.AddMinutes(-1),
+            Status = ScheduleStatus.Pending,
+            Payload = body,
+            Headers = headers.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase)
+        };
+
+        await new EventBusSchedulingDispatcher(pipeline, serializer).DispatchAsync(record);
+
+        var captured = await outbox.GetByMessageIdAsync(command.MessageId);
+        Assert.NotNull(captured);
+        var envelope = Newtonsoft.Json.JsonConvert.DeserializeObject<OutboxEnvelope>(captured!.Payload);
+        Assert.Equal(OutboxOperationKind.Send, envelope!.Operation);
+        Assert.Equal(command.MessageId, envelope.MessageId);
     }
 
     [Fact]

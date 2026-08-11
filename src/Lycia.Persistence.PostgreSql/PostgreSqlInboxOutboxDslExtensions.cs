@@ -66,8 +66,6 @@ public static class PostgreSqlInboxOutboxDslExtensions
 
         persistence.Services.RemoveAll(typeof(IOutboxStore));
         persistence.Services.AddScoped<IOutboxStore>(_ => new PostgreSqlOutboxStore(options));
-        persistence.Services.TryAddScoped<IOutboxDispatcher, OutboxDispatcher>();
-
-        return persistence;
+        return persistence.ActivateOutboxPipeline();
     }
 }

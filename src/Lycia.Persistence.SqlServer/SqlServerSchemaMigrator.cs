@@ -11,6 +11,7 @@ namespace Lycia.Persistence.SqlServer;
 /// <summary>Applies the embedded SQL Server schema for <see cref="SqlServerSagaStore"/> via the shared migration runner.</summary>
 public static class SqlServerSchemaMigrator
 {
+    /// <summary>Applies pending SagaStore migrations according to the configured schema-management mode.</summary>
     public static Task RunAsync(SqlServerSagaStoreOptions options, CancellationToken cancellationToken = default)
     {
         if (options == null) throw new ArgumentNullException(nameof(options));

@@ -4,15 +4,22 @@
 using System.Reflection;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Messaging;
+using Lycia.Saga.Abstractions.Outbox;
 using Lycia.Saga.Abstractions.Scheduling;
 using Lycia.Saga.Abstractions.Serializers;
 
 namespace Lycia.Scheduling;
 
 /// <summary>Restores durable payloads and invokes the original event-bus semantic.</summary>
-public sealed class EventBusSchedulingDispatcher(IEventBus eventBus, IMessageSerializer serializer)
+public sealed class EventBusSchedulingDispatcher(IOutgoingMessagePipeline outgoingPipeline, IMessageSerializer serializer)
     : ISchedulingDispatcher
 {
+    /// <summary>Creates a direct dispatcher for compatibility when no outgoing pipeline is supplied.</summary>
+    public EventBusSchedulingDispatcher(IEventBus eventBus, IMessageSerializer serializer)
+        : this(new DirectPipeline(eventBus), serializer)
+    {
+    }
+
     /// <inheritdoc />
     public Task DispatchAsync(ScheduleRecord record, CancellationToken cancellationToken = default)
     {
@@ -28,10 +35,10 @@ public sealed class EventBusSchedulingDispatcher(IEventBus eventBus, IMessageSer
         switch (record.MessageKind)
         {
             case ScheduledMessageKind.Command:
-                return InvokeGeneric(nameof(IEventBus.Send), new[] { messageType },
+                return InvokeGeneric(nameof(IOutgoingMessagePipeline.Send), new[] { messageType },
                     new object?[] { message, null, typedMessage.SagaId, cancellationToken });
             case ScheduledMessageKind.Event:
-                return InvokeGeneric(nameof(IEventBus.Publish), new[] { messageType },
+                return InvokeGeneric(nameof(IOutgoingMessagePipeline.Publish), new[] { messageType },
                     new object?[] { message, null, typedMessage.SagaId, cancellationToken });
             case ScheduledMessageKind.Response:
                 return DispatchResponseAsync(record, messageType, message, typedMessage.SagaId, cancellationToken);
@@ -50,7 +57,7 @@ public sealed class EventBusSchedulingDispatcher(IEventBus eventBus, IMessageSer
                                       ?? throw new InvalidOperationException("Scheduled response request type is missing."),
             "scheduled response request");
         var request = Deserialize(record.RequestPayload, record.RequestHeaders, requestType);
-        return InvokeGeneric(nameof(IEventBus.Respond), new[] { requestType, responseType },
+        return InvokeGeneric(nameof(IOutgoingMessagePipeline.Respond), new[] { requestType, responseType },
             new object?[] { request, response, null, sagaId, cancellationToken });
     }
 
@@ -62,13 +69,13 @@ public sealed class EventBusSchedulingDispatcher(IEventBus eventBus, IMessageSer
 
     private Task InvokeGeneric(string methodName, Type[] genericArguments, object?[] arguments)
     {
-        var method = typeof(IEventBus).GetMethods()
+        var method = typeof(IOutgoingMessagePipeline).GetMethods()
             .Single(candidate => candidate.Name == methodName &&
                                  candidate.IsGenericMethodDefinition &&
                                  candidate.GetGenericArguments().Length == genericArguments.Length);
         try
         {
-            return (Task)(method.MakeGenericMethod(genericArguments).Invoke(eventBus, arguments)
+            return (Task)(method.MakeGenericMethod(genericArguments).Invoke(outgoingPipeline, arguments)
                           ?? throw new InvalidOperationException($"Event bus method '{methodName}' returned null."));
         }
         catch (TargetInvocationException exception) when (exception.InnerException != null)
@@ -80,4 +87,20 @@ public sealed class EventBusSchedulingDispatcher(IEventBus eventBus, IMessageSer
     private static Type ResolveType(string assemblyQualifiedName, string role) =>
         Type.GetType(assemblyQualifiedName, throwOnError: false)
         ?? throw new InvalidOperationException($"Unable to resolve {role} type '{assemblyQualifiedName}'.");
+
+    private sealed class DirectPipeline(IEventBus eventBus) : IOutgoingMessagePipeline
+    {
+        public Task Send<TCommand>(TCommand command, Type? handlerType, Guid? sagaId,
+            CancellationToken cancellationToken = default) where TCommand : ICommand =>
+            eventBus.Send(command, handlerType, sagaId, cancellationToken);
+
+        public Task Publish<TEvent>(TEvent message, Type? handlerType, Guid? sagaId,
+            CancellationToken cancellationToken = default) where TEvent : IEvent =>
+            eventBus.Publish(message, handlerType, sagaId, cancellationToken);
+
+        public Task Respond<TRequest, TResponse>(TRequest request, TResponse response, Type? handlerType, Guid? sagaId,
+            CancellationToken cancellationToken = default)
+            where TRequest : IMessage where TResponse : IResponse<TRequest> =>
+            eventBus.Respond(request, response, handlerType, sagaId, cancellationToken);
+    }
 }

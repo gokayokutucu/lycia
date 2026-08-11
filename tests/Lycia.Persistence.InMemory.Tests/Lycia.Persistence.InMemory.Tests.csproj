@@ -25,6 +25,7 @@
         <ProjectReference Include="..\..\src\Lycia.Persistence.InMemory\Lycia.Persistence.InMemory.csproj" />
         <ProjectReference Include="..\Lycia.Persistence.TestKit\Lycia.Persistence.TestKit.csproj" />
         <ProjectReference Include="..\..\src\Lycia\Lycia.csproj" />
+        <ProjectReference Include="..\..\src\Lycia.Extensions\Lycia.Extensions.csproj" />
         <ProjectReference Include="..\..\src\Lycia.Saga\Lycia.Saga.csproj" />
         <ProjectReference Include="..\..\src\Lycia.Saga.Abstractions\Lycia.Saga.Abstractions.csproj" />
     </ItemGroup>

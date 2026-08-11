@@ -6,6 +6,7 @@ using Lycia.Extensions.Nats;
 using Lycia.Extensions.RabbitMq;
 using Lycia.Extensions.Scheduling;
 using Lycia.Middleware;
+using Lycia.Outbox;
 using Lycia.Common.SagaSteps;
 using Lycia.Persistence.Redis;
 using Lycia.Saga.Abstractions;
@@ -218,6 +219,10 @@ public class LyciaDslTests
 
         Assert.IsType<LyciaPersistenceBuilder>(persistence);
         Assert.Single(services, sd => sd.ServiceType == typeof(IOutboxStore));
+        Assert.Single(services, sd => sd.ServiceType == typeof(IOutgoingMessagePipeline) &&
+                                     sd.ImplementationType == typeof(OutboxOutgoingMessagePipeline));
+        Assert.Single(services, sd => sd.ServiceType == typeof(Microsoft.Extensions.Hosting.IHostedService) &&
+                                     sd.ImplementationType == typeof(OutboxWorker));
     }
 
     [Fact]
@@ -289,7 +294,9 @@ public class LyciaDslTests
     {
         public Task AddAsync(OutboxMessage message, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task<OutboxMessage?> GetByMessageIdAsync(Guid messageId, CancellationToken cancellationToken = default) => Task.FromResult<OutboxMessage?>(null);
-        public Task<IReadOnlyList<OutboxMessage>> ClaimPendingBatchAsync(int maxCount, CancellationToken cancellationToken = default) =>
+        public Task<IReadOnlyList<OutboxMessage>> ClaimPendingBatchAsync(int maxCount,
+            CancellationToken cancellationToken = default, int maxAttempts = 5,
+            TimeSpan? recoveryTimeout = null) =>
             Task.FromResult<IReadOnlyList<OutboxMessage>>(Array.Empty<OutboxMessage>());
         public Task MarkPublishingAsync(Guid messageId, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task MarkPublishedAsync(Guid messageId, CancellationToken cancellationToken = default) => Task.CompletedTask;

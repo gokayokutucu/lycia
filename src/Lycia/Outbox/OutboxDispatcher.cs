@@ -6,22 +6,23 @@ using Lycia.Common.SagaSteps;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Abstractions.Outbox;
+using Lycia.Saga.Abstractions.Serializers;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
 namespace Lycia.Outbox;
 
 /// <inheritdoc cref="IOutboxDispatcher" />
-public class OutboxDispatcher(IOutboxStore outboxStore, IEventBus eventBus, ILogger<OutboxDispatcher> logger)
+public class OutboxDispatcher(IOutboxStore outboxStore, IEventBus eventBus, IMessageSerializer serializer,
+    ILogger<OutboxDispatcher> logger)
     : IOutboxDispatcher
 {
-    private static readonly MethodInfo PublishMethodDefinition = typeof(IEventBus)
-        .GetMethod(nameof(IEventBus.Publish))!;
-
     /// <inheritdoc />
-    public async Task<OutboxDispatchResult> DispatchPendingBatchAsync(int maxCount = 50, CancellationToken cancellationToken = default)
+    public async Task<OutboxDispatchResult> DispatchPendingBatchAsync(int maxCount = 50,
+        CancellationToken cancellationToken = default, int maxAttempts = 5, TimeSpan? recoveryTimeout = null)
     {
-        var claimed = await outboxStore.ClaimPendingBatchAsync(maxCount, cancellationToken);
+        var claimed = await outboxStore.ClaimPendingBatchAsync(maxCount, cancellationToken, maxAttempts,
+            recoveryTimeout);
 
         var published = 0;
         var confirmationUnknown = 0;
@@ -51,22 +52,19 @@ public class OutboxDispatcher(IOutboxStore outboxStore, IEventBus eventBus, ILog
     {
         // Local failure before anything left the process: the message never reached the transport,
         // so it's safe to mark Failed rather than ConfirmationUnknown.
-        object? deserialized;
-        Type? messageType;
+        OutboxEnvelope envelope;
+        object deserialized;
+        Type messageType;
         try
         {
-            messageType = Type.GetType(message.MessageTypeName);
-            if (messageType == null)
-                throw new InvalidOperationException($"Could not resolve outbox message type '{message.MessageTypeName}'.");
-
-            if (!typeof(IEvent).IsAssignableFrom(messageType))
-                throw new InvalidOperationException(
-                    $"Outbox dispatch only supports IEvent-typed messages today; '{messageType.FullName}' is not an IEvent. " +
-                    "Send/Respond routing through the Outbox is not yet implemented.");
-
-            deserialized = JsonConvert.DeserializeObject(message.Payload, messageType);
-            if (deserialized == null)
-                throw new InvalidOperationException($"Outbox payload for message {message.MessageId} deserialized to null.");
+            envelope = JsonConvert.DeserializeObject<OutboxEnvelope>(message.Payload)
+                ?? throw new InvalidOperationException($"Outbox envelope {message.MessageId} deserialized to null.");
+            if (envelope.Version != 1 || envelope.OutboxId != message.MessageId || envelope.MessageId != message.MessageId)
+                throw new InvalidOperationException($"Outbox envelope {message.MessageId} has inconsistent identity or version.");
+            messageType = ResolveType(envelope.MessageType, "outgoing message");
+            deserialized = Deserialize(envelope.Body, envelope.Headers, messageType);
+            if (deserialized is not IMessage typed || typed.MessageId != message.MessageId)
+                throw new InvalidOperationException($"Outbox payload MessageId differs from stored MessageId '{message.MessageId}'.");
         }
         catch (Exception ex)
         {
@@ -81,14 +79,23 @@ public class OutboxDispatcher(IOutboxStore outboxStore, IEventBus eventBus, ILog
 
         try
         {
-            var publish = PublishMethodDefinition.MakeGenericMethod(messageType);
-            var task = (Task)publish.Invoke(eventBus, [deserialized, null, message.SagaId, cancellationToken])!;
-            await task;
+            var confirmed = eventBus is IConfirmedEventBus;
+            await DispatchSemanticAsync(envelope, messageType, deserialized, cancellationToken);
+            if (confirmed)
+            {
+                await outboxStore.MarkPublishedAsync(message.MessageId, cancellationToken);
+                return OutboxMessageStatus.Published;
+            }
 
-            // No broker-level publisher-confirms wiring exists yet: this only reflects that the
-            // transport call completed without throwing, not a verified broker acknowledgment.
-            await outboxStore.MarkPublishedAsync(message.MessageId, cancellationToken);
-            return OutboxMessageStatus.Published;
+            await outboxStore.MarkConfirmationUnknownAsync(message.MessageId, cancellationToken);
+            return OutboxMessageStatus.ConfirmationUnknown;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // A transport call may already have reached the broker. Persist the ambiguous outcome,
+            // then honor shutdown cancellation so the hosted worker stops promptly.
+            await outboxStore.MarkConfirmationUnknownAsync(message.MessageId, CancellationToken.None);
+            throw;
         }
         catch (Exception ex)
         {
@@ -97,6 +104,62 @@ public class OutboxDispatcher(IOutboxStore outboxStore, IEventBus eventBus, ILog
             logger.LogWarning(ex, "Outbox message {MessageId} publish attempt did not confirm success; marking ConfirmationUnknown.", message.MessageId);
             await outboxStore.MarkConfirmationUnknownAsync(message.MessageId, cancellationToken);
             return OutboxMessageStatus.ConfirmationUnknown;
+        }
+    }
+
+    private async Task DispatchSemanticAsync(OutboxEnvelope envelope, Type messageType, object message,
+        CancellationToken cancellationToken)
+    {
+        var target = eventBus is IConfirmedEventBus ? typeof(IConfirmedEventBus) : typeof(IEventBus);
+        var instance = eventBus;
+        var handlerType = string.IsNullOrWhiteSpace(envelope.HandlerType)
+            ? null : ResolveType(envelope.HandlerType!, "handler");
+        switch (envelope.Operation)
+        {
+            case OutboxOperationKind.Send:
+                await InvokeGeneric(target, instance, eventBus is IConfirmedEventBus ? nameof(IConfirmedEventBus.SendConfirmed) : nameof(IEventBus.Send),
+                    [messageType], [message, handlerType, envelope.SagaId, cancellationToken]);
+                return;
+            case OutboxOperationKind.Publish:
+                await InvokeGeneric(target, instance, eventBus is IConfirmedEventBus ? nameof(IConfirmedEventBus.PublishConfirmed) : nameof(IEventBus.Publish),
+                    [messageType], [message, handlerType, envelope.SagaId, cancellationToken]);
+                return;
+            case OutboxOperationKind.Respond:
+                if (envelope.RequestBody == null || envelope.RequestHeaders == null ||
+                    string.IsNullOrWhiteSpace(envelope.RequestType))
+                    throw new InvalidOperationException($"Response envelope '{envelope.OutboxId}' has no durable request.");
+                var requestType = ResolveType(envelope.RequestType!, "response request");
+                var request = Deserialize(envelope.RequestBody, envelope.RequestHeaders, requestType);
+                await InvokeGeneric(target, instance, eventBus is IConfirmedEventBus ? nameof(IConfirmedEventBus.RespondConfirmed) : nameof(IEventBus.Respond),
+                    [requestType, messageType], [request, message, handlerType, envelope.SagaId, cancellationToken]);
+                return;
+            default:
+                throw new InvalidOperationException($"Unsupported Outbox operation '{envelope.Operation}'.");
+        }
+    }
+
+    private object Deserialize(byte[] body, IReadOnlyDictionary<string, object?> headers, Type type)
+    {
+        var (_, context) = serializer.CreateContextFor(type);
+        return serializer.Deserialize(body, headers, context);
+    }
+
+    private static Type ResolveType(string typeName, string role) => Type.GetType(typeName, false)
+        ?? throw new InvalidOperationException($"Could not resolve Outbox {role} type '{typeName}'.");
+
+    private static async Task InvokeGeneric(Type contract, object instance, string methodName, Type[] genericArguments,
+        object?[] arguments)
+    {
+        var method = contract.GetMethods().Single(candidate => candidate.Name == methodName &&
+            candidate.IsGenericMethodDefinition && candidate.GetGenericArguments().Length == genericArguments.Length);
+        try
+        {
+            await ((Task)(method.MakeGenericMethod(genericArguments).Invoke(instance, arguments)
+                ?? throw new InvalidOperationException($"Event bus method '{methodName}' returned null.")));
+        }
+        catch (TargetInvocationException exception) when (exception.InnerException != null)
+        {
+            throw exception.InnerException;
         }
     }
 }

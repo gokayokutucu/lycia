@@ -292,23 +292,29 @@ generic method directly, mirroring their SagaStore DSL exactly: `.WithInMemoryIn
 
 ### Outbox dispatcher
 
-`IOutboxDispatcher`/`OutboxDispatcher` (project `Lycia`, namespace `Lycia.Outbox`) claims a pending
-batch and publishes each message through `IEventBus.Publish<TEvent>` (resolved via reflection since
-the message type is only known at runtime from `OutboxMessage.MessageTypeName`). Registered
-automatically (`TryAddScoped`) whenever any `.With...Outbox()` is called. Status classification on
-publish:
-- no exception → `Published` (the transport call completed; this is **not** a verified broker
-  acknowledgment — there is no publisher-confirms wiring yet)
-- exception during the publish call → `ConfirmationUnknown` (the message may have reached the broker
-  before the exception; Lycia never guesses either way)
-- exception before anything left the process (unresolvable `MessageTypeName`, bad payload, or the
-  resolved type isn't an `IEvent`) → `Failed`
+`IOutgoingMessagePipeline` is the single direct-versus-durable selection point. All saga contexts,
+including tracked adapters and due-schedule dispatch, call it. `DirectOutgoingMessagePipeline`
+delegates unchanged to `IEventBus`; `OutboxOutgoingMessagePipeline` uses `IMessageSerializer` and
+stores a versioned `OutboxEnvelope` containing stable identity, operation (`Send`, `Publish`, or
+`Respond`), body/headers, handler/application/saga routing, and the original request body needed for
+targeted response routing. Schedule is deliberately not an Outbox operation: the schedule store owns
+the intent until due, then hands the original semantic to this pipeline.
 
-Remaining integration boundary, explicitly not done: no background hosted-service loop invokes
-`IOutboxDispatcher` automatically (callers/a future worker call `DispatchPendingBatchAsync` directly);
-nothing intercepts `Context.Publish()`/`Send()` to populate the Outbox automatically — callers call
-`IOutboxStore.AddAsync` themselves; only `IEvent`-typed messages can be redispatched (Send/Respond
-routing through the Outbox is not implemented).
+`OutboxWorker` is registered with every `.With...Outbox()` provider and configured with
+`.WithOutboxWorker(...)`. It creates a scope per pass, atomically claims batches, honors shutdown
+cancellation, recovers expired `Claimed`/`Publishing` work after `RecoveryTimeout`, and uses bounded
+attempts with exponential backoff and jitter. `RecoveryTimeout` must exceed the transport publish
+timeout; a slow original worker can still create the documented at-least-once duplicate window. A stable `MessageId`
+also serves as `OutboxId`, so retry/recovery cannot create a new logical message. Concurrent replicas
+rely on provider claim atomicity; Outbox intentionally has no scheduler-style fencing token because
+claim ownership is a different, shorter lifecycle.
+
+`OutboxDispatcher` restores the operation rather than publishing everything. Only
+`IConfirmedEventBus` success becomes `Published`: Kafka (`EnableIdempotence`, `Acks.All`) and NATS
+JetStream provide this capability. Core NATS and the current RabbitMQ publisher remain
+`ConfirmationUnknown`; they are safely redispatchable and therefore at least once. A transport
+exception is also `ConfirmationUnknown`; only a permanent local envelope/type/serialization error is
+`Failed`.
 
 ### Persistence session
 
@@ -370,10 +376,10 @@ services.AddLycia(configuration, lycia =>
 
 ## 🔮 Roadmap
 
-- Inbox/Outbox durable providers done for InMemory/Redis/SQL Server/PostgreSQL, plus a pull-based
-  `IOutboxDispatcher`; a background hosted-service loop, `Context.Publish()` interception, real
-  broker publisher-confirms, and atomic Saga+Inbox+Outbox transactions via `ILyciaPersistenceSession`
-  remain to be built
+- Inbox/Outbox providers, outgoing capture, semantic dispatcher, hosted worker, and Kafka/JetStream
+  confirmation integration are complete. Atomic Saga+Inbox+Outbox enlistment through
+  `ILyciaPersistenceSession` remains the Phase 4 boundary; RabbitMQ publisher confirms also remain a
+  transport-specific follow-up.
 - Add support for Avro / Protobuf with Schema Registry (including the built‑in `AvroSchemaConverter`)
 - Finalize `IRetryPolicy` (done) and extend `Lycia.Scheduling` module for delayed retries
 - Improve distributed tracing and observability

@@ -7,6 +7,7 @@ using Lycia.Common.Messaging;
 using Lycia.Messaging;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Messaging;
+using Lycia.Saga.Abstractions.Outbox;
 using Lycia.Saga.Abstractions.Serializers;
 using Lycia.Saga.Extensions;
 
@@ -16,7 +17,7 @@ namespace Lycia.Extensions.Kafka;
 /// Lycia Kafka transport with one logical group per command owner or event subscription.
 /// Offsets are committed only after the listener acknowledges successful processing.
 /// </summary>
-public sealed class KafkaEventBus : IEventBus, IAsyncDisposable
+public sealed class KafkaEventBus : IEventBus, IConfirmedEventBus, IAsyncDisposable
 {
     private readonly IDictionary<string, (Type MessageType, Type HandlerType)> _queueTypeMap;
     private readonly KafkaEventBusOptions _options;
@@ -79,6 +80,22 @@ public sealed class KafkaEventBus : IEventBus, IAsyncDisposable
                 $"Response '{@event.GetType().FullName}' cannot be published. Use Respond(request, response)." );
         return PublishMessageAsync(@event, sagaId, cancellationToken);
     }
+
+    /// <inheritdoc />
+    public Task SendConfirmed<TCommand>(TCommand command, Type? handlerType, Guid? sagaId,
+        CancellationToken cancellationToken = default) where TCommand : ICommand =>
+        Send(command, handlerType, sagaId, cancellationToken);
+
+    /// <inheritdoc />
+    public Task PublishConfirmed<TEvent>(TEvent message, Type? handlerType, Guid? sagaId,
+        CancellationToken cancellationToken = default) where TEvent : IEvent =>
+        Publish(message, handlerType, sagaId, cancellationToken);
+
+    /// <inheritdoc />
+    public Task RespondConfirmed<TRequest, TResponse>(TRequest request, TResponse response, Type? handlerType,
+        Guid? sagaId, CancellationToken cancellationToken = default)
+        where TRequest : IMessage where TResponse : IResponse<TRequest> =>
+        Respond(request, response, handlerType, sagaId, cancellationToken);
 
     /// <inheritdoc />
     public IAsyncEnumerable<(byte[] Body, Type MessageType, Type HandlerType, IReadOnlyDictionary<string, object?> Headers)>

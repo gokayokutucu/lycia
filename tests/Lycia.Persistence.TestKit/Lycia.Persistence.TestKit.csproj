@@ -6,6 +6,8 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <IsPackable>false</IsPackable>
+        <!-- Contains abstract conformance fixtures consumed by provider test assemblies; it is not a runnable test host. -->
+        <IsTestProject>false</IsTestProject>
     </PropertyGroup>
 
     <ItemGroup>

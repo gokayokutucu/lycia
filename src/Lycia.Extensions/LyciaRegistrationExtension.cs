@@ -18,7 +18,9 @@ using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Handlers;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Abstractions.Middlewares;
+using Lycia.Saga.Abstractions.Outbox;
 using Lycia.Saga.Abstractions.Serializers;
+using Lycia.Saga.Contexts;
 using Lycia.Saga.Messaging.Handlers;
 using Lycia.Stores;
 using Microsoft.Extensions.Configuration;
@@ -100,6 +102,8 @@ namespace Lycia.Extensions
             services
                 .AddOptions<OutboxOptions>()
                 .Bind(configuration.GetSection(OutboxOptions.SectionName));
+            services.AddOptions<OutboxWorkerOptions>()
+                .Bind(configuration.GetSection(OutboxOptions.SectionName).GetSection("Worker"));
             
             services
                 .AddOptions<LoggingOptions>()
@@ -120,6 +124,7 @@ namespace Lycia.Extensions
 
             // Serializer default
             services.TryAddSingleton<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
+            services.TryAddScoped<IOutgoingMessagePipeline, DirectOutgoingMessagePipeline>();
 
             // Placeholder for queue map; the builder will populate it in Build()
             services.TryAddSingleton<IDictionary<string, (Type MessageType, Type HandlerType)>>(sp =>
@@ -286,6 +291,8 @@ namespace Lycia.Extensions
             // Serializer
             services.RemoveAll(typeof(IMessageSerializer));
             services.AddSingleton<IMessageSerializer, NewtonsoftJsonMessageSerializer>();
+            services.AddOptions<OutboxWorkerOptions>();
+            services.TryAddScoped<IOutgoingMessagePipeline, DirectOutgoingMessagePipeline>();
 
             // In-memory transports/stores
             RegisterInMemoryEventBus(services, configuration["ApplicationId"]);
