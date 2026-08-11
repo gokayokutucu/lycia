@@ -10,6 +10,7 @@ namespace Lycia.Persistence.PostgreSql;
 /// <summary>Applies the embedded PostgreSQL schema for <see cref="PostgreSqlSagaStore"/> via the shared migration runner.</summary>
 public static class PostgreSqlSchemaMigrator
 {
+    /// <summary>Applies pending SagaStore migrations according to the configured schema-management mode.</summary>
     public static Task RunAsync(PostgreSqlSagaStoreOptions options, CancellationToken cancellationToken = default)
     {
         if (options == null) throw new ArgumentNullException(nameof(options));

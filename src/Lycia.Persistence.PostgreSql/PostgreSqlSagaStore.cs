@@ -10,6 +10,7 @@ using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Contexts;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Abstractions.Scheduling;
+using Lycia.Saga.Abstractions.Outbox;
 using Lycia.Saga.Contexts;
 using Lycia.Saga.Exceptions;
 using Lycia.Saga.Helpers;
@@ -28,7 +29,8 @@ public class PostgreSqlSagaStore(
     IEventBus eventBus,
     ISagaIdGenerator sagaIdGenerator,
     ISagaCompensationCoordinator compensationCoordinator,
-    IMessageScheduler? messageScheduler = null)
+    IMessageScheduler? messageScheduler = null,
+    IOutgoingMessagePipeline? outgoingMessagePipeline = null)
     : ISagaStore, IVersionedSagaStore, ISagaStoreHealthCheck
 {
     private const string UniqueViolationSqlState = "23505";
@@ -548,7 +550,8 @@ public class PostgreSqlSagaStore(
             sagaStore: this,
             sagaIdGenerator: sagaIdGenerator,
             compensationCoordinator: compensationCoordinator,
-            messageScheduler: messageScheduler
+            messageScheduler: messageScheduler,
+            outgoingMessagePipeline: outgoingMessagePipeline
         );
 
         return context;

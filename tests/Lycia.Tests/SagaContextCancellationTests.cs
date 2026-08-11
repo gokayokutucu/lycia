@@ -2,12 +2,17 @@
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 using Lycia.Common.Enums;
+using Lycia.Extensions.Serialization;
+using Lycia.Outbox;
+using Lycia.Persistence.InMemory;
 using Lycia.Saga.Abstractions;
+using Lycia.Saga.Abstractions.Outbox;
 using Lycia.Saga.Abstractions.Scheduling;
 using Lycia.Saga.Contexts;
 using Lycia.Saga.Messaging;
 using Lycia.Tests.Messages;
 using Moq;
+using Newtonsoft.Json;
 
 namespace Lycia.Tests;
 
@@ -186,6 +191,42 @@ public class SagaContextCancellationTests
 
         eventBus.Verify(b => b.Respond(request, response, It.IsAny<Type>(), It.IsAny<Guid>(), cts.Token), Times.Once);
     }
+
+    [Fact]
+    public async Task Tracked_Send_Publish_And_Respond_Capture_Outbox_Semantics_Before_Transition()
+    {
+        var eventBus = new Mock<IEventBus>();
+        eventBus.SetupGet(bus => bus.ApplicationId).Returns("TestApp");
+        var store = new InMemoryOutboxStore();
+        var serializer = new NewtonsoftJsonMessageSerializer();
+        var pipeline = new OutboxOutgoingMessagePipeline(store, serializer);
+        var current = new OrderCreatedEvent { OrderId = Guid.NewGuid() };
+        var context = new SagaContext<OrderCreatedEvent>(Guid.NewGuid(), current,
+            typeof(SagaContextCancellationTests), eventBus.Object, Mock.Of<ISagaStore>(),
+            Mock.Of<ISagaIdGenerator>(), Mock.Of<ISagaCompensationCoordinator>(),
+            Mock.Of<IMessageScheduler>(), pipeline);
+        var command = new ReserveInventoryCommand();
+        var published = new OrderCreatedEvent();
+        var request = new CreateOrderCommand { ResponseEndpoint = "requesting-app" };
+        var response = new OrderCreatedResponse();
+
+        await context.SendWithTracking(command).ThenMarkAsComplete();
+        await context.PublishWithTracking(published).ThenMarkAsComplete();
+        await context.RespondWithTracking(request, response).ThenMarkAsComplete();
+
+        Assert.Equal(OutboxOperationKind.Send, ReadEnvelope(await store.GetByMessageIdAsync(command.MessageId)).Operation);
+        Assert.Equal(OutboxOperationKind.Publish, ReadEnvelope(await store.GetByMessageIdAsync(published.MessageId)).Operation);
+        Assert.Equal(OutboxOperationKind.Respond, ReadEnvelope(await store.GetByMessageIdAsync(response.MessageId)).Operation);
+        eventBus.Verify(bus => bus.Send(It.IsAny<ReserveInventoryCommand>(), It.IsAny<Type>(), It.IsAny<Guid>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        eventBus.Verify(bus => bus.Publish(It.IsAny<OrderCreatedEvent>(), It.IsAny<Type>(), It.IsAny<Guid>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        eventBus.Verify(bus => bus.Respond(It.IsAny<CreateOrderCommand>(), It.IsAny<OrderCreatedResponse>(),
+            It.IsAny<Type>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    private static OutboxEnvelope ReadEnvelope(OutboxMessage? message) =>
+        JsonConvert.DeserializeObject<OutboxEnvelope>(Assert.IsType<OutboxMessage>(message).Payload)!;
 
     // 14. ScheduleWithTracking: same deferred-execution and terminal-token model.
     [Fact]
