@@ -79,6 +79,8 @@ Git rules. Agents must update this file as phases move through the milestone.
   scheduling ownership. Feature commit `4939c70`; merged into `dev` as `40a6811`.
   Historical note: this Phase 3 state was also merged into `main` as `6af4d9b` before the
   milestone-only workflow was adopted; it does not authorize future per-phase `main` merges.
+- **Roadmap maintenance:** aligned this milestone with the Atomic Persistence Boundary phase model.
+  Feature commit `9e5fee3`; merged into `dev` as `56e60db`.
 
 # FINALIZATION
 
