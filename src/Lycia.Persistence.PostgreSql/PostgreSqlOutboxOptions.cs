@@ -38,6 +38,7 @@ public class PostgreSqlOutboxOptions
     public SchemaManagementMode SchemaManagement { get; set; } = SchemaManagementMode.ApplyMigrations;
 
     internal const string OutboxTable = "lycia_outbox";
+    internal string QualifiedOutboxTable => $"\"{SchemaName}\".{OutboxTable}";
 
     /// <summary>Builds the effective connection string, injecting <see cref="SchemaName"/> as the search path when non-default.</summary>
     internal string BuildEffectiveConnectionString()

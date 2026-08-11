@@ -4,7 +4,7 @@ Transport-independent building blocks for the Lycia Saga framework: fluent depen
 registration (`AddLycia` with `ConfigureSaga`, `ConfigureEventBus`, `ConfigureRetry`,
 `ConfigureLogging`), the middleware pipeline slots (logging, tracing, retry, custom middlewares),
 Polly-based retry policies, the Newtonsoft JSON serializer, the transport-neutral outgoing
-direct/Outbox pipeline, and health checks.
+direct/Outbox pipeline, automatic persistence-topology resolution, and health checks.
 
 ## Registration
 
@@ -19,9 +19,14 @@ services.AddLyciaRabbitMq();            // Lycia.Extensions.RabbitMq
 // services.AddLyciaKafka(o => ...);    // Lycia.Extensions.Kafka
 ```
 
-`AddLycia` binds options, registers core saga services, middleware, serializer, the Redis saga
-store and health checks. It no longer registers a transport: resolve `IEventBus` without a
+`AddLycia` binds options and registers core saga services, middleware, serializer, and health checks.
+Concrete persistence and transport selection remains explicit. Resolve `IEventBus` without a
 transport package and you get a clear error naming the packages to reference.
+
+`UsePersistence()` defaults to automatic boundary selection. Compatible SQL Server/PostgreSQL
+stores in one database resolve `LocalAtomic`; mixed providers resolve `Independent`. Use
+`RequireAtomicBoundary()` as a startup assertion or `UseIndependentTransactions()` as an explicit
+opt-out. This is a service-local Lycia boundary, not distributed or exactly-once processing.
 
 ## Package split
 

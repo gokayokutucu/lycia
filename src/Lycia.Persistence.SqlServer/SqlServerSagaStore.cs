@@ -6,11 +6,13 @@ using Lycia.Common.Helpers;
 using Lycia.Common.SagaSteps;
 using Lycia.Extensions;
 using Lycia.Helpers;
+using Lycia.Persistence.Relational.Internal.Sessions;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Contexts;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Abstractions.Scheduling;
 using Lycia.Saga.Abstractions.Outbox;
+using Lycia.Saga.Abstractions.Persistence;
 using Lycia.Saga.Contexts;
 using Lycia.Saga.Exceptions;
 using Lycia.Saga.Helpers;
@@ -29,7 +31,8 @@ public class SqlServerSagaStore(
     ISagaIdGenerator sagaIdGenerator,
     ISagaCompensationCoordinator compensationCoordinator,
     IMessageScheduler? messageScheduler = null,
-    IOutgoingMessagePipeline? outgoingMessagePipeline = null)
+    IOutgoingMessagePipeline? outgoingMessagePipeline = null,
+    ILyciaPersistenceSessionAccessor? sessionAccessor = null)
     : ISagaStore, IVersionedSagaStore, ISagaStoreHealthCheck
 {
     private const int UniqueOrPrimaryKeyViolation1 = 2627;
@@ -66,11 +69,13 @@ public class SqlServerSagaStore(
         var messageTypeName = SagaStoreLogicHelper.GetMessageTypeName(stepType);
         var stepKey = $"step:{stepTypeName}:handler:{handlerTypeName}:message-id:{messageId}";
 
-        using var connection = CreateConnection();
-        await connection.OpenAsync().ConfigureAwait(false);
-        using var transaction = connection.BeginTransaction();
+        await using var lease = await RelationalConnectionLease<SqlConnection, SqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection).ConfigureAwait(false);
+        using var ownedTransaction = lease.OwnsConnection ? lease.Connection.BeginTransaction() : null;
+        var transaction = lease.Transaction ?? ownedTransaction
+            ?? throw new InvalidOperationException("A relational saga operation requires a transaction.");
 
-        var allSteps = await SelectAllStepsAsync(connection, transaction, sagaId).ConfigureAwait(false);
+        var allSteps = await SelectAllStepsAsync(lease.Connection, transaction, sagaId).ConfigureAwait(false);
         allSteps.TryGetValue((stepTypeName, handlerTypeName, messageId), out var existingMeta);
 
         var newMeta = SagaStepMetadata.Build(status, messageId, parentMessageId, messageTypeName,
@@ -84,32 +89,32 @@ public class SqlServerSagaStore(
             case SagaStepValidationResult.ValidTransition:
                 if (existingMeta == null)
                 {
-                    await InsertStepAsync(connection, transaction, sagaId, stepTypeName, handlerTypeName, newMeta)
+                    await InsertStepAsync(lease.Connection, transaction, sagaId, stepTypeName, handlerTypeName, newMeta)
                         .ConfigureAwait(false);
                 }
                 else
                 {
-                    await UpdateStepAsync(connection, transaction, sagaId, stepTypeName, handlerTypeName, messageId, newMeta)
+                    await UpdateStepAsync(lease.Connection, transaction, sagaId, stepTypeName, handlerTypeName, messageId, newMeta)
                         .ConfigureAwait(false);
                 }
 
-                transaction.Commit();
+                if (ownedTransaction != null) ownedTransaction.Commit();
                 break;
             case SagaStepValidationResult.Idempotent:
                 // Silently ignore idempotent updates.
-                transaction.Rollback();
+                if (ownedTransaction != null) ownedTransaction.Rollback();
                 break;
             case SagaStepValidationResult.DuplicateWithDifferentPayload:
-                transaction.Rollback();
+                if (ownedTransaction != null) ownedTransaction.Rollback();
                 throw new SagaStepIdempotencyException(result.Message);
             case SagaStepValidationResult.InvalidTransition:
-                transaction.Rollback();
+                if (ownedTransaction != null) ownedTransaction.Rollback();
                 throw new SagaStepTransitionException(result.Message);
             case SagaStepValidationResult.CircularChain:
-                transaction.Rollback();
+                if (ownedTransaction != null) ownedTransaction.Rollback();
                 throw new SagaStepCircularChainException(result.Message);
             default:
-                transaction.Rollback();
+                if (ownedTransaction != null) ownedTransaction.Rollback();
                 throw new InvalidOperationException("Unexpected validation result: " + result.ValidationResult);
         }
     }
@@ -222,13 +227,12 @@ public class SqlServerSagaStore(
     /// <inheritdoc />
     public async Task<StepStatus> GetStepStatusAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType)
     {
-        using var connection = CreateConnection();
-        await connection.OpenAsync().ConfigureAwait(false);
-
-        using var command = CreateCommand(connection, $"""
+        await using var lease = await RelationalConnectionLease<SqlConnection, SqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection).ConfigureAwait(false);
+        using var command = CreateCommand(lease.Connection, $"""
             SELECT Status FROM {StepsTable}
             WHERE SagaId = @sagaId AND StepType = @stepType AND HandlerType = @handlerType AND MessageId = @messageId;
-            """);
+            """, lease.Transaction);
         command.Parameters.AddWithValue("@sagaId", sagaId);
         command.Parameters.AddWithValue("@stepType", stepType.GetSimplifiedQualifiedName());
         command.Parameters.AddWithValue("@handlerType", handlerType.GetSimplifiedQualifiedName());
@@ -242,14 +246,13 @@ public class SqlServerSagaStore(
     public async Task<KeyValuePair<(string stepType, string handlerType, string messageId), SagaStepMetadata>?>
         GetSagaHandlerStepAsync(Guid sagaId, Guid messageId)
     {
-        using var connection = CreateConnection();
-        await connection.OpenAsync().ConfigureAwait(false);
-
-        using var command = CreateCommand(connection, $"""
+        await using var lease = await RelationalConnectionLease<SqlConnection, SqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection).ConfigureAwait(false);
+        using var command = CreateCommand(lease.Connection, $"""
             SELECT StepType, HandlerType, MessageId, ParentMessageId, Status, MessageTypeName, ApplicationId, MessagePayload, FailureInfoJson
             FROM {StepsTable}
             WHERE SagaId = @sagaId AND MessageId = @messageId;
-            """);
+            """, lease.Transaction);
         command.Parameters.AddWithValue("@sagaId", sagaId);
         command.Parameters.AddWithValue("@messageId", messageId);
 
@@ -269,10 +272,9 @@ public class SqlServerSagaStore(
     public async Task<IReadOnlyDictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>>
         GetSagaHandlerStepsAsync(Guid sagaId)
     {
-        using var connection = CreateConnection();
-        await connection.OpenAsync().ConfigureAwait(false);
-
-        var stepsById = await SelectAllStepsAsync(connection, null, sagaId).ConfigureAwait(false);
+        await using var lease = await RelationalConnectionLease<SqlConnection, SqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection).ConfigureAwait(false);
+        var stepsById = await SelectAllStepsAsync(lease.Connection, lease.Transaction, sagaId).ConfigureAwait(false);
         var result = new Dictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>();
         foreach (var entry in stepsById)
         {
@@ -292,14 +294,13 @@ public class SqlServerSagaStore(
 
     private async Task<IMessage?> LoadSagaStepMessageInternalAsync(Guid sagaId, string filterColumn, object filterValue)
     {
-        using var connection = CreateConnection();
-        await connection.OpenAsync().ConfigureAwait(false);
-
-        using var command = CreateCommand(connection, $"""
+        await using var lease = await RelationalConnectionLease<SqlConnection, SqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection).ConfigureAwait(false);
+        using var command = CreateCommand(lease.Connection, $"""
             SELECT MessageTypeName, MessagePayload
             FROM {StepsTable}
             WHERE SagaId = @sagaId AND {filterColumn} = @filterValue;
-            """);
+            """, lease.Transaction);
         command.Parameters.AddWithValue("@sagaId", sagaId);
         command.Parameters.AddWithValue("@filterValue", filterValue);
 
@@ -338,9 +339,9 @@ public class SqlServerSagaStore(
 
     private async Task<TSagaData?> TryLoadSagaDataAsync<TSagaData>(Guid sagaId) where TSagaData : SagaData
     {
-        using var connection = CreateConnection();
-        await connection.OpenAsync().ConfigureAwait(false);
-        return await TryLoadSagaDataAsync<TSagaData>(connection, null, sagaId).ConfigureAwait(false);
+        await using var lease = await RelationalConnectionLease<SqlConnection, SqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection).ConfigureAwait(false);
+        return await TryLoadSagaDataAsync<TSagaData>(lease.Connection, lease.Transaction, sagaId).ConfigureAwait(false);
     }
 
     private async Task<TSagaData?> TryLoadSagaDataAsync<TSagaData>(SqlConnection connection, SqlTransaction? transaction,
@@ -363,18 +364,18 @@ public class SqlServerSagaStore(
         if (data is null) return;
         data.SagaId = sagaId;
 
-        using var connection = CreateConnection();
-        await connection.OpenAsync().ConfigureAwait(false);
+        await using var lease = await RelationalConnectionLease<SqlConnection, SqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection).ConfigureAwait(false);
 
         var dataJson = JsonHelper.SerializeSafe(data);
         var dataType = data.GetType().GetSimplifiedQualifiedName();
 
-        using (var update = CreateCommand(connection, $"""
+        using (var update = CreateCommand(lease.Connection, $"""
             UPDATE {DataTable}
             SET DataJson = @dataJson, SagaDataType = @dataType, Version = Version + 1, IsCompleted = @isCompleted,
                 CompletedAtUtc = @completedAt, FailedAtUtc = @failedAt, ApplicationId = @applicationId, UpdatedAtUtc = SYSUTCDATETIME()
             WHERE SagaId = @sagaId;
-            """))
+            """, lease.Transaction))
         {
             AddSagaDataParameters(update, sagaId, dataJson, dataType, data);
             var rows = await update.ExecuteNonQueryAsync().ConfigureAwait(false);
@@ -383,10 +384,10 @@ public class SqlServerSagaStore(
 
         try
         {
-            using var insert = CreateCommand(connection, $"""
+            using var insert = CreateCommand(lease.Connection, $"""
                 INSERT INTO {DataTable} (SagaId, ApplicationId, SagaDataType, DataJson, Version, IsCompleted, CompletedAtUtc, FailedAtUtc, UpdatedAtUtc)
                 VALUES (@sagaId, @applicationId, @dataType, @dataJson, 1, @isCompleted, @completedAt, @failedAt, SYSUTCDATETIME());
-                """);
+                """, lease.Transaction);
             AddSagaDataParameters(insert, sagaId, dataJson, dataType, data);
             await insert.ExecuteNonQueryAsync().ConfigureAwait(false);
         }
@@ -394,12 +395,12 @@ public class SqlServerSagaStore(
         {
             // Lost the race against a concurrent first-write; the other writer's row now exists, so
             // fall back to an update to still honor last-write-wins semantics for this non-versioned API.
-            using var update = CreateCommand(connection, $"""
+            using var update = CreateCommand(lease.Connection, $"""
                 UPDATE {DataTable}
                 SET DataJson = @dataJson, SagaDataType = @dataType, Version = Version + 1, IsCompleted = @isCompleted,
                     CompletedAtUtc = @completedAt, FailedAtUtc = @failedAt, ApplicationId = @applicationId, UpdatedAtUtc = SYSUTCDATETIME()
                 WHERE SagaId = @sagaId;
-                """);
+                """, lease.Transaction);
             AddSagaDataParameters(update, sagaId, dataJson, dataType, data);
             await update.ExecuteNonQueryAsync().ConfigureAwait(false);
         }
@@ -424,8 +425,8 @@ public class SqlServerSagaStore(
         if (data == null) throw new ArgumentNullException(nameof(data));
         data.SagaId = sagaId;
 
-        using var connection = CreateConnection();
-        await connection.OpenAsync().ConfigureAwait(false);
+        await using var lease = await RelationalConnectionLease<SqlConnection, SqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection).ConfigureAwait(false);
 
         var dataJson = JsonHelper.SerializeSafe(data);
         var dataType = data.GetType().GetSimplifiedQualifiedName();
@@ -434,10 +435,10 @@ public class SqlServerSagaStore(
         {
             try
             {
-                using var insert = CreateCommand(connection, $"""
+                using var insert = CreateCommand(lease.Connection, $"""
                     INSERT INTO {DataTable} (SagaId, ApplicationId, SagaDataType, DataJson, Version, IsCompleted, CompletedAtUtc, FailedAtUtc, UpdatedAtUtc)
                     VALUES (@sagaId, @applicationId, @dataType, @dataJson, 1, @isCompleted, @completedAt, @failedAt, SYSUTCDATETIME());
-                    """);
+                    """, lease.Transaction);
                 AddSagaDataParameters(insert, sagaId, dataJson, dataType, data);
                 await insert.ExecuteNonQueryAsync().ConfigureAwait(false);
                 data.Version = 1;
@@ -445,17 +446,18 @@ public class SqlServerSagaStore(
             }
             catch (SqlException ex) when (IsUniqueViolation(ex))
             {
-                var actual = await SelectCurrentVersionAsync(connection, null, sagaId).ConfigureAwait(false) ?? 0;
+                var actual = await SelectCurrentVersionAsync(lease.Connection, lease.Transaction, sagaId)
+                    .ConfigureAwait(false) ?? 0;
                 throw new SagaConcurrencyException(sagaId, 0, actual);
             }
         }
 
-        using (var update = CreateCommand(connection, $"""
+        using (var update = CreateCommand(lease.Connection, $"""
             UPDATE {DataTable}
             SET DataJson = @dataJson, SagaDataType = @dataType, Version = Version + 1, IsCompleted = @isCompleted,
                 CompletedAtUtc = @completedAt, FailedAtUtc = @failedAt, ApplicationId = @applicationId, UpdatedAtUtc = SYSUTCDATETIME()
             WHERE SagaId = @sagaId AND Version = @expectedVersion;
-            """))
+            """, lease.Transaction))
         {
             AddSagaDataParameters(update, sagaId, dataJson, dataType, data);
             update.Parameters.AddWithValue("@expectedVersion", expectedVersion);
@@ -468,7 +470,8 @@ public class SqlServerSagaStore(
             }
         }
 
-        var actualVersion = await SelectCurrentVersionAsync(connection, null, sagaId).ConfigureAwait(false) ?? 0;
+        var actualVersion = await SelectCurrentVersionAsync(lease.Connection, lease.Transaction, sagaId)
+            .ConfigureAwait(false) ?? 0;
         throw new SagaConcurrencyException(sagaId, expectedVersion, actualVersion);
     }
 
@@ -476,10 +479,10 @@ public class SqlServerSagaStore(
     public async Task<(TSagaData Data, long Version)> LoadSagaDataWithVersionAsync<TSagaData>(Guid sagaId)
         where TSagaData : SagaData, new()
     {
-        using var connection = CreateConnection();
-        await connection.OpenAsync().ConfigureAwait(false);
-
-        using var command = CreateCommand(connection, $"SELECT DataJson, Version FROM {DataTable} WHERE SagaId = @sagaId;");
+        await using var lease = await RelationalConnectionLease<SqlConnection, SqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection).ConfigureAwait(false);
+        using var command = CreateCommand(lease.Connection,
+            $"SELECT DataJson, Version FROM {DataTable} WHERE SagaId = @sagaId;", lease.Transaction);
         command.Parameters.AddWithValue("@sagaId", sagaId);
 
         using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);

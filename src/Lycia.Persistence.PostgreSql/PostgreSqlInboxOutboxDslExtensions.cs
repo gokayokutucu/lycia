@@ -5,6 +5,7 @@ using Lycia.Extensions;
 using Lycia.Outbox;
 using Lycia.Saga.Abstractions.Inbox;
 using Lycia.Saga.Abstractions.Outbox;
+using Lycia.Saga.Abstractions.Persistence;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -38,7 +39,10 @@ public static class PostgreSqlInboxOutboxDslExtensions
         persistence.SelectInboxProvider("PostgreSql");
 
         persistence.Services.RemoveAll(typeof(IInboxStore));
-        persistence.Services.AddScoped<IInboxStore>(_ => new PostgreSqlInboxStore(options));
+        persistence.Services.AddScoped<IInboxStore>(sp => new PostgreSqlInboxStore(options,
+            sp.GetService<ILyciaPersistenceSessionAccessor>()));
+        persistence.RegisterProviderMetadata(PersistenceCapabilityKind.Inbox, "PostgreSql",
+            PostgreSqlConnectionIdentity.Create(options.ConnectionString), true);
 
         return persistence;
     }
@@ -65,7 +69,10 @@ public static class PostgreSqlInboxOutboxDslExtensions
         persistence.SelectOutboxProvider("PostgreSql");
 
         persistence.Services.RemoveAll(typeof(IOutboxStore));
-        persistence.Services.AddScoped<IOutboxStore>(_ => new PostgreSqlOutboxStore(options));
+        persistence.Services.AddScoped<IOutboxStore>(sp => new PostgreSqlOutboxStore(options,
+            sp.GetService<ILyciaPersistenceSessionAccessor>()));
+        persistence.RegisterProviderMetadata(PersistenceCapabilityKind.Outbox, "PostgreSql",
+            PostgreSqlConnectionIdentity.Create(options.ConnectionString), true);
         return persistence.ActivateOutboxPipeline();
     }
 }

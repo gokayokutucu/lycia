@@ -8,6 +8,7 @@
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <RepositoryUrl>https://github.com/gokayokutucu/lycia</RepositoryUrl>
         <RepositoryType>git</RepositoryType>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
 
         <!-- Prevent writing project references as dependencies in nuspec -->
         <SuppressProjectReferenceDependenciesWhenPacking>true</SuppressProjectReferenceDependenciesWhenPacking>
@@ -19,6 +20,9 @@
         <AllowedOutputExtensionsInPackageBuildOutputFolder>
             $(AllowedOutputExtensionsInPackageBuildOutputFolder);.xml
         </AllowedOutputExtensionsInPackageBuildOutputFolder>
+        <TargetsForTfmSpecificBuildOutput>
+            $(TargetsForTfmSpecificBuildOutput);_IncludeRelationalInternal
+        </TargetsForTfmSpecificBuildOutput>
     </PropertyGroup>
 
     <PropertyGroup>
@@ -27,6 +31,7 @@
             Lycia Saga framework:
             - Durable saga-data and saga-step persistence over Microsoft.Data.SqlClient
             - Optimistic concurrency (IVersionedSagaStore) via an explicit version column and CAS updates
+            - Service-local atomic SagaStore + Inbox + Outbox transactions for compatible topology
             - Embedded, self-applying schema migrations (ApplyMigrations/ValidateOnly/Disabled)
             - Health check integration (ISagaStoreHealthCheck)
         </Description>
@@ -90,6 +95,17 @@
 
     <ItemGroup>
         <EmbeddedResource Include="Schema\*.sql" />
+        <None Include="..\..\README.md" Pack="true" PackagePath="" />
     </ItemGroup>
+
+    <Target Name="_IncludeRelationalInternal" DependsOnTargets="ResolveReferences">
+        <ItemGroup>
+            <_RelationalInternal Include="@(ReferenceCopyLocalPaths)"
+                Condition="'%(ReferenceCopyLocalPaths.ReferenceSourceTarget)' == 'ProjectReference' and
+                           '%(ReferenceCopyLocalPaths.Filename)' == 'Lycia.Persistence.Relational.Internal' and
+                           '%(ReferenceCopyLocalPaths.Extension)' == '.dll'" />
+            <BuildOutputInPackage Include="@(_RelationalInternal)" />
+        </ItemGroup>
+    </Target>
 
 </Project>

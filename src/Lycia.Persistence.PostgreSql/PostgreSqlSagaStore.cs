@@ -6,11 +6,13 @@ using Lycia.Common.Helpers;
 using Lycia.Common.SagaSteps;
 using Lycia.Extensions;
 using Lycia.Helpers;
+using Lycia.Persistence.Relational.Internal.Sessions;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Contexts;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Abstractions.Scheduling;
 using Lycia.Saga.Abstractions.Outbox;
+using Lycia.Saga.Abstractions.Persistence;
 using Lycia.Saga.Contexts;
 using Lycia.Saga.Exceptions;
 using Lycia.Saga.Helpers;
@@ -30,13 +32,14 @@ public class PostgreSqlSagaStore(
     ISagaIdGenerator sagaIdGenerator,
     ISagaCompensationCoordinator compensationCoordinator,
     IMessageScheduler? messageScheduler = null,
-    IOutgoingMessagePipeline? outgoingMessagePipeline = null)
+    IOutgoingMessagePipeline? outgoingMessagePipeline = null,
+    ILyciaPersistenceSessionAccessor? sessionAccessor = null)
     : ISagaStore, IVersionedSagaStore, ISagaStoreHealthCheck
 {
     private const string UniqueViolationSqlState = "23505";
 
-    private const string DataTable = PostgreSqlSagaStoreOptions.SagaDataTable;
-    private const string StepsTable = PostgreSqlSagaStoreOptions.SagaStepsTable;
+    private string DataTable => options.QualifiedSagaDataTable;
+    private string StepsTable => options.QualifiedSagaStepsTable;
 
     private readonly string _connectionString = options.BuildEffectiveConnectionString();
 
@@ -81,15 +84,17 @@ public class PostgreSqlSagaStore(
         var messageTypeName = SagaStoreLogicHelper.GetMessageTypeName(stepType);
         var stepKey = $"step:{stepTypeName}:handler:{handlerTypeName}:message-id:{messageId}";
 
-        using var connection = CreateConnection();
-        await connection.OpenAsync().ConfigureAwait(false);
-        using var transaction = connection.BeginTransaction();
+        await using var lease = await RelationalConnectionLease<NpgsqlConnection, NpgsqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection).ConfigureAwait(false);
+        using var ownedTransaction = lease.OwnsConnection ? lease.Connection.BeginTransaction() : null;
+        var transaction = lease.Transaction ?? ownedTransaction
+            ?? throw new InvalidOperationException("A relational saga operation requires a transaction.");
 
         // lycia_saga_steps.saga_id has a foreign key to lycia_saga_data.saga_id, so a step can only be
         // logged once a (possibly placeholder) saga-data row exists for this saga.
-        await EnsureSagaDataPlaceholderAsync(connection, transaction, sagaId).ConfigureAwait(false);
+        await EnsureSagaDataPlaceholderAsync(lease.Connection, transaction, sagaId).ConfigureAwait(false);
 
-        var allSteps = await SelectAllStepsAsync(connection, transaction, sagaId).ConfigureAwait(false);
+        var allSteps = await SelectAllStepsAsync(lease.Connection, transaction, sagaId).ConfigureAwait(false);
         allSteps.TryGetValue((stepTypeName, handlerTypeName, messageId), out var existingMeta);
 
         var newMeta = SagaStepMetadata.Build(status, messageId, parentMessageId, messageTypeName,
@@ -103,31 +108,31 @@ public class PostgreSqlSagaStore(
             case SagaStepValidationResult.ValidTransition:
                 if (existingMeta == null)
                 {
-                    await InsertStepAsync(connection, transaction, sagaId, stepTypeName, handlerTypeName, newMeta)
+                    await InsertStepAsync(lease.Connection, transaction, sagaId, stepTypeName, handlerTypeName, newMeta)
                         .ConfigureAwait(false);
                 }
                 else
                 {
-                    await UpdateStepAsync(connection, transaction, sagaId, stepTypeName, handlerTypeName, newMeta)
+                    await UpdateStepAsync(lease.Connection, transaction, sagaId, stepTypeName, handlerTypeName, newMeta)
                         .ConfigureAwait(false);
                 }
 
-                transaction.Commit();
+                if (ownedTransaction != null) ownedTransaction.Commit();
                 break;
             case SagaStepValidationResult.Idempotent:
-                transaction.Rollback();
+                if (ownedTransaction != null) ownedTransaction.Rollback();
                 break;
             case SagaStepValidationResult.DuplicateWithDifferentPayload:
-                transaction.Rollback();
+                if (ownedTransaction != null) ownedTransaction.Rollback();
                 throw new SagaStepIdempotencyException(result.Message);
             case SagaStepValidationResult.InvalidTransition:
-                transaction.Rollback();
+                if (ownedTransaction != null) ownedTransaction.Rollback();
                 throw new SagaStepTransitionException(result.Message);
             case SagaStepValidationResult.CircularChain:
-                transaction.Rollback();
+                if (ownedTransaction != null) ownedTransaction.Rollback();
                 throw new SagaStepCircularChainException(result.Message);
             default:
-                transaction.Rollback();
+                if (ownedTransaction != null) ownedTransaction.Rollback();
                 throw new InvalidOperationException("Unexpected validation result: " + result.ValidationResult);
         }
     }
@@ -252,13 +257,12 @@ public class PostgreSqlSagaStore(
     /// <inheritdoc />
     public async Task<StepStatus> GetStepStatusAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType)
     {
-        using var connection = CreateConnection();
-        await connection.OpenAsync().ConfigureAwait(false);
-
-        using var command = CreateCommand(connection, $"""
+        await using var lease = await RelationalConnectionLease<NpgsqlConnection, NpgsqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection).ConfigureAwait(false);
+        using var command = CreateCommand(lease.Connection, $"""
             SELECT status FROM {StepsTable}
             WHERE saga_id = @sagaId AND step_type = @stepType AND handler_type = @handlerType AND message_id = @messageId;
-            """);
+            """, lease.Transaction);
         command.Parameters.AddWithValue("sagaId", sagaId);
         command.Parameters.AddWithValue("stepType", stepType.GetSimplifiedQualifiedName());
         command.Parameters.AddWithValue("handlerType", handlerType.GetSimplifiedQualifiedName());
@@ -272,14 +276,13 @@ public class PostgreSqlSagaStore(
     public async Task<KeyValuePair<(string stepType, string handlerType, string messageId), SagaStepMetadata>?>
         GetSagaHandlerStepAsync(Guid sagaId, Guid messageId)
     {
-        using var connection = CreateConnection();
-        await connection.OpenAsync().ConfigureAwait(false);
-
-        using var command = CreateCommand(connection, $"""
+        await using var lease = await RelationalConnectionLease<NpgsqlConnection, NpgsqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection).ConfigureAwait(false);
+        using var command = CreateCommand(lease.Connection, $"""
             SELECT step_type, handler_type, message_id, parent_message_id, status, message_type_name, application_id, message_payload, failure_info_json
             FROM {StepsTable}
             WHERE saga_id = @sagaId AND message_id = @messageId;
-            """);
+            """, lease.Transaction);
         command.Parameters.AddWithValue("sagaId", sagaId);
         command.Parameters.AddWithValue("messageId", messageId);
 
@@ -299,10 +302,9 @@ public class PostgreSqlSagaStore(
     public async Task<IReadOnlyDictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>>
         GetSagaHandlerStepsAsync(Guid sagaId)
     {
-        using var connection = CreateConnection();
-        await connection.OpenAsync().ConfigureAwait(false);
-
-        var stepsById = await SelectAllStepsAsync(connection, null, sagaId).ConfigureAwait(false);
+        await using var lease = await RelationalConnectionLease<NpgsqlConnection, NpgsqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection).ConfigureAwait(false);
+        var stepsById = await SelectAllStepsAsync(lease.Connection, lease.Transaction, sagaId).ConfigureAwait(false);
         var result = new Dictionary<(string stepType, string handlerType, string messageId), SagaStepMetadata>();
         foreach (var entry in stepsById)
         {
@@ -322,14 +324,13 @@ public class PostgreSqlSagaStore(
 
     private async Task<IMessage?> LoadSagaStepMessageInternalAsync(Guid sagaId, string filterColumn, object filterValue)
     {
-        using var connection = CreateConnection();
-        await connection.OpenAsync().ConfigureAwait(false);
-
-        using var command = CreateCommand(connection, $"""
+        await using var lease = await RelationalConnectionLease<NpgsqlConnection, NpgsqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection).ConfigureAwait(false);
+        using var command = CreateCommand(lease.Connection, $"""
             SELECT message_type_name, message_payload
             FROM {StepsTable}
             WHERE saga_id = @sagaId AND {filterColumn} = @filterValue;
-            """);
+            """, lease.Transaction);
         command.Parameters.AddWithValue("sagaId", sagaId);
         command.Parameters.AddWithValue("filterValue", filterValue);
 
@@ -368,15 +369,17 @@ public class PostgreSqlSagaStore(
 
     private async Task<TSagaData?> TryLoadSagaDataAsync<TSagaData>(Guid sagaId) where TSagaData : SagaData
     {
-        using var connection = CreateConnection();
-        await connection.OpenAsync().ConfigureAwait(false);
-        return await TryLoadSagaDataAsync<TSagaData>(connection, sagaId).ConfigureAwait(false);
+        await using var lease = await RelationalConnectionLease<NpgsqlConnection, NpgsqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection).ConfigureAwait(false);
+        return await TryLoadSagaDataAsync<TSagaData>(lease.Connection, lease.Transaction, sagaId).ConfigureAwait(false);
     }
 
-    private async Task<TSagaData?> TryLoadSagaDataAsync<TSagaData>(NpgsqlConnection connection, Guid sagaId)
+    private async Task<TSagaData?> TryLoadSagaDataAsync<TSagaData>(NpgsqlConnection connection,
+        NpgsqlTransaction? transaction, Guid sagaId)
         where TSagaData : SagaData
     {
-        using var command = CreateCommand(connection, $"SELECT data_json FROM {DataTable} WHERE saga_id = @sagaId AND saga_data_type != 'Unknown';");
+        using var command = CreateCommand(connection,
+            $"SELECT data_json FROM {DataTable} WHERE saga_id = @sagaId AND saga_data_type != 'Unknown';", transaction);
         command.Parameters.AddWithValue("sagaId", sagaId);
 
         var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
@@ -393,13 +396,13 @@ public class PostgreSqlSagaStore(
         if (data is null) return;
         data.SagaId = sagaId;
 
-        using var connection = CreateConnection();
-        await connection.OpenAsync().ConfigureAwait(false);
+        await using var lease = await RelationalConnectionLease<NpgsqlConnection, NpgsqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection).ConfigureAwait(false);
 
         var dataJson = JsonHelper.SerializeSafe(data);
         var dataType = data.GetType().GetSimplifiedQualifiedName();
 
-        using var command = CreateCommand(connection, $"""
+        using var command = CreateCommand(lease.Connection, $"""
             INSERT INTO {DataTable} (saga_id, application_id, saga_data_type, data_json, version, is_completed, completed_at_utc, failed_at_utc, updated_at_utc)
             VALUES (@sagaId, @applicationId, @dataType, @dataJson, 1, @isCompleted, @completedAt, @failedAt, now())
             ON CONFLICT (saga_id) DO UPDATE SET
@@ -411,7 +414,7 @@ public class PostgreSqlSagaStore(
                 failed_at_utc = EXCLUDED.failed_at_utc,
                 application_id = EXCLUDED.application_id,
                 updated_at_utc = now();
-            """);
+            """, lease.Transaction);
         AddSagaDataParameters(command, sagaId, dataJson, dataType, data);
         await command.ExecuteNonQueryAsync().ConfigureAwait(false);
     }
@@ -435,8 +438,8 @@ public class PostgreSqlSagaStore(
         if (data == null) throw new ArgumentNullException(nameof(data));
         data.SagaId = sagaId;
 
-        using var connection = CreateConnection();
-        await connection.OpenAsync().ConfigureAwait(false);
+        await using var lease = await RelationalConnectionLease<NpgsqlConnection, NpgsqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection).ConfigureAwait(false);
 
         var dataJson = JsonHelper.SerializeSafe(data);
         var dataType = data.GetType().GetSimplifiedQualifiedName();
@@ -446,12 +449,12 @@ public class PostgreSqlSagaStore(
             // A row may already exist at version 0 as a saga-data placeholder auto-created by LogStepAsync
             // to satisfy the saga_steps -> saga_data foreign key. Try updating that placeholder in place
             // before falling back to INSERT, so "first save" still succeeds when steps were logged first.
-            using (var updatePlaceholder = CreateCommand(connection, $"""
+            using (var updatePlaceholder = CreateCommand(lease.Connection, $"""
                 UPDATE {DataTable}
                 SET data_json = @dataJson, saga_data_type = @dataType, version = 1, is_completed = @isCompleted,
                     completed_at_utc = @completedAt, failed_at_utc = @failedAt, application_id = @applicationId, updated_at_utc = now()
                 WHERE saga_id = @sagaId AND version = 0;
-                """))
+                """, lease.Transaction))
             {
                 AddSagaDataParameters(updatePlaceholder, sagaId, dataJson, dataType, data);
                 var updatedRows = await updatePlaceholder.ExecuteNonQueryAsync().ConfigureAwait(false);
@@ -464,10 +467,10 @@ public class PostgreSqlSagaStore(
 
             try
             {
-                using var insert = CreateCommand(connection, $"""
+                using var insert = CreateCommand(lease.Connection, $"""
                     INSERT INTO {DataTable} (saga_id, application_id, saga_data_type, data_json, version, is_completed, completed_at_utc, failed_at_utc, updated_at_utc)
                     VALUES (@sagaId, @applicationId, @dataType, @dataJson, 1, @isCompleted, @completedAt, @failedAt, now());
-                    """);
+                    """, lease.Transaction);
                 AddSagaDataParameters(insert, sagaId, dataJson, dataType, data);
                 await insert.ExecuteNonQueryAsync().ConfigureAwait(false);
                 data.Version = 1;
@@ -475,17 +478,18 @@ public class PostgreSqlSagaStore(
             }
             catch (PostgresException ex) when (ex.SqlState == UniqueViolationSqlState)
             {
-                var actual = await SelectCurrentVersionAsync(connection, sagaId).ConfigureAwait(false) ?? 0;
+                var actual = await SelectCurrentVersionAsync(lease.Connection, lease.Transaction, sagaId)
+                    .ConfigureAwait(false) ?? 0;
                 throw new SagaConcurrencyException(sagaId, 0, actual);
             }
         }
 
-        using (var update = CreateCommand(connection, $"""
+        using (var update = CreateCommand(lease.Connection, $"""
             UPDATE {DataTable}
             SET data_json = @dataJson, saga_data_type = @dataType, version = version + 1, is_completed = @isCompleted,
                 completed_at_utc = @completedAt, failed_at_utc = @failedAt, application_id = @applicationId, updated_at_utc = now()
             WHERE saga_id = @sagaId AND version = @expectedVersion;
-            """))
+            """, lease.Transaction))
         {
             AddSagaDataParameters(update, sagaId, dataJson, dataType, data);
             update.Parameters.AddWithValue("expectedVersion", expectedVersion);
@@ -498,7 +502,8 @@ public class PostgreSqlSagaStore(
             }
         }
 
-        var actualVersion = await SelectCurrentVersionAsync(connection, sagaId).ConfigureAwait(false) ?? 0;
+        var actualVersion = await SelectCurrentVersionAsync(lease.Connection, lease.Transaction, sagaId)
+            .ConfigureAwait(false) ?? 0;
         throw new SagaConcurrencyException(sagaId, expectedVersion, actualVersion);
     }
 
@@ -506,10 +511,10 @@ public class PostgreSqlSagaStore(
     public async Task<(TSagaData Data, long Version)> LoadSagaDataWithVersionAsync<TSagaData>(Guid sagaId)
         where TSagaData : SagaData, new()
     {
-        using var connection = CreateConnection();
-        await connection.OpenAsync().ConfigureAwait(false);
-
-        using var command = CreateCommand(connection, $"SELECT data_json, version FROM {DataTable} WHERE saga_id = @sagaId;");
+        await using var lease = await RelationalConnectionLease<NpgsqlConnection, NpgsqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection).ConfigureAwait(false);
+        using var command = CreateCommand(lease.Connection,
+            $"SELECT data_json, version FROM {DataTable} WHERE saga_id = @sagaId;", lease.Transaction);
         command.Parameters.AddWithValue("sagaId", sagaId);
 
         using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
@@ -522,9 +527,11 @@ public class PostgreSqlSagaStore(
         return (data, version);
     }
 
-    private async Task<long?> SelectCurrentVersionAsync(NpgsqlConnection connection, Guid sagaId)
+    private async Task<long?> SelectCurrentVersionAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction,
+        Guid sagaId)
     {
-        using var command = CreateCommand(connection, $"SELECT version FROM {DataTable} WHERE saga_id = @sagaId;");
+        using var command = CreateCommand(connection, $"SELECT version FROM {DataTable} WHERE saga_id = @sagaId;",
+            transaction);
         command.Parameters.AddWithValue("sagaId", sagaId);
         var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
         return result == null || result == DBNull.Value ? null : (long)result;

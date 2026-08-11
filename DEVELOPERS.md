@@ -271,8 +271,8 @@ README.md for what's still planned beyond this.
   not implemented here.
 - **`Lycia.Persistence.SqlServer`**: `LyciaInbox`/`LyciaOutbox` tables (`002_InboxOutboxSchema.sql`,
   applied only when Inbox/Outbox is actually enabled, not by `WithSqlServerSagaStore` alone).
-  `SqlServerInboxStore.TryBeginAsync` reuses `SqlServerSagaStore`'s insert-then-catch-unique-violation
-  idiom. `SqlServerOutboxStore.ClaimPendingBatchAsync` uses
+  `SqlServerInboxStore.TryBeginAsync` uses transaction-aware locking and the store's unique identity
+  constraint. `SqlServerOutboxStore.ClaimPendingBatchAsync` uses
   `UPDATE TOP (@n) ... OUTPUT INSERTED.* WHERE Status = Pending`, safe under concurrent callers via
   SQL Server's normal row locking during the `UPDATE`.
 - **`Lycia.Persistence.PostgreSql`**: `lycia_inbox`/`lycia_outbox` tables with `jsonb` payload/failure
@@ -316,17 +316,25 @@ JetStream provide this capability. Core NATS and the current RabbitMQ publisher 
 exception is also `ConfirmationUnknown`; only a permanent local envelope/type/serialization error is
 `Failed`.
 
-### Persistence session
+### Atomic persistence session
 
 - **`ILyciaPersistenceSession`/`ILyciaPersistenceSessionFactory`** (`Lycia.Saga.Abstractions.Persistence`)
-  — a provider-neutral transaction boundary, prepared for a future atomic Saga+Inbox+Outbox commit.
+  — the provider-neutral, service-local SagaStore+Inbox+Outbox transaction boundary.
   `RelationalPersistenceSession`/`RelationalPersistenceSessionFactory`
   (`Lycia.Persistence.Relational.Internal.Sessions`) wrap a real `DbConnection`/`DbTransaction`, and
   are registered by `WithSqlServerSagaStore(...)`/`WithPostgreSqlSagaStore(...)` using
   `SqlConnection`/`NpgsqlConnection` respectively (`SupportsAtomicTransactions = true`).
-  `NonAtomicPersistenceSession`/`NonAtomicPersistenceSessionFactory` are the honest no-op default for
-  InMemory/Redis (`SupportsAtomicTransactions = false`) — nothing is disguised as atomic. **No
-  SagaStore/Inbox/Outbox operation actually enlists in a session yet** — that wiring is future work.
+  A scoped `ILyciaPersistenceSessionAccessor` gives relational stores explicit access to the session
+  owned by `SagaDispatcher`; it is not static or `AsyncLocal`. The dispatcher claims Inbox, runs the
+  handler, captures Outbox intent, persists Saga state/steps, marks Inbox completed, and then commits.
+  A failure rolls back partial writes. An unobservable commit result becomes
+  `PersistenceCommitOutcomeUnknownException` and is not reclassified as a definite rollback.
+
+`Auto` is the default policy. Matching SQL Server or PostgreSQL database identities resolve
+`LocalAtomic`; mixed providers or different databases resolve `Independent`. The public assertions
+are `.RequireAtomicBoundary()` and `.UseIndependentTransactions()`. The boundary never spans
+services, does not automatically include application business tables, and does not change Lycia's
+at-least-once delivery model.
 
 
 ## 🧪 Integration Tests
@@ -376,10 +384,9 @@ services.AddLycia(configuration, lycia =>
 
 ## 🔮 Roadmap
 
-- Inbox/Outbox providers, outgoing capture, semantic dispatcher, hosted worker, and Kafka/JetStream
-  confirmation integration are complete. Atomic Saga+Inbox+Outbox enlistment through
-  `ILyciaPersistenceSession` remains the Phase 4 boundary; RabbitMQ publisher confirms also remain a
-  transport-specific follow-up.
+- Inbox/Outbox providers, outgoing capture, semantic dispatcher, hosted worker, Kafka/JetStream
+  confirmation integration, and SQL Server/PostgreSQL atomic Lycia persistence boundaries are
+  complete. RabbitMQ publisher confirms remain a transport-specific follow-up.
 - Add support for Avro / Protobuf with Schema Registry (including the built‑in `AvroSchemaConverter`)
 - Finalize `IRetryPolicy` (done) and extend `Lycia.Scheduling` module for delayed retries
 - Improve distributed tracing and observability

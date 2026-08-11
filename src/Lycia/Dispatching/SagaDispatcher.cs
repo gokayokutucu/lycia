@@ -15,6 +15,7 @@ using Lycia.Saga.Abstractions.Inbox;
 using Lycia.Saga.Abstractions.Handlers;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Abstractions.Middlewares;
+using Lycia.Saga.Abstractions.Persistence;
 using Lycia.Saga.Exceptions;
 using Lycia.Saga.Helpers;
 using Lycia.Saga.Messaging;
@@ -137,62 +138,100 @@ public class SagaDispatcher(
         
         if (!IsSupportedSagaHandler(handlerType)) return;
 
-        // Inbox is optional and disabled by default: IInboxStore only resolves when a persistence
-        // provider registered one via UsePersistence().With...Inbox(). When absent, dispatch behaves
-        // exactly as before this check existed.
-        var inboxStore = serviceProvider.GetService<IInboxStore>();
-        if (inboxStore != null)
+        var topology = serviceProvider.GetService<IPersistenceTopology>()?.Current;
+        var useLocalAtomic = topology?.ResolvedStrategy == PersistenceExecutionStrategy.LocalAtomic;
+        var sessionAccessor = serviceProvider.GetService<ILyciaPersistenceSessionAccessor>();
+        ILyciaPersistenceSession? ownedSession = null;
+        ILyciaPersistenceSession? previousSession = null;
+
+        if (useLocalAtomic)
         {
-            var beginResult = await inboxStore.TryBeginAsync(message.MessageId, handlerType, cancellationToken);
-            if (beginResult != InboxBeginResult.Started)
+            if (sessionAccessor == null)
+                throw new InvalidOperationException("Local atomic persistence requires a scoped session accessor.");
+            if (sessionAccessor.Current != null)
+                throw new InvalidOperationException("A nested Lycia persistence session is not supported.");
+
+            var sessionFactory = serviceProvider.GetRequiredService<ILyciaPersistenceSessionFactory>();
+            ownedSession = await sessionFactory.BeginAsync(cancellationToken);
+            if (!ownedSession.SupportsAtomicTransactions)
             {
-                logger.LogInformation(
-                    "Inbox: message {MessageId} for handler {HandlerType} is already {InboxResult}; skipping duplicate execution.",
-                    message.MessageId, handlerType.Name, beginResult);
-                return;
+                await ownedSession.DisposeAsync();
+                throw new InvalidOperationException(
+                    "The resolved LocalAtomic topology did not provide an atomic persistence session.");
             }
+
+            previousSession = sessionAccessor.Current;
+            sessionAccessor.Current = ownedSession;
         }
 
-        var createdContext = await SagaContextFactory.InitializeForHandlerAsync(
-            handler,
-            sagaId!.Value,
-            message,
-            eventBus,
-            sagaStore,
-            sagaIdGenerator,
-            compensationCoordinator, 
-            serviceProvider, 
-            cancellationToken);
-        
-        // Build middleware pipeline and execute handler through it
-        var middlewares = serviceProvider.GetServices<ISagaMiddleware>();
-        var orderedTypes = serviceProvider.GetService<IReadOnlyList<Type>>();
-        var pipeline = new Middleware.SagaMiddlewarePipeline(middlewares, serviceProvider, orderedTypes);
-        var ctx = new SagaContextInvocationContext
-        {
-            Message = message,
-            SagaContext = createdContext as ISagaContext,
-            HandlerType = handlerType,
-            SagaId = sagaId,
-            ApplicationId = message.ApplicationId,
-            CancellationToken = cancellationToken
-        };
-        
+        var inboxStore = serviceProvider.GetService<IInboxStore>();
         var sagaContextAccessor = serviceProvider.GetService<ISagaContextAccessor>();
-
-        // Set current saga context in accessor if available
         var previous = sagaContextAccessor?.Current;
         try
         {
+            // Inbox is optional. Under LocalAtomic its claim, handler persistence, Outbox capture,
+            // and completion all use the session installed above and commit as one unit.
+            if (inboxStore != null)
+            {
+                var beginResult = await inboxStore.TryBeginAsync(message.MessageId, handlerType, cancellationToken);
+                if (beginResult != InboxBeginResult.Started)
+                {
+                    logger.LogInformation(
+                        "Inbox: message {MessageId} for handler {HandlerType} is already {InboxResult}; skipping duplicate execution.",
+                        message.MessageId, handlerType.Name, beginResult);
+                    if (ownedSession != null) await ownedSession.RollbackAsync(cancellationToken);
+                    return;
+                }
+            }
+
+            var createdContext = await SagaContextFactory.InitializeForHandlerAsync(
+                handler,
+                sagaId!.Value,
+                message,
+                eventBus,
+                sagaStore,
+                sagaIdGenerator,
+                compensationCoordinator,
+                serviceProvider,
+                cancellationToken);
+
+            var middlewares = serviceProvider.GetServices<ISagaMiddleware>();
+            var orderedTypes = serviceProvider.GetService<IReadOnlyList<Type>>();
+            var pipeline = new Middleware.SagaMiddlewarePipeline(middlewares, serviceProvider, orderedTypes);
+            var ctx = new SagaContextInvocationContext
+            {
+                Message = message,
+                SagaContext = createdContext as ISagaContext,
+                HandlerType = handlerType,
+                SagaId = sagaId,
+                ApplicationId = message.ApplicationId,
+                CancellationToken = cancellationToken
+            };
+
             if (sagaContextAccessor != null)
                 sagaContextAccessor.Current = createdContext as ISagaContext;
             await pipeline.InvokeAsync(ctx, () => HandleSagaAsync(message, handler, handlerType, cancellationToken));
 
             if (inboxStore != null)
                 await inboxStore.MarkCompletedAsync(message.MessageId, handlerType, cancellationToken);
+
+            if (ownedSession != null)
+                await ownedSession.CommitAsync(cancellationToken);
+        }
+        catch (PersistenceCommitOutcomeUnknownException)
+        {
+            // Never mark the Inbox failed or rerun business logic when COMMIT may have succeeded.
+            // Durable identities are the recovery authority for this indeterminate outcome.
+            throw;
         }
         catch (Exception ex)
         {
+            if (ownedSession != null)
+            {
+                await ownedSession.RollbackAsync(cancellationToken);
+                sessionAccessor!.Current = previousSession;
+            }
+
             if (inboxStore != null)
                 await inboxStore.MarkFailedAsync(message.MessageId, handlerType,
                     new SagaStepFailureInfo("Handler execution failed", ex.GetType().Name, ex.ToString()), cancellationToken);
@@ -201,6 +240,8 @@ public class SagaDispatcher(
         finally
         {
             if (sagaContextAccessor != null) sagaContextAccessor.Current = previous;
+            if (sessionAccessor != null) sessionAccessor.Current = previousSession;
+            if (ownedSession != null) await ownedSession.DisposeAsync();
         }
     }
 
