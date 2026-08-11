@@ -47,13 +47,14 @@ public static class PostgreSqlSagaStoreDslExtensions
             sp.GetRequiredService<ISagaIdGenerator>(),
             sp.GetRequiredService<ISagaCompensationCoordinator>(),
             sp.GetService<IMessageScheduler>(),
-            sp.GetService<IOutgoingMessagePipeline>()));
+            sp.GetService<IOutgoingMessagePipeline>(),
+            sp.GetService<ILyciaPersistenceSessionAccessor>()));
 
-        // Prepares the relational transaction boundary for a future atomic Saga+Inbox+Outbox commit.
-        // Not yet wired into SagaStore/Inbox/Outbox operations - see the Strong Consistency roadmap item.
         persistence.Services.RemoveAll(typeof(ILyciaPersistenceSessionFactory));
         persistence.Services.AddScoped<ILyciaPersistenceSessionFactory>(_ =>
-            new RelationalPersistenceSessionFactory(() => new NpgsqlConnection(options.ConnectionString)));
+            new RelationalPersistenceSessionFactory(() => new NpgsqlConnection(options.BuildEffectiveConnectionString())));
+        persistence.RegisterProviderMetadata(PersistenceCapabilityKind.SagaStore, "PostgreSql",
+            PostgreSqlConnectionIdentity.Create(options.ConnectionString), true);
 
         return persistence;
     }

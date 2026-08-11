@@ -743,7 +743,7 @@ services.AddLycia(configuration, lycia =>
     lycia
         .UsePersistence()
             .WithRedisSagaStore(options => options.ConnectionString = redisConnection)
-            .WithInMemoryInbox(); // disabled by default; only an in-memory implementation exists today
+            .WithRedisInbox(options => options.ConnectionString = redisConnection); // disabled by default
 });
 ```
 
@@ -791,8 +791,8 @@ Transport-specific behavior remains outside the core package.
 `WithInMemorySagaStore()`, `WithRedisSagaStore(...)`, `WithSqlServerSagaStore(...)`, and
 `WithPostgreSqlSagaStore(...)` — each contributed by its own package. `Lycia.Extensions` itself only
 defines `LyciaPersistenceBuilder` and its duplicate-provider guard; it never depends on a concrete
-provider package. Future split-store and strong-consistency atomic boundaries will
-extend `LyciaPersistenceBuilder` the same way, without changing this dependency direction.
+provider package. Persistence-boundary policy and future split-store capabilities extend
+`LyciaPersistenceBuilder` without changing this dependency direction.
 
 ---
 
@@ -854,8 +854,9 @@ Outbox
 -> durable publication lifecycle of outgoing messages
 ```
 
-The saga state machine does not replace Inbox or Outbox. These concerns may share one database
-transaction in the future (see `ILyciaPersistenceSession`), but they remain separate lifecycles.
+The saga state machine does not replace Inbox or Outbox. When SQL Server or PostgreSQL backs every
+enabled store with the same normalized database identity, these concerns share one service-local
+transaction automatically; they remain separate durable lifecycles.
 
 **Idempotency** prevents duplicate handling of the same logical message — Inbox implements this at
 the handler-execution level: `IInboxStore.TryBeginAsync(messageId, handlerType)` claims a
@@ -908,9 +909,31 @@ Scheduling remains the sole owner of not-yet-due intent. When a schedule becomes
 `SchedulerWorker` hands `Send`/`Publish`/`Respond` to the same outgoing pipeline; with Outbox enabled
 this creates one Outbox record at due time rather than two competing durable records.
 
-Saga state, Inbox, and Outbox writes are not yet one atomic transaction. The prepared
-`ILyciaPersistenceSession` boundary does not enlist these operations; atomic Saga+Inbox+Outbox commit
-is the explicit Phase 4 boundary.
+### Atomic Lycia persistence boundary
+
+The persistence-boundary policy defaults to `Auto`. SQL Server or PostgreSQL SagaStore, Inbox, and
+Outbox stores that resolve to the same logical database use `LocalAtomic` automatically. Different
+schemas in that database may participate because each store uses schema-qualified tables; different
+databases or mixed providers resolve to `Independent`.
+
+```csharp
+lycia.UsePersistence()
+    .WithPostgreSqlSagaStore(options => options.ConnectionString = postgres)
+    .WithPostgreSqlInbox(options => options.ConnectionString = postgres)
+    .WithPostgreSqlOutbox(options => options.ConnectionString = postgres);
+// Auto -> LocalAtomic
+```
+
+Use `.RequireAtomicBoundary()` to make an incompatible topology fail during startup validation, or
+`.UseIndependentTransactions()` to deliberately opt out when a compatible local boundary exists.
+There is no `WithAutomaticConsistency()`, `WithStrongConsistency()`, or `AllowNonAtomicBoundary()`;
+mixed topology is a valid automatic Independent configuration.
+
+The local transaction covers only the enabled Lycia Inbox, SagaStore, and Outbox operations in one
+service. It never spans service A's Outbox and service B's Inbox, never uses a distributed
+transaction, and does not automatically enlist application business tables. Outbox publication
+happens after commit. If COMMIT is issued but its result cannot be observed, Lycia reports an unknown
+outcome and does not blindly rerun the handler; durable identities must be checked during recovery.
 
 **Lycia provides at-least-once delivery semantics. It does not claim exactly-once processing.**
 Inbox reduces duplicate-processing risk; Outbox reduces the local-store/broker dual-write window when
@@ -941,7 +964,6 @@ own schema via an embedded migration (`ApplyMigrations` by default).
 
 Not yet built — still future work, not implemented and not to be assumed available:
 
-- strong-consistency relational mode (`WithStrongConsistency()` / `RequireAtomicBoundary()`)
 - split-store Redis + relational mode (`WithSplitStore()`)
 - deterministic replay / Redis rebuild from canonical history
 - reconciliation workers, leases and fencing
@@ -969,11 +991,13 @@ Implemented today:
   `OutboxWorker`: automatic Context capture, due-schedule handoff, Send/Publish/Respond restoration,
   bounded redispatch, and the conservative Pending→Claimed→Publishing→Published/ConfirmationUnknown/Failed
   lifecycle described above. Registered whenever an Outbox provider is selected.
-- `ILyciaPersistenceSession`/`ILyciaPersistenceSessionFactory` — a real relational transaction boundary (`RelationalPersistenceSession`, backed by `Microsoft.Data.SqlClient`/`Npgsql`) registered by the SQL Server/PostgreSQL SagaStore providers, and a `NonAtomicPersistenceSession` default for InMemory/Redis that honestly reports `SupportsAtomicTransactions = false`
+- `ILyciaPersistenceSession`/`ILyciaPersistenceSessionFactory` — a real, service-local relational
+  transaction boundary (`RelationalPersistenceSession`, backed by `Microsoft.Data.SqlClient`/`Npgsql`)
+  shared by enabled SQL Server/PostgreSQL SagaStore, Inbox, and Outbox operations when `Auto` resolves
+  `LocalAtomic`. InMemory/Redis remain honestly independent.
 
 Still planned (not implemented):
 
-- wiring SagaStore + Inbox + Outbox operations to actually share one `ILyciaPersistenceSession`
 - RabbitMQ publisher-confirm mode (Kafka and NATS JetStream confirmations are integrated; Core NATS
   and RabbitMQ remain conservatively `ConfirmationUnknown`)
 - canonical incoming/outgoing journals

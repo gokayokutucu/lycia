@@ -3,7 +3,9 @@
 // https://www.apache.org/licenses/LICENSE-2.0
 using Lycia.Common.Helpers;
 using Lycia.Common.SagaSteps;
+using Lycia.Persistence.Relational.Internal.Sessions;
 using Lycia.Saga.Abstractions.Outbox;
+using Lycia.Saga.Abstractions.Persistence;
 using Newtonsoft.Json;
 using Npgsql;
 using NpgsqlTypes;
@@ -11,9 +13,10 @@ using NpgsqlTypes;
 namespace Lycia.Persistence.PostgreSql;
 
 /// <summary>PostgreSQL backed implementation of <see cref="IOutboxStore"/>.</summary>
-public class PostgreSqlOutboxStore(PostgreSqlOutboxOptions options) : IOutboxStore
+public class PostgreSqlOutboxStore(PostgreSqlOutboxOptions options,
+    ILyciaPersistenceSessionAccessor? sessionAccessor = null) : IOutboxStore
 {
-    private const string OutboxTable = PostgreSqlOutboxOptions.OutboxTable;
+    private string OutboxTable => options.QualifiedOutboxTable;
 
     private static readonly string SelectColumns =
         "message_id, message_type_name, payload, application_id, saga_id, status, retry_count, failure_info_json, created_at_utc, updated_at_utc";
@@ -49,16 +52,15 @@ public class PostgreSqlOutboxStore(PostgreSqlOutboxOptions options) : IOutboxSto
     {
         if (message is null) throw new ArgumentNullException(nameof(message));
 
-        using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-        using var command = CreateCommand(connection, $"""
+        await using var lease = await RelationalConnectionLease<NpgsqlConnection, NpgsqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
+        using var command = CreateCommand(lease.Connection, $"""
             INSERT INTO {OutboxTable}
                 (message_id, message_type_name, payload, application_id, saga_id, status, retry_count, failure_info_json, created_at_utc, updated_at_utc)
             VALUES
                 (@messageId, @messageTypeName, @payload, @applicationId, @sagaId, @status, 0, NULL, @createdAt, @updatedAt)
             ON CONFLICT (message_id) DO NOTHING;
-            """);
+            """, lease.Transaction);
         command.Parameters.AddWithValue("messageId", message.MessageId);
         command.Parameters.AddWithValue("messageTypeName", message.MessageTypeName);
         AddJsonb(command, "payload", message.Payload);
@@ -73,12 +75,11 @@ public class PostgreSqlOutboxStore(PostgreSqlOutboxOptions options) : IOutboxSto
     /// <inheritdoc />
     public async Task<OutboxMessage?> GetByMessageIdAsync(Guid messageId, CancellationToken cancellationToken = default)
     {
-        using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-        using var command = CreateCommand(connection, $"""
+        await using var lease = await RelationalConnectionLease<NpgsqlConnection, NpgsqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
+        using var command = CreateCommand(lease.Connection, $"""
             SELECT {SelectColumns} FROM {OutboxTable} WHERE message_id = @messageId;
-            """);
+            """, lease.Transaction);
         command.Parameters.AddWithValue("messageId", messageId);
 
         using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -91,10 +92,9 @@ public class PostgreSqlOutboxStore(PostgreSqlOutboxOptions options) : IOutboxSto
     public async Task<IReadOnlyList<OutboxMessage>> ClaimPendingBatchAsync(int maxCount,
         CancellationToken cancellationToken = default, int maxAttempts = 5, TimeSpan? recoveryTimeout = null)
     {
-        using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-        using var command = CreateCommand(connection, $"""
+        await using var lease = await RelationalConnectionLease<NpgsqlConnection, NpgsqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
+        using var command = CreateCommand(lease.Connection, $"""
             UPDATE {OutboxTable}
             SET status = @claimedStatus, updated_at_utc = now()
             WHERE message_id IN (
@@ -107,7 +107,7 @@ public class PostgreSqlOutboxStore(PostgreSqlOutboxOptions options) : IOutboxSto
                 FOR UPDATE SKIP LOCKED
             )
             RETURNING {SelectColumns};
-            """);
+            """, lease.Transaction);
         command.Parameters.AddWithValue("claimedStatus", (int)OutboxMessageStatus.Claimed);
         command.Parameters.AddWithValue("pendingStatus", (int)OutboxMessageStatus.Pending);
         command.Parameters.AddWithValue("unknownStatus", (int)OutboxMessageStatus.ConfirmationUnknown);
@@ -146,15 +146,14 @@ public class PostgreSqlOutboxStore(PostgreSqlOutboxOptions options) : IOutboxSto
     private async Task UpdateStatusAsync(Guid messageId, OutboxMessageStatus status, SagaStepFailureInfo? failureInfo,
         CancellationToken cancellationToken, bool incrementRetry = false)
     {
-        using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-        using var command = CreateCommand(connection, $"""
+        await using var lease = await RelationalConnectionLease<NpgsqlConnection, NpgsqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
+        using var command = CreateCommand(lease.Connection, $"""
             UPDATE {OutboxTable}
             SET status = @status, failure_info_json = COALESCE(@failureInfo, failure_info_json),
                 retry_count = retry_count + @retryIncrement, updated_at_utc = now()
             WHERE message_id = @messageId;
-            """);
+            """, lease.Transaction);
         command.Parameters.AddWithValue("messageId", messageId);
         command.Parameters.AddWithValue("status", (int)status);
         command.Parameters.AddWithValue("retryIncrement", incrementRetry ? 1 : 0);

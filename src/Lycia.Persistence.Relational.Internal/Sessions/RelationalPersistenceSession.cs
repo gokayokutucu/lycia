@@ -13,11 +13,12 @@ namespace Lycia.Persistence.Relational.Internal.Sessions;
 /// Saga+Inbox+Outbox commits. Wiring those operations to actually share one session is future work —
 /// this type only provides the boundary itself.
 /// </summary>
-public sealed class RelationalPersistenceSession : ILyciaPersistenceSession
+public sealed class RelationalPersistenceSession : IRelationalPersistenceSession
 {
     private readonly DbConnection _connection;
     private readonly DbTransaction _transaction;
     private bool _completed;
+    private bool _commitIssued;
 
     internal RelationalPersistenceSession(DbConnection connection, DbTransaction transaction)
     {
@@ -37,18 +38,30 @@ public sealed class RelationalPersistenceSession : ILyciaPersistenceSession
     /// <inheritdoc />
     public async Task CommitAsync(CancellationToken cancellationToken = default)
     {
+        if (_completed) throw new InvalidOperationException("The persistence session has already completed.");
+        _commitIssued = true;
+        try
+        {
 #if NET8_0_OR_GREATER
-        await _transaction.CommitAsync(cancellationToken);
+            await _transaction.CommitAsync(cancellationToken);
 #else
-        _transaction.Commit();
-        await Task.CompletedTask;
+            _transaction.Commit();
+            await Task.CompletedTask;
 #endif
-        _completed = true;
+            _completed = true;
+        }
+        catch (Exception ex) when (ex is not PersistenceCommitOutcomeUnknownException)
+        {
+            throw new PersistenceCommitOutcomeUnknownException(ex);
+        }
     }
 
     /// <inheritdoc />
     public async Task RollbackAsync(CancellationToken cancellationToken = default)
     {
+        if (_completed) throw new InvalidOperationException("The persistence session has already completed.");
+        if (_commitIssued)
+            throw new InvalidOperationException("Rollback cannot be asserted after commit was issued because the outcome may be unknown.");
 #if NET8_0_OR_GREATER
         await _transaction.RollbackAsync(cancellationToken);
 #else
@@ -60,7 +73,7 @@ public sealed class RelationalPersistenceSession : ILyciaPersistenceSession
 
     public async ValueTask DisposeAsync()
     {
-        if (!_completed)
+        if (!_completed && !_commitIssued)
         {
             try
             {

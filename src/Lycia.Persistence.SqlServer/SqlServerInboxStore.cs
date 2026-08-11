@@ -5,14 +5,17 @@ using System.Linq;
 using Lycia.Common.SagaSteps;
 using Lycia.Common.Helpers;
 using Lycia.Extensions;
+using Lycia.Persistence.Relational.Internal.Sessions;
 using Lycia.Saga.Abstractions.Inbox;
+using Lycia.Saga.Abstractions.Persistence;
 using Microsoft.Data.SqlClient;
 using Newtonsoft.Json;
 
 namespace Lycia.Persistence.SqlServer;
 
 /// <summary>Microsoft SQL Server backed implementation of <see cref="IInboxStore"/>.</summary>
-public class SqlServerInboxStore(SqlServerInboxOptions options) : IInboxStore
+public class SqlServerInboxStore(SqlServerInboxOptions options,
+    ILyciaPersistenceSessionAccessor? sessionAccessor = null) : IInboxStore
 {
     private const int UniqueOrPrimaryKeyViolation1 = 2627;
     private const int UniqueOrPrimaryKeyViolation2 = 2601;
@@ -21,11 +24,12 @@ public class SqlServerInboxStore(SqlServerInboxOptions options) : IInboxStore
 
     private SqlConnection CreateConnection() => new(options.ConnectionString);
 
-    private SqlCommand CreateCommand(SqlConnection connection, string sql)
+    private SqlCommand CreateCommand(SqlConnection connection, string sql, SqlTransaction? transaction = null)
     {
         var command = connection.CreateCommand();
         command.CommandText = sql;
         command.CommandTimeout = options.CommandTimeoutSeconds;
+        if (transaction != null) command.Transaction = transaction;
         return command;
     }
 
@@ -37,15 +41,27 @@ public class SqlServerInboxStore(SqlServerInboxOptions options) : IInboxStore
     {
         var handlerTypeName = handlerType.GetSimplifiedQualifiedName();
 
-        using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var lease = await RelationalConnectionLease<SqlConnection, SqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
+
+        var existingStatus = await SelectStatusAsync(lease.Connection, lease.Transaction, messageId, handlerTypeName,
+            cancellationToken, lockForInsert: lease.Transaction != null).ConfigureAwait(false);
+        if (existingStatus != InboxMessageStatus.None)
+        {
+            return existingStatus switch
+            {
+                InboxMessageStatus.Completed => InboxBeginResult.AlreadyCompleted,
+                InboxMessageStatus.Failed => InboxBeginResult.AlreadyFailed,
+                _ => InboxBeginResult.AlreadyProcessing
+            };
+        }
 
         try
         {
-            using var insert = CreateCommand(connection, $"""
+            using var insert = CreateCommand(lease.Connection, $"""
                 INSERT INTO {InboxTable} (MessageId, HandlerType, Status, CreatedAtUtc, UpdatedAtUtc)
                 VALUES (@messageId, @handlerType, @status, SYSUTCDATETIME(), SYSUTCDATETIME());
-                """);
+                """, lease.Transaction);
             insert.Parameters.AddWithValue("@messageId", messageId);
             insert.Parameters.AddWithValue("@handlerType", handlerTypeName);
             insert.Parameters.AddWithValue("@status", (int)InboxMessageStatus.Processing);
@@ -55,7 +71,8 @@ public class SqlServerInboxStore(SqlServerInboxOptions options) : IInboxStore
         }
         catch (SqlException ex) when (IsUniqueViolation(ex))
         {
-            var existingStatus = await SelectStatusAsync(connection, messageId, handlerTypeName, cancellationToken)
+            existingStatus = await SelectStatusAsync(lease.Connection, lease.Transaction, messageId, handlerTypeName,
+                    cancellationToken)
                 .ConfigureAwait(false);
 
             return existingStatus switch
@@ -82,14 +99,13 @@ public class SqlServerInboxStore(SqlServerInboxOptions options) : IInboxStore
     {
         var handlerTypeName = handlerType.GetSimplifiedQualifiedName();
 
-        using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-        using var command = CreateCommand(connection, $"""
+        await using var lease = await RelationalConnectionLease<SqlConnection, SqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
+        using var command = CreateCommand(lease.Connection, $"""
             UPDATE {InboxTable}
             SET Status = @status, FailureInfoJson = @failureInfo, UpdatedAtUtc = SYSUTCDATETIME()
             WHERE MessageId = @messageId AND HandlerType = @handlerType;
-            """);
+            """, lease.Transaction);
         command.Parameters.AddWithValue("@messageId", messageId);
         command.Parameters.AddWithValue("@handlerType", handlerTypeName);
         command.Parameters.AddWithValue("@status", (int)status);
@@ -101,19 +117,20 @@ public class SqlServerInboxStore(SqlServerInboxOptions options) : IInboxStore
     /// <inheritdoc />
     public async Task<InboxMessageStatus> GetStatusAsync(Guid messageId, Type handlerType, CancellationToken cancellationToken = default)
     {
-        using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-        return await SelectStatusAsync(connection, messageId, handlerType.GetSimplifiedQualifiedName(), cancellationToken)
+        await using var lease = await RelationalConnectionLease<SqlConnection, SqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
+        return await SelectStatusAsync(lease.Connection, lease.Transaction, messageId,
+                handlerType.GetSimplifiedQualifiedName(), cancellationToken)
             .ConfigureAwait(false);
     }
 
-    private async Task<InboxMessageStatus> SelectStatusAsync(SqlConnection connection, Guid messageId, string handlerTypeName,
-        CancellationToken cancellationToken)
+    private async Task<InboxMessageStatus> SelectStatusAsync(SqlConnection connection, SqlTransaction? transaction,
+        Guid messageId, string handlerTypeName, CancellationToken cancellationToken, bool lockForInsert = false)
     {
         using var command = CreateCommand(connection, $"""
-            SELECT Status FROM {InboxTable} WHERE MessageId = @messageId AND HandlerType = @handlerType;
-            """);
+            SELECT Status FROM {InboxTable} {(lockForInsert ? "WITH (UPDLOCK, HOLDLOCK)" : string.Empty)}
+            WHERE MessageId = @messageId AND HandlerType = @handlerType;
+            """, transaction);
         command.Parameters.AddWithValue("@messageId", messageId);
         command.Parameters.AddWithValue("@handlerType", handlerTypeName);
 

@@ -4,6 +4,7 @@
 using Lycia.Outbox;
 using Lycia.Saga.Abstractions.Inbox;
 using Lycia.Saga.Abstractions.Outbox;
+using Lycia.Saga.Abstractions.Persistence;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -32,6 +33,7 @@ public sealed class LyciaPersistenceBuilder
     {
         Services = services;
         Configuration = configuration;
+        EnsureTopologyServices();
     }
 
     /// <summary>
@@ -60,6 +62,7 @@ public sealed class LyciaPersistenceBuilder
 
         Services.RemoveAll(typeof(LyciaSagaStoreProviderMarker));
         Services.AddSingleton(new LyciaSagaStoreProviderMarker(providerName));
+        RegisterProviderMetadata(PersistenceCapabilityKind.SagaStore, providerName, null, false);
     }
 
     /// <summary>
@@ -67,16 +70,19 @@ public sealed class LyciaPersistenceBuilder
     /// Inbox provider was already selected, so at most one Inbox implementation is ever active.
     /// </summary>
     public void SelectInboxProvider(string providerName) =>
-        SelectCapabilityProvider<LyciaInboxProviderMarker>("Inbox", providerName, n => new LyciaInboxProviderMarker(n));
+        SelectCapabilityProvider<LyciaInboxProviderMarker>("Inbox", providerName, n => new LyciaInboxProviderMarker(n),
+            PersistenceCapabilityKind.Inbox);
 
     /// <summary>
     /// Marks <paramref name="providerName"/> as the selected Outbox provider. Throws if a different
     /// Outbox provider was already selected, so at most one Outbox implementation is ever active.
     /// </summary>
     public void SelectOutboxProvider(string providerName) =>
-        SelectCapabilityProvider<LyciaOutboxProviderMarker>("Outbox", providerName, n => new LyciaOutboxProviderMarker(n));
+        SelectCapabilityProvider<LyciaOutboxProviderMarker>("Outbox", providerName, n => new LyciaOutboxProviderMarker(n),
+            PersistenceCapabilityKind.Outbox);
 
-    private void SelectCapabilityProvider<TMarker>(string capabilityName, string providerName, Func<string, TMarker> createMarker)
+    private void SelectCapabilityProvider<TMarker>(string capabilityName, string providerName,
+        Func<string, TMarker> createMarker, PersistenceCapabilityKind capability)
         where TMarker : class, ICapabilityProviderMarker
     {
         if (string.IsNullOrWhiteSpace(providerName))
@@ -96,6 +102,58 @@ public sealed class LyciaPersistenceBuilder
 
         Services.RemoveAll(typeof(TMarker));
         Services.AddSingleton(createMarker(providerName));
+        RegisterProviderMetadata(capability, providerName, null, false);
+    }
+
+    /// <summary>
+    /// Contributes safe provider metadata used to resolve the service-local persistence boundary.
+    /// Provider packages should call this after selecting their store implementation.
+    /// </summary>
+    public void RegisterProviderMetadata(PersistenceCapabilityKind capability, string providerName,
+        string? connectionIdentity, bool supportsRelationalLocalTransaction)
+    {
+        if (string.IsNullOrWhiteSpace(providerName))
+            throw new ArgumentException("Persistence provider name must not be empty.", nameof(providerName));
+
+        GetTopologyConfiguration().SetStore(new PersistenceStoreDescriptor(
+            capability, providerName, connectionIdentity, supportsRelationalLocalTransaction));
+    }
+
+    /// <summary>Requires all enabled Lycia persistence stores to share one service-local atomic boundary.</summary>
+    public LyciaPersistenceBuilder RequireAtomicBoundary()
+    {
+        GetTopologyConfiguration().SetPolicy(PersistenceBoundaryPolicy.RequireAtomic);
+        return this;
+    }
+
+    /// <summary>
+    /// Forces independent store operations even when the enabled relational stores could share one transaction.
+    /// This intentionally gives up the atomic Lycia persistence boundary.
+    /// </summary>
+    public LyciaPersistenceBuilder UseIndependentTransactions()
+    {
+        GetTopologyConfiguration().SetPolicy(PersistenceBoundaryPolicy.ForceIndependent);
+        return this;
+    }
+
+    private void EnsureTopologyServices()
+    {
+        _ = GetTopologyConfiguration();
+        Services.TryAddScoped<ILyciaPersistenceSessionAccessor, LyciaPersistenceSessionAccessor>();
+        Services.TryAddSingleton<IPersistenceTopology, PersistenceTopologyProvider>();
+        Services.TryAddEnumerable(ServiceDescriptor.Singleton<Microsoft.Extensions.Hosting.IHostedService,
+            PersistenceTopologyValidationHostedService>());
+    }
+
+    private PersistenceTopologyConfiguration GetTopologyConfiguration()
+    {
+        var existing = Services.LastOrDefault(x => x.ServiceType == typeof(PersistenceTopologyConfiguration))
+            ?.ImplementationInstance as PersistenceTopologyConfiguration;
+        if (existing != null) return existing;
+
+        var configuration = new PersistenceTopologyConfiguration();
+        Services.AddSingleton(configuration);
+        return configuration;
     }
 
     /// <summary>

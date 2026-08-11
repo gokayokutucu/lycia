@@ -9,11 +9,6 @@ namespace Lycia.Saga.Abstractions.Persistence;
 /// that cannot join a real transaction (Redis, InMemory) return a session with
 /// <see cref="SupportsAtomicTransactions"/> set to <c>false</c> instead of pretending to be atomic.
 /// </summary>
-/// <remarks>
-/// This phase only introduces the boundary type and its relational implementation. Wiring SagaStore
-/// + Inbox + Outbox operations to actually share one session is future work — see the Strong
-/// Consistency roadmap item in README.md.
-/// </remarks>
 public interface ILyciaPersistenceSession : IAsyncDisposable
 {
     /// <summary>

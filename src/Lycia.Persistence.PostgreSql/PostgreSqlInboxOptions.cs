@@ -38,6 +38,7 @@ public class PostgreSqlInboxOptions
     public SchemaManagementMode SchemaManagement { get; set; } = SchemaManagementMode.ApplyMigrations;
 
     internal const string InboxTable = "lycia_inbox";
+    internal string QualifiedInboxTable => $"\"{SchemaName}\".{InboxTable}";
 
     /// <summary>Builds the effective connection string, injecting <see cref="SchemaName"/> as the search path when non-default.</summary>
     internal string BuildEffectiveConnectionString()

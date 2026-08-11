@@ -1,79 +1,70 @@
 // Copyright 2023 Lycia Contributors
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
-using System.Linq;
 using Lycia.Common.Helpers;
 using Lycia.Common.SagaSteps;
+using Lycia.Persistence.Relational.Internal.Sessions;
 using Lycia.Saga.Abstractions.Outbox;
+using Lycia.Saga.Abstractions.Persistence;
 using Microsoft.Data.SqlClient;
 using Newtonsoft.Json;
 
 namespace Lycia.Persistence.SqlServer;
 
 /// <summary>Microsoft SQL Server backed implementation of <see cref="IOutboxStore"/>.</summary>
-public class SqlServerOutboxStore(SqlServerOutboxOptions options) : IOutboxStore
+public class SqlServerOutboxStore(SqlServerOutboxOptions options,
+    ILyciaPersistenceSessionAccessor? sessionAccessor = null) : IOutboxStore
 {
-    private const int UniqueOrPrimaryKeyViolation1 = 2627;
-    private const int UniqueOrPrimaryKeyViolation2 = 2601;
-
     private string OutboxTable => options.OutboxTable;
 
     private SqlConnection CreateConnection() => new(options.ConnectionString);
 
-    private SqlCommand CreateCommand(SqlConnection connection, string sql)
+    private SqlCommand CreateCommand(SqlConnection connection, string sql, SqlTransaction? transaction = null)
     {
         var command = connection.CreateCommand();
         command.CommandText = sql;
         command.CommandTimeout = options.CommandTimeoutSeconds;
+        if (transaction != null) command.Transaction = transaction;
         return command;
     }
-
-    private static bool IsUniqueViolation(SqlException ex) =>
-        ex.Errors.Cast<SqlError>().Any(e => e.Number is UniqueOrPrimaryKeyViolation1 or UniqueOrPrimaryKeyViolation2);
 
     /// <inheritdoc />
     public async Task AddAsync(OutboxMessage message, CancellationToken cancellationToken = default)
     {
         if (message is null) throw new ArgumentNullException(nameof(message));
 
-        using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-        try
-        {
-            using var insert = CreateCommand(connection, $"""
+        await using var lease = await RelationalConnectionLease<SqlConnection, SqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
+        using var insert = CreateCommand(lease.Connection, $"""
+                IF NOT EXISTS (SELECT 1 FROM {OutboxTable} WITH (UPDLOCK, HOLDLOCK) WHERE MessageId = @messageId)
+                BEGIN
                 INSERT INTO {OutboxTable}
                     (MessageId, MessageTypeName, Payload, ApplicationId, SagaId, Status, RetryCount, CreatedAtUtc, UpdatedAtUtc)
                 VALUES
                     (@messageId, @messageTypeName, @payload, @applicationId, @sagaId, @status, 0, @createdAt, @updatedAt);
-                """);
-            insert.Parameters.AddWithValue("@messageId", message.MessageId);
-            insert.Parameters.AddWithValue("@messageTypeName", message.MessageTypeName);
-            insert.Parameters.AddWithValue("@payload", message.Payload);
-            insert.Parameters.AddWithValue("@applicationId", (object?)message.ApplicationId ?? DBNull.Value);
-            insert.Parameters.AddWithValue("@sagaId", (object?)message.SagaId ?? DBNull.Value);
-            insert.Parameters.AddWithValue("@status", (int)message.Status);
-            insert.Parameters.AddWithValue("@createdAt", message.CreatedAtUtc);
-            insert.Parameters.AddWithValue("@updatedAt", message.UpdatedAtUtc);
-            await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (SqlException ex) when (IsUniqueViolation(ex))
-        {
-            // Already captured; re-adding must not reset an already-advanced status.
-        }
+                END
+                """, lease.Transaction);
+        insert.Parameters.AddWithValue("@messageId", message.MessageId);
+        insert.Parameters.AddWithValue("@messageTypeName", message.MessageTypeName);
+        insert.Parameters.AddWithValue("@payload", message.Payload);
+        insert.Parameters.AddWithValue("@applicationId", (object?)message.ApplicationId ?? DBNull.Value);
+        insert.Parameters.AddWithValue("@sagaId", (object?)message.SagaId ?? DBNull.Value);
+        insert.Parameters.AddWithValue("@status", (int)message.Status);
+        insert.Parameters.AddWithValue("@createdAt", message.CreatedAtUtc);
+        insert.Parameters.AddWithValue("@updatedAt", message.UpdatedAtUtc);
+        await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
     public async Task<OutboxMessage?> GetByMessageIdAsync(Guid messageId, CancellationToken cancellationToken = default)
     {
-        using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-        using var command = CreateCommand(connection, $"""
+        await using var lease = await RelationalConnectionLease<SqlConnection, SqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
+        using var command = CreateCommand(lease.Connection, $"""
             SELECT MessageId, MessageTypeName, Payload, ApplicationId, SagaId, Status, FailureInfoJson, RetryCount, CreatedAtUtc, UpdatedAtUtc
             FROM {OutboxTable}
             WHERE MessageId = @messageId;
-            """);
+            """, lease.Transaction);
         command.Parameters.AddWithValue("@messageId", messageId);
 
         using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
@@ -86,13 +77,13 @@ public class SqlServerOutboxStore(SqlServerOutboxOptions options) : IOutboxStore
     public async Task<IReadOnlyList<OutboxMessage>> ClaimPendingBatchAsync(int maxCount,
         CancellationToken cancellationToken = default, int maxAttempts = 5, TimeSpan? recoveryTimeout = null)
     {
-        using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var lease = await RelationalConnectionLease<SqlConnection, SqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
 
         // The derived-table TOP/ORDER BY claims the oldest pending rows and takes row locks on exactly
         // those rows before flipping Status; READPAST makes a concurrent claimer skip rows already
         // locked by another caller instead of blocking or double-claiming them.
-        using var command = CreateCommand(connection, $"""
+        using var command = CreateCommand(lease.Connection, $"""
             UPDATE claimed
             SET Status = @claimedStatus, UpdatedAtUtc = SYSUTCDATETIME()
             OUTPUT INSERTED.MessageId, INSERTED.MessageTypeName, INSERTED.Payload, INSERTED.ApplicationId,
@@ -106,7 +97,7 @@ public class SqlServerOutboxStore(SqlServerOutboxOptions options) : IOutboxStore
                   AND RetryCount < @maxAttempts
                 ORDER BY CreatedAtUtc
             ) AS claimed;
-            """);
+            """, lease.Transaction);
         command.Parameters.AddWithValue("@maxCount", maxCount);
         command.Parameters.AddWithValue("@pendingStatus", (int)OutboxMessageStatus.Pending);
         command.Parameters.AddWithValue("@unknownStatus", (int)OutboxMessageStatus.ConfirmationUnknown);
@@ -168,15 +159,14 @@ public class SqlServerOutboxStore(SqlServerOutboxOptions options) : IOutboxStore
     private async Task UpdateStatusAsync(Guid messageId, OutboxMessageStatus status, SagaStepFailureInfo? failureInfo,
         CancellationToken cancellationToken, bool incrementRetry = false)
     {
-        using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-        using var command = CreateCommand(connection, $"""
+        await using var lease = await RelationalConnectionLease<SqlConnection, SqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
+        using var command = CreateCommand(lease.Connection, $"""
             UPDATE {OutboxTable}
             SET Status = @status, FailureInfoJson = @failureInfo,
                 RetryCount = RetryCount + @retryIncrement, UpdatedAtUtc = SYSUTCDATETIME()
             WHERE MessageId = @messageId;
-            """);
+            """, lease.Transaction);
         command.Parameters.AddWithValue("@messageId", messageId);
         command.Parameters.AddWithValue("@status", (int)status);
         command.Parameters.AddWithValue("@retryIncrement", incrementRetry ? 1 : 0);
