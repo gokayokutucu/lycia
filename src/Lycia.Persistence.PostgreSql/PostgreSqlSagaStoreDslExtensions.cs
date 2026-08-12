@@ -6,6 +6,7 @@ using Lycia.Persistence.Relational.Internal.Sessions;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Persistence;
 using Lycia.Saga.Abstractions.Outbox;
+using Lycia.Saga.Abstractions.Persistence.Journal;
 using Lycia.Saga.Abstractions.Persistence.Reconciliation;
 using Lycia.Saga.Abstractions.Scheduling;
 using Microsoft.Extensions.DependencyInjection;
@@ -35,9 +36,14 @@ public static class PostgreSqlSagaStoreDslExtensions
         persistence.Services.RemoveAll(typeof(IReconciliationStore));
         persistence.Services.AddScoped<IReconciliationStore>(sp => new PostgreSqlReconciliationStore(options,
             sp.GetService<ILyciaPersistenceSessionAccessor>()));
+        PostgreSqlJournalSchemaMigrator.RunAsync(options).GetAwaiter().GetResult();
+        persistence.Services.RemoveAll(typeof(ISagaJournalStore));
+        persistence.Services.AddScoped<ISagaJournalStore>(sp => new PostgreSqlSagaJournalStore(options,
+            sp.GetService<ILyciaPersistenceSessionAccessor>()));
         var identity = PostgreSqlConnectionIdentity.Create(options.ConnectionString);
         persistence.SelectSplitStoreCanonicalProvider("PostgreSql", identity);
         persistence.RegisterProviderMetadata(PersistenceCapabilityKind.Reconciliation, "PostgreSql", identity, true);
+        persistence.RegisterProviderMetadata(PersistenceCapabilityKind.Journal, "PostgreSql", identity, true);
         return persistence;
     }
 
