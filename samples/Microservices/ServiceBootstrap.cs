@@ -4,6 +4,7 @@ using Lycia.Persistence.PostgreSql;
 using Lycia.Persistence.Redis;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Persistence;
+using Lycia.Saga.Abstractions.Persistence.Journal;
 using Lycia.Saga.Abstractions.Persistence.Reconciliation;
 using Lycia.Samples.Microservices.Contracts;
 using Npgsql;
@@ -55,6 +56,31 @@ internal static class ServiceBootstrap
             await reconciler.RestoreLatestAsync(sagaId,token)?Results.Accepted():Results.NotFound());
         app.MapDelete("/debug/projections/{sagaId:guid}",async(Guid sagaId,IOperationalSagaProjectionStore store,CancellationToken token)=>
         { await store.DeleteAsync(sagaId,token); return Results.NoContent(); });
+        // Phase 6: canonical journal inspection. Safe metadata only - no payload/SagaData dump by default.
+        app.MapGet("/debug/sagas/{sagaId:guid}/journal",async(Guid sagaId,ISagaJournalStore journal,CancellationToken token)=>
+        {
+            var entries=await journal.ReadAsync(sagaId,afterVersion:0,maxCount:500,token);
+            return Results.Ok(entries.Select(e=>new {
+                sequence=e.SequenceNumber,previousVersion=e.PreviousVersion,targetVersion=e.TargetVersion,
+                transitionType=e.TransitionType.ToString(),messageId=e.MessageId,handlerType=e.HandlerType,
+                messageType=e.MessageType,journalSchemaVersion=e.JournalSchemaVersion,createdAtUtc=e.CreatedAtUtc
+            }));
+        });
+        // Phase 6: rebuilds the operational (Redis) projection strictly from canonical journal history via
+        // the deterministic reducer - distinct from /debug/projections/{sagaId}/restore, which is the Phase 5
+        // reconciliation-based restore from the latest canonical row, not ordered journal replay.
+        app.MapPost("/debug/sagas/{sagaId:guid}/rebuild-from-journal",async(Guid sagaId,ISagaRebuildService rebuildService,CancellationToken token)=>
+        {
+            var outcome=await rebuildService.RebuildSagaAsync(sagaId,token);
+            return outcome.Succeeded?Results.Ok(new{sagaId,rebuiltVersion=outcome.RebuiltVersion}):
+                Results.UnprocessableEntity(new{sagaId,failureKind=outcome.FailureKind.ToString(),outcome.FailureReason});
+        });
+        app.MapGet("/debug/sagas/{sagaId:guid}/verify",async(Guid sagaId,ISagaRebuildService rebuildService,CancellationToken token)=>
+        {
+            var result=await rebuildService.VerifySagaAsync(sagaId,token);
+            return Results.Ok(new{sagaId,status=result.Status.ToString(),journalVersion=result.JournalVersion,
+                operationalProjectionVersion=result.OperationalProjectionVersion,canonicalVersion=result.CanonicalVersion,result.Detail});
+        });
         if (applicationId == "CheckoutService")
         {
             app.MapPost("/checkout",async (CheckoutRequest request,IEventBus bus,CancellationToken token)=>
