@@ -84,7 +84,9 @@ application business domains (the journal is a framework-level canonical transit
 business-aggregate event stream); it does not implement a durable snapshot table (each entry already
 being a full snapshot mostly realizes that acceleration architecturally); it does not add distributed
 leases/fencing beyond the CAS-based rebuild-install safety already provided by
-`IOperationalSagaProjectionStore` (broader lease/fencing hardening is Phase 7); it does not implement
+`IOperationalSagaProjectionStore` (Phase 7's stale-ownership audit confirmed scheduling, Vacuum, and
+Split Store reconciliation/rebuild already had adequate fencing-token CAS protection, so no broader
+mechanism was added); it does not implement
 `lycia doctor` CLI commands (the `ISagaRebuildService` boundary is designed so those would be thin future
 wrappers).
 
@@ -111,6 +113,28 @@ with exact provenance. Vacuum uses a per-transport distributed lease/fence, acti
 references, broker message/consumer facts, age/idle thresholds, and conditional deletion. Ordinary topology follows a
 separate orphan/quarantine state machine and defaults to report-only; inactivity or a matching name never proves
 ownership. The `Lycia.Scheduling` activity source/meter and `LyciaScheduling` health check avoid payload data.
+
+### `WithDispatch` vs `SchedulerWorker` (Phase 7)
+
+`LyciaSchedulingBuilder.WithDispatch(Action<SchedulerWorkerOptions>)` is the canonical public DSL
+entry point; it configures `SchedulingOptions.Worker`, which the internal hosted `SchedulerWorker`
+reads to run durable due-schedule dispatch. `WithDispatch` replaces `WithWorker`, which remains an
+`[Obsolete]` thin wrapper calling `WithDispatch` with the same options instance — no duplicated
+configuration logic, no behavior difference. The rename exists because "Worker" names an
+implementation detail (`SchedulerWorker` the class) that should not leak into ordinary application
+configuration; `WithVacuum(...)` and `VacuumOptions` were deliberately left unchanged; nothing about
+`SchedulerWorker` itself (the internal class name, its DI registration, or `VacuumWorker`) changed.
+
+`SchedulerWorker`'s claim/lease/renew loop already used fencing-token CAS (owner *and* fence must
+both match, not lease-expiry alone) via the same `EvaluateOwnedMutationAsync` Lua pattern
+`RedisVacuumLeaseManager` uses — Phase 7's audit confirmed this was already correct and did not add a
+second fencing mechanism. The one real gap Phase 7 found and fixed: failed dispatch attempts retried
+immediately rather than backing off. `SchedulerWorker` now computes retry-at with the same bounded
+exponential-backoff-plus-jitter `RetryDelay` shape `OutboxWorker` already used (new
+`SchedulerWorkerOptions.MaxRetryBackoff` / `MaxJitter`, validated in `LyciaSchedulingExtensions`),
+copied rather than extracted into a shared primitive — there was no existing reusable retry
+abstraction to extend, and the task explicitly disallows building a new one just to avoid a few
+duplicated lines.
 
 ---
 
@@ -424,6 +448,39 @@ are `.RequireAtomicBoundary()` and `.UseIndependentTransactions()`. The boundary
 services, does not automatically include application business tables, and does not change Lycia's
 at-least-once delivery model.
 
+**Unknown commit outcome recovery (Phase 7 audit)**: `SagaDispatcher` deliberately does not catch
+`PersistenceCommitOutcomeUnknownException` and reinterpret it — it propagates, Inbox is never marked
+`Failed` for it, and the handler is never blindly re-run. The durable identities that already exist
+are the recovery authority: Inbox's `(MessageId, HandlerType)` claim tells a redelivery whether the
+handler actually completed; `SagaData.Version` tells a caller whether the saga state write landed;
+the journal's `TransitionId` (idempotent `AppendAsync`) and Outbox's `MessageId` do the same for their
+respective writes. Phase 7 added SQL Server/PostgreSQL failure-window tests
+(`SqlServerFailureWindowTests`/`PostgreSqlFailureWindowTests`) that simulate connection loss before
+and during commit and assert this recovery path rather than assuming rollback.
+
+**RabbitMQ publisher confirms (Phase 7 investigation)**: investigated whether RabbitMQ.Client 7.1.2
+exposes a way to await broker confirmation per publish. `IChannel` has no public
+`WaitForConfirmsAsync`-equivalent method (confirmed via reflection against the installed assembly);
+`CreateChannelOptions(publisherConfirmationsEnabled: true, publisherConfirmationTrackingEnabled: true)`
+embeds confirm-tracking inside `BasicPublishAsync` itself, but a live spike against a real RabbitMQ
+container showed this hanging for the full cancellation guard rather than completing. Building a
+correct, tested confirmation path would require a broader `RabbitMqEventBus` rewrite than a focused
+hardening phase should carry. Per this phase's own instruction — "if it requires a broad transport
+rewrite, do NOT fake it" — the attempt was reverted (`git checkout --`) and RabbitMQ intentionally
+remains `IConfirmedEventBus`-unimplemented, so Outbox dispatch through RabbitMQ stays
+`ConfirmationUnknown` and redispatches under the normal bounded-retry/backoff window like any other
+unconfirmed attempt. This is an accurate, permanent limitation to document, not a temporary gap.
+
+**Reliability diagnostics**: `ILyciaReliabilityDiagnostics.GetSnapshot()`
+(`Lycia.Extensions.Reliability.LyciaReliabilityDiagnostics`) composes a `LyciaReliabilitySnapshot`
+purely from signals that already exist — `IPersistenceTopology.Current` (resolved optionally, since
+it is only registered once `UsePersistence()` runs) plus a service-registration presence check for
+`ISagaJournalStore`/`ISagaRebuildService`/`IInboxStore`/`IOutboxStore`. It intentionally does not
+introduce a second, independently-maintained copy of topology state, and it is registered
+unconditionally by `AddLycia` (both the canonical and legacy registration paths) via
+`TryAddScoped<ILyciaReliabilityDiagnostics, LyciaReliabilityDiagnostics>()` so it resolves even for
+applications that never call `.UsePersistence()`.
+
 
 ## 🧪 Integration Tests
 
@@ -474,11 +531,16 @@ services.AddLycia(configuration, lycia =>
 
 - Inbox/Outbox providers, outgoing capture, semantic dispatcher, hosted worker, Kafka/JetStream
   confirmation integration, and SQL Server/PostgreSQL atomic Lycia persistence boundaries are
-  complete. RabbitMQ publisher confirms remain a transport-specific follow-up.
+  complete. RabbitMQ publisher confirms remain a transport-specific follow-up (see
+  "RabbitMQ publisher confirms (Phase 7 investigation)" below).
 - Split Store (Phase 5) and the canonical journal + deterministic replay/rebuild engine (Phase 6) are
-  complete for SQL Server/PostgreSQL canonical + Redis operational. Reliability Hardening (Phase 7) is
-  next: broader distributed leases/fencing, stale-ownership hardening beyond the minimum rebuild-safety
-  CAS, a full capability/health matrix, and the production reliability review.
+  complete for SQL Server/PostgreSQL canonical + Redis operational. Reliability Hardening (Phase 7)
+  implementation is complete: the stale-ownership audit confirmed scheduling/Vacuum/reconciliation/
+  rebuild already used correct fencing-token CAS; the `WithDispatch` rename; scheduling retry backoff
+  parity; the `ILyciaReliabilityDiagnostics` topology snapshot; and expanded SQL Server/PostgreSQL
+  failure-window test coverage all landed as part of it. `PROJECT_LEDGER.md`'s FINALIZATION gate
+  remains `NOT READY` pending independent architecture review and the reliability red team — Phase 7
+  is an implementation phase, not the finalization decision itself.
 - Add support for Avro / Protobuf with Schema Registry (including the built‑in `AvroSchemaConverter`)
 - Finalize `IRetryPolicy` (done) and extend `Lycia.Scheduling` module for delayed retries
 - Improve distributed tracing and observability
@@ -627,7 +689,7 @@ services.AddLycia(configuration, lycia =>
         .AddScheduling()
             .WithRedisStore()
             .WithPredefinedDelays()
-            .WithWorker(options =>
+            .WithDispatch(options =>
             {
                 options.LeaseDuration = TimeSpan.FromSeconds(30);
                 options.LeaseRenewInterval = TimeSpan.FromSeconds(10);

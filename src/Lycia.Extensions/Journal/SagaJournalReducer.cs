@@ -13,6 +13,7 @@ namespace Lycia.Extensions.Journal;
 /// </summary>
 public sealed class SagaJournalReducer : ISagaJournalReducer
 {
+    /// <inheritdoc />
     public SagaJournalState Reduce(SagaJournalState? previous, SagaJournalEntry entry)
     {
         if (entry == null) throw new ArgumentNullException(nameof(entry));

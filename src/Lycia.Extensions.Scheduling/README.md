@@ -22,6 +22,25 @@ services.AddLyciaScheduling(options =>
 services.AddLyciaInMemoryScheduling();
 ```
 
+The nested `AddLycia(...)` DSL form is equivalent and preferred for new code:
+
+```csharp
+lycia
+    .AddScheduling()
+        .WithRedisStore()
+        .WithPredefinedDelays()
+        .WithDispatch(options =>
+        {
+            options.LeaseDuration = TimeSpan.FromSeconds(30);
+            options.LeaseRenewInterval = TimeSpan.FromSeconds(10);
+        })
+        .WithVacuum(options => options.ApplicationTopology.Mode = VacuumMode.ReportOnly);
+```
+
+`WithDispatch(...)` configures the same `SchedulingOptions.Worker` settings as `options.Worker` above
+— batching, claim lifetime, lease renewal, and bounded backoff-with-jitter retry for due-schedule
+dispatch. It replaces `WithWorker(...)`, kept as an `[Obsolete]` wrapper for existing callers.
+
 Schedule from any saga context:
 
 ```csharp

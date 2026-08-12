@@ -573,14 +573,28 @@ Install:
 dotnet add package Lycia.Extensions.Scheduling
 ```
 
-Register Redis-backed scheduling as part of the same `AddLycia` DSL:
+Register Redis-backed scheduling as part of the same `AddLycia` DSL. Safe defaults apply, so the
+minimal registration needs no dispatch tuning at all:
+
+```csharp
+lycia
+    .AddScheduling()
+        .WithRedisStore()
+        .WithPredefinedDelays();
+```
+
+`WithPredefinedDelays()` sets `AllowDynamicDelays = false`; use `WithDynamicDelays()` for
+`AllowDynamicDelays = true`. Both are semantic aliases over the same `SchedulingOptions` property —
+nothing was removed, so code that still sets `options.AllowDynamicDelays` directly keeps working.
+
+Tune dispatch lease/claim behavior and enable Vacuum only when the defaults do not fit:
 
 ```csharp
 lycia
     .AddScheduling()
         .WithRedisStore()
         .WithPredefinedDelays()
-        .WithWorker(options =>
+        .WithDispatch(options =>
         {
             options.LeaseDuration = TimeSpan.FromSeconds(30);
             options.LeaseRenewInterval = TimeSpan.FromSeconds(10);
@@ -591,9 +605,10 @@ lycia
         });
 ```
 
-`WithPredefinedDelays()` sets `AllowDynamicDelays = false`; use `WithDynamicDelays()` for
-`AllowDynamicDelays = true`. Both are semantic aliases over the same `SchedulingOptions` property —
-nothing was removed, so code that still sets `options.AllowDynamicDelays` directly keeps working.
+`WithDispatch(...)` configures batching, claim lifetime, lease renewal, and bounded
+backoff-with-jitter retry for due-schedule dispatch — it replaces `WithWorker(...)`, which remains
+available as an `[Obsolete]` wrapper over the same `SchedulingOptions.Worker` settings for existing
+callers. `WithVacuum(...)` is unrelated and unchanged.
 
 Schedule a message:
 
@@ -621,13 +636,18 @@ This does not require the `x-delayed-message` plugin.
 
 Dynamic RabbitMQ delay buckets are opt-in because arbitrary durations may create additional queues.
 
-Kafka uses the durable `SchedulerWorker`; Kafka retention is not treated as delayed delivery.
+Kafka uses durable scheduling dispatch (`WithDispatch(...)`); Kafka retention is not treated as
+delayed delivery.
 
-The current validated NATS baseline also uses `SchedulerWorker` for durable scheduling.
+The current validated NATS baseline also uses durable scheduling dispatch rather than delay buckets.
 
 ### Scheduling reliability
 
-Scheduling dispatch follows at-least-once semantics around crash and confirmation windows.
+Scheduling dispatch follows at-least-once semantics around crash and confirmation windows. A due
+schedule is claimed under a fencing-token-protected lease (owner and fence both validated, not
+lease-expiry alone), so a stale or resumed owner cannot re-claim work another live owner still
+holds. Failed dispatch attempts retry with bounded exponential backoff and jitter, the same pattern
+Outbox and reconciliation already use.
 
 Consumers must remain idempotent.
 
@@ -811,8 +831,8 @@ Transport-specific behavior remains outside the core package.
 `WithInMemorySagaStore()`, `WithRedisSagaStore(...)`, `WithSqlServerSagaStore(...)`, and
 `WithPostgreSqlSagaStore(...)` — each contributed by its own package. `Lycia.Extensions` itself only
 defines `LyciaPersistenceBuilder` and its duplicate-provider guard; it never depends on a concrete
-provider package. Persistence-boundary policy and future split-store capabilities extend
-`LyciaPersistenceBuilder` without changing this dependency direction.
+provider package. The atomic persistence-boundary policy, Split Store, and the canonical journal all
+extend `LyciaPersistenceBuilder` the same way, without changing this dependency direction.
 
 ---
 
@@ -852,9 +872,10 @@ Lycia currently provides and prepares for:
 - compensation traversal
 - broker acknowledgement handling
 - RabbitMQ DLQ behavior
-- bounded retry policies
+- bounded retry policies with backoff and jitter (Outbox, Reconciliation, and scheduling dispatch)
 - publisher confirmation integration where supported
-- durable scheduling
+- durable scheduling with fencing-token-protected lease ownership (scheduler dispatch and Vacuum)
+- a safe, secret-free reliability/topology diagnostics snapshot (`ILyciaReliabilityDiagnostics`)
 
 Durable Inbox/Outbox provider stores exist for InMemory, Redis, SQL Server, and PostgreSQL. Selecting
 an Outbox replaces the direct outgoing pipeline with durable capture for `Context.Send`,
@@ -925,9 +946,9 @@ Claims left in `Claimed`/`Publishing` by a crashed process become eligible after
 Set it longer than the transport publish timeout. Recovery can duplicate a publish whose original
 worker was only slow, which is another explicit at-least-once window rather than a fencing claim.
 
-Scheduling remains the sole owner of not-yet-due intent. When a schedule becomes due,
-`SchedulerWorker` hands `Send`/`Publish`/`Respond` to the same outgoing pipeline; with Outbox enabled
-this creates one Outbox record at due time rather than two competing durable records.
+Scheduling remains the sole owner of not-yet-due intent. When a schedule becomes due, scheduling
+dispatch hands `Send`/`Publish`/`Respond` to the same outgoing pipeline; with Outbox enabled this
+creates one Outbox record at due time rather than two competing durable records.
 
 ### Atomic Lycia persistence boundary
 
@@ -959,6 +980,27 @@ outcome and does not blindly rerun the handler; durable identities must be check
 Inbox reduces duplicate-processing risk; Outbox reduces the local-store/broker dual-write window when
 used correctly. Neither changes Lycia's fundamental at-least-once delivery guarantee.
 
+### Reliability diagnostics
+
+`ILyciaReliabilityDiagnostics` composes a safe, secret-free snapshot of the active persistence
+topology from signals that already exist elsewhere (`IPersistenceTopology`, and which of
+Inbox/Outbox/journal/rebuild are actually registered) rather than tracking a second, independently
+maintained copy of that state. It is registered automatically by `AddLycia`:
+
+```csharp
+var snapshot = serviceProvider
+    .GetRequiredService<ILyciaReliabilityDiagnostics>()
+    .GetSnapshot();
+
+// snapshot.Mode, snapshot.CanonicalStore, snapshot.OperationalStore, snapshot.ResolvedStrategy,
+// snapshot.ReconciliationEnabled, snapshot.JournalEnabled, snapshot.JournalRebuildAvailable,
+// snapshot.InboxEnabled, snapshot.OutboxEnabled, snapshot.DeliveryGuarantee ("AtLeastOnce")
+```
+
+The snapshot never includes connection strings, credentials, or message payloads — only provider
+names, capability flags, and the resolved transaction boundary. It is a plain read model, not a
+health check or UI; use it to back a custom startup log line or diagnostics endpoint.
+
 ---
 
 ## Roadmap
@@ -986,10 +1028,14 @@ Also implemented: Split Store (`.UseSplitStore()`, PostgreSQL/SQL Server canonic
 see "Split Store persistence" above) and the canonical journal + deterministic replay/rebuild engine
 (see "Canonical Journal + Replay/Rebuild" below).
 
+Also implemented: a safe, secret-free reliability/topology diagnostics snapshot
+(`ILyciaReliabilityDiagnostics`, see "Reliability diagnostics" above).
+
 Not yet built — still future work, not implemented and not to be assumed available:
 
-- broad distributed leases/fencing beyond the minimum rebuild-safety CAS already in place
-- provider capability reporting and persistence health checks beyond `ISagaStoreHealthCheck`
+- broad distributed leases/fencing beyond the fencing-token CAS already used by scheduling dispatch,
+  Vacuum, and Split Store reconciliation/rebuild
+- persistence health checks beyond `ISagaStoreHealthCheck` and the reliability diagnostics snapshot
 
 ### Inbox and Outbox
 
@@ -1020,8 +1066,12 @@ Implemented today:
 
 Still planned (not implemented):
 
-- RabbitMQ publisher-confirm mode (Kafka and NATS JetStream confirmations are integrated; Core NATS
-  and RabbitMQ remain conservatively `ConfirmationUnknown`)
+- RabbitMQ publisher-confirm mode. Kafka's idempotent `acks=all` producer and NATS JetStream
+  confirmations are integrated and implement `IConfirmedEventBus`. RabbitMQ.Client 7.x does not expose
+  a public API to await broker confirmation per publish (verified directly against the installed
+  client), so RabbitMQ intentionally remains `ConfirmationUnknown` rather than faking a confirmation
+  signal the transport cannot actually give; Core NATS remains `ConfirmationUnknown` for the same
+  honesty reason (no durable server ack outside JetStream)
 - fail-closed processing guarantees beyond what SagaStore already provides
 - bounded recovery beyond the journal-based rebuild described below
 
