@@ -20,6 +20,15 @@ public abstract class SagaStoreConformanceTests
     /// <summary>Creates a fresh <see cref="ISagaStore"/> instance for a single test. Must not share state across tests.</summary>
     protected abstract ISagaStore CreateStore();
 
+    /// <summary>
+    /// Whether two <see cref="CreateStore"/> results observe the same canonical data, the way two
+    /// separate service processes/connections would against a real external store (Redis, SQL Server,
+    /// PostgreSQL). <c>false</c> for providers whose "fresh, isolated instance" is also isolated
+    /// storage (InMemory) - two in-process instances never share state by design, so tests that model
+    /// multiple independent writers against one store do not apply to them.
+    /// </summary>
+    protected virtual bool SupportsCrossInstanceSharedStorage => true;
+
     private static readonly Type StepType = typeof(DummyEvent);
     private static readonly Type HandlerType = typeof(DummySagaHandler);
 
@@ -238,6 +247,8 @@ public abstract class SagaStoreConformanceTests
         // Two separate ISagaStore instances stand in for two separate service processes/connections,
         // as opposed to SaveSagaDataAsync_Concurrent_Writers_Should_Have_Exactly_One_Winner above,
         // which proves the single-winner outcome but not the exact version numbers the loser sees.
+        if (!SupportsCrossInstanceSharedStorage) return;
+
         var storeA = CreateStore();
         var storeB = CreateStore();
         var versionedA = AsVersioned(storeA);
