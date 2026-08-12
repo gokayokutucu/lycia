@@ -139,6 +139,8 @@ public sealed class SchedulingTests
         var dispatcher = new FailOnceDispatcher();
         var options = new SchedulingOptions();
         options.Worker.RetryBackoff = TimeSpan.FromSeconds(5);
+        options.Worker.MaxRetryBackoff = TimeSpan.FromSeconds(5);
+        options.Worker.MaxJitter = TimeSpan.Zero; // Deterministic retry-at for this test's exact clock assertions.
         var worker = new SchedulerWorker(store, dispatcher, clock, Options.Create(options),
             NullLogger<SchedulerWorker>.Instance);
 

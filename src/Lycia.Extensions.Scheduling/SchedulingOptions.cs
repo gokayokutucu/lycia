@@ -44,8 +44,16 @@ public sealed class SchedulerWorkerOptions
     public TimeSpan LeaseRenewInterval { get; set; } = TimeSpan.FromSeconds(10);
     /// <summary>Gets or sets the maximum dispatch attempts before terminal failure.</summary>
     public int MaxDispatchAttempts { get; set; } = 10;
-    /// <summary>Gets or sets retry delay after a failed dispatch.</summary>
+    /// <summary>Gets or sets the initial retry delay after a failed dispatch attempt.</summary>
     public TimeSpan RetryBackoff { get; set; } = TimeSpan.FromSeconds(5);
+    /// <summary>
+    /// Gets or sets the ceiling for the exponential backoff applied across successive failed attempts
+    /// for the same schedule (mirrors the Outbox/Reconciliation worker backoff shape), preventing
+    /// unbounded delay growth for schedules that fail repeatedly.
+    /// </summary>
+    public TimeSpan MaxRetryBackoff { get; set; } = TimeSpan.FromMinutes(1);
+    /// <summary>Gets or sets the maximum random jitter added to a retry delay, to avoid synchronized retry storms across replicas.</summary>
+    public TimeSpan MaxJitter { get; set; } = TimeSpan.FromMilliseconds(250);
     /// <summary>Gets or sets the graceful drain limit.</summary>
     public TimeSpan ShutdownDrainTimeout { get; set; } = TimeSpan.FromSeconds(30);
 }

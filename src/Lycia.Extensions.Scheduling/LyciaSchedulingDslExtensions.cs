@@ -66,13 +66,30 @@ public sealed class LyciaSchedulingBuilder
         return this;
     }
 
-    /// <summary>Configures the durable <see cref="SchedulerWorker"/> (polling, leases, dispatch retry).</summary>
-    public LyciaSchedulingBuilder WithWorker(Action<SchedulerWorkerOptions> configure)
+    /// <summary>
+    /// Configures durable scheduled-message dispatch behavior: how many due messages are claimed per
+    /// pass, how long a claim is held before it is considered abandoned, how often that claim is
+    /// renewed while dispatch is in flight, and how failed dispatch attempts are retried before a
+    /// message is treated as terminally failed.
+    /// </summary>
+    public LyciaSchedulingBuilder WithDispatch(Action<SchedulerWorkerOptions> configure)
     {
         if (configure == null) throw new ArgumentNullException(nameof(configure));
         _services.Configure<SchedulingOptions>(o => configure(o.Worker));
         return this;
     }
+
+    /// <summary>
+    /// Configures durable scheduled-message dispatch behavior.
+    /// </summary>
+    /// <remarks>
+    /// Obsolete: use <see cref="WithDispatch"/> instead. "Worker" named the internal
+    /// <see cref="SchedulerWorker"/> implementation detail rather than the behavior being configured;
+    /// this member configures the exact same <see cref="SchedulerWorkerOptions"/> and will be removed
+    /// in a future release.
+    /// </remarks>
+    [Obsolete("Use WithDispatch(...) instead. WithWorker(...) exposes an implementation detail and will be removed in a future release.")]
+    public LyciaSchedulingBuilder WithWorker(Action<SchedulerWorkerOptions> configure) => WithDispatch(configure);
 
     /// <summary>Configures scheduling-resource and application-topology vacuum behavior.</summary>
     public LyciaSchedulingBuilder WithVacuum(Action<VacuumOptions> configure)
