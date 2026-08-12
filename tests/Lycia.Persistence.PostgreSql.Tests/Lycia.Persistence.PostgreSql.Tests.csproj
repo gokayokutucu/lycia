@@ -15,7 +15,9 @@
         <PackageReference Include="FluentAssertions" Version="8.4.0" />
         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
         <PackageReference Include="OpenTelemetry.Api" Version="1.15.3" />
+        <PackageReference Include="StackExchange.Redis" Version="2.8.37" />
         <PackageReference Include="Testcontainers.PostgreSql" Version="4.6.0" />
+        <PackageReference Include="Testcontainers.Redis" Version="4.6.0" />
         <PackageReference Include="xunit" Version="2.9.2" />
         <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
     </ItemGroup>
@@ -31,6 +33,9 @@
     <ItemGroup>
         <ProjectReference Include="..\..\src\Lycia.Persistence.PostgreSql\Lycia.Persistence.PostgreSql.csproj" />
         <ProjectReference Include="..\..\src\Lycia.Persistence.Relational.Internal\Lycia.Persistence.Relational.Internal.csproj" />
+        <ProjectReference Include="..\..\src\Lycia.Persistence.Redis\Lycia.Persistence.Redis.csproj" />
+        <ProjectReference Include="..\..\src\Lycia.Extensions\Lycia.Extensions.csproj" />
+        <ProjectReference Include="..\..\src\Lycia.Saga.Abstractions\Lycia.Saga.Abstractions.csproj" />
         <ProjectReference Include="..\Lycia.Persistence.TestKit\Lycia.Persistence.TestKit.csproj" />
     </ItemGroup>
 

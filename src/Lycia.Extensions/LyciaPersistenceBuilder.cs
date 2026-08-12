@@ -2,11 +2,13 @@
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 using Lycia.Outbox;
+using Lycia.Extensions.Journal;
 using Lycia.Extensions.SplitStore;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Inbox;
 using Lycia.Saga.Abstractions.Outbox;
 using Lycia.Saga.Abstractions.Persistence;
+using Lycia.Saga.Abstractions.Persistence.Journal;
 using Lycia.Saga.Abstractions.Persistence.Reconciliation;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -147,15 +149,27 @@ public sealed class LyciaPersistenceBuilder
             throw new InvalidOperationException("Split Store requires a canonical relational reconciliation store.");
         if (!Services.Any(x => x.ServiceType == typeof(IOperationalSagaProjectionStore)))
             throw new InvalidOperationException("Split Store requires a Redis operational saga projection store.");
+        if (!Services.Any(x => x.ServiceType == typeof(ISagaJournalStore)))
+            throw new InvalidOperationException(
+                "Split Store requires a canonical relational Saga journal store. Rebuildability is not optional " +
+                "once Split Store is enabled — register a journal store via the canonical provider's " +
+                "With...CanonicalSagaStore(...) extension before calling UseSplitStore().");
 
         var canonicalDescriptor = Services.LastOrDefault(x => x.ServiceType == typeof(ISagaStore))
             ?? throw new InvalidOperationException("Split Store requires a canonical relational SagaStore.");
         Services.Remove(canonicalDescriptor);
         Services.AddScoped<ISagaStore>(sp => new SplitStoreSagaStore(
-            CreateService(sp, canonicalDescriptor), sp.GetRequiredService<IReconciliationStore>()));
+            CreateService(sp, canonicalDescriptor),
+            sp.GetRequiredService<IReconciliationStore>(),
+            sp.GetRequiredService<ISagaJournalStore>(),
+            sp.GetService<ISagaJournalContextAccessor>()));
         Services.TryAddScoped<ISagaProjectionReconciler, SagaProjectionReconciler>();
         Services.TryAddEnumerable(ServiceDescriptor.Singleton<Microsoft.Extensions.Hosting.IHostedService,
             ReconciliationWorker>());
+
+        Services.TryAddSingleton<ISagaJournalReducer, SagaJournalReducer>();
+        Services.TryAddSingleton(sp => new JournalEntryUpcastChain(sp.GetServices<IJournalEntryUpcaster>()));
+        Services.TryAddScoped<ISagaRebuildService, SagaRebuildService>();
         return this;
     }
 

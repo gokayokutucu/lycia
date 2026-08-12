@@ -5,8 +5,88 @@
 The Split Store request path commits relational state and a `SagaProjectionIntent`; it never dual-writes
 Redis. `ReconciliationWorker` uses provider-native claims and installs complete target states through
 Redis CAS. Saga version—not time—orders work: equal versions are idempotent and older versions are
-superseded. `RestoreLatestAsync` requeues the current canonical materialization and does not implement
-the Phase 6 journal/replay contract. The executable failure proof lives under `samples/Microservices`.
+superseded. `RestoreLatestAsync` requeues the current canonical materialization — restoring from the
+*latest* row, not ordered history — and is intentionally distinct from the Phase 6 journal/replay
+contract below. The executable failure proof lives under `samples/Microservices`.
+
+## Canonical journal + deterministic replay/rebuild (Phase 6)
+
+`UseSplitStore()` now requires a registered `ISagaJournalStore` in addition to `IReconciliationStore` and
+`IOperationalSagaProjectionStore` — rebuildability is not optional once Split Store is enabled. This is a
+genuinely new table/concern, not a repurposing of `LyciaSagaReconciliation`: that table only ever holds
+the most recent intent per saga version and gets claimed/completed/superseded away, so it cannot serve as
+permanently retained ordered history.
+
+**Contracts** (`Lycia.Saga.Abstractions.Persistence.Journal`):
+- `SagaJournalEntry` — immutable-by-convention record of one transition: identity
+  (`JournalEntryId`/`TransitionId`), ordering (`SagaId`+`SequenceNumber`, always equal to `TargetVersion`),
+  correlation metadata (`MessageId`/`RequestId`/`CorrelationId`/`CausationId`/`ParentMessageId`/
+  `ApplicationId`/`HandlerType`/`MessageType`, best-effort), schema versions (`MessageSchemaVersion`,
+  `JournalSchemaVersion`), `TransitionType` (`Created`/`Updated`/`Completed`/`Failed`), and the payload:
+  full post-transition `SagaDataPayload` (JSON) plus a full `StepsSnapshotPayload` (JSON array of
+  `SagaStepMetadata` as of this transition — captures step/compensation/cancellation state without
+  requiring the reducer to fold per-step deltas). `CreatedAtUtc` is diagnostic only.
+- `ISagaJournalStore` — `AppendAsync` (idempotent on `TransitionId`), `ReadAsync(sagaId, afterVersion,
+  maxCount)` (ordered, bounded — never loads unbounded history), `GetLatestVersionAsync`,
+  `EnumerateSagaIdsAsync(afterSagaId, maxCount)` (cursor-based, for bulk rebuild paging). No
+  `DbConnection`/`DbTransaction` on the public surface — relational implementations enlist internally via
+  `RelationalConnectionLease`/`ILyciaPersistenceSessionAccessor`, the exact same pattern
+  `SqlServerReconciliationStore`/`PostgreSqlReconciliationStore` already use.
+- `ISagaJournalReducer` — `Reduce(previous, entry) -> SagaJournalState`, pure and side-effect-free.
+  Because each entry is a full snapshot (not a delta), `SagaJournalReducer`'s implementation is a direct
+  projection from the entry, not a merge.
+- `ISagaJournalContextAccessor`/`SagaJournalTransitionContext` — scoped, framework-managed correlation
+  metadata. `SagaDispatcher.InvokeHandlerAsync` populates it right before dispatch (mirroring
+  `ISagaContextAccessor`'s existing pattern) and clears it in `finally`. Never set by handler code —
+  there is no `Context.AppendJournal(...)`.
+- `IJournalEntryUpcaster`/`JournalEntryUpcastChain` — deterministic, chained schema upgrades applied
+  before reduction; a missing upcaster fails the rebuild/verify clearly.
+- `ISagaRebuildService` — one engine for both automatic recovery and manual/operator rebuild:
+  `RebuildSagaAsync`/`RebuildAllAsync` (bounded pages via `EnumerateSagaIdsAsync`, per-saga failure
+  isolation so one corrupt saga doesn't abort the batch, `IProgress<SagaRebuildProgress>`, cancellation,
+  a resumable `ResumeCursor` in the summary) and `VerifySagaAsync`/`VerifyAllAsync` (non-mutating:
+  `Healthy`/`MissingProjection`/`VersionMismatch`/`StateMismatch`/`JournalGap`/`SchemaUnsupported`/
+  `CorruptEntry`). `StateMismatch` best-effort compares the canonical SagaStore's current version via
+  reflection against the journal-derived version (skipped gracefully if the SagaData CLR type can't be
+  resolved from the stored simplified type name — never fails verify outright over that).
+
+**Wiring**: `SplitStoreSagaStore.SaveSagaDataAsync` (both the legacy and versioned overloads) now calls
+`AddJournalEntryAsync` alongside the existing `AddIntentAsync`, in the same method — both enlist in the
+same `LocalAtomic` session when one is active, so journal append, canonical save, Inbox, and Outbox commit
+or roll back together. `AddJournalEntryAsync` fetches the current step-log snapshot
+(`canonicalStore.GetSagaHandlerStepsAsync`) and reads `ISagaJournalContextAccessor.Current` for
+correlation metadata before appending.
+
+**Rebuild installation reuses Split Store's existing writer**: `SagaRebuildService` installs the reduced
+state through the same `IOperationalSagaProjectionStore.ApplyAsync` that `SagaProjectionReconciler`
+already uses, so rebuild gets the identical CAS/version-fencing guarantee (a stale rebuild can never
+overwrite a newer live projection; installing the same version twice is a safe no-op) without a second,
+parallel Redis-writing code path.
+
+**Relational schema** (`004_SagaJournal.sql` per provider, following the exact `RelationalMigrationRunner`
+pattern `001_InitialSchema.sql`/`003_SplitStoreReconciliation.sql` already establish): SQL Server
+`dbo.LyciaSagaJournal`, PostgreSQL `lycia_saga_journal` (snake_case, `jsonb` payload columns). Primary key
+on the idempotency identity (`TransitionId`/`transition_id`); a `UNIQUE (SagaId, TargetVersion)` /
+`UNIQUE (saga_id, target_version)` constraint as a corruption guard — SagaStore's existing optimistic
+concurrency is what actually prevents two writers from ever producing the same target version, so this
+constraint should never fire in normal operation. Applied only by the canonical Split Store DSL entry
+point (`With...CanonicalSagaStore`), not by plain `With...SagaStore` — journal storage growth is opt-in
+via Split Store, not imposed on every existing relational SagaStore deployment.
+
+**Continuity/corruption detection**: `SagaRebuildService` validates, while replaying, that each entry's
+`PreviousVersion` equals the previously folded version and `TargetVersion > PreviousVersion` — a gap or
+backward transition is reported as `JournalGap`/`CorruptEntry`, never silently best-effort reconstructed.
+An entry whose `JournalSchemaVersion` has no registered upcaster and exceeds the reducer's supported
+version is `SchemaUnsupported`.
+
+**What Phase 6 deliberately does not do**: it does not turn Lycia into an event-sourcing framework for
+application business domains (the journal is a framework-level canonical transition history, not a
+business-aggregate event stream); it does not implement a durable snapshot table (each entry already
+being a full snapshot mostly realizes that acceleration architecturally); it does not add distributed
+leases/fencing beyond the CAS-based rebuild-install safety already provided by
+`IOperationalSagaProjectionStore` (broader lease/fencing hardening is Phase 7); it does not implement
+`lycia doctor` CLI commands (the `ISagaRebuildService` boundary is designed so those would be thin future
+wrappers).
 
 This document provides an in-depth look into the architecture, components, configuration, and internals of the Lycia Saga Infrastructure. It complements the public-facing `README.md` with implementation details, design decisions, and extensibility points.
 
@@ -395,6 +475,10 @@ services.AddLycia(configuration, lycia =>
 - Inbox/Outbox providers, outgoing capture, semantic dispatcher, hosted worker, Kafka/JetStream
   confirmation integration, and SQL Server/PostgreSQL atomic Lycia persistence boundaries are
   complete. RabbitMQ publisher confirms remain a transport-specific follow-up.
+- Split Store (Phase 5) and the canonical journal + deterministic replay/rebuild engine (Phase 6) are
+  complete for SQL Server/PostgreSQL canonical + Redis operational. Reliability Hardening (Phase 7) is
+  next: broader distributed leases/fencing, stale-ownership hardening beyond the minimum rebuild-safety
+  CAS, a full capability/health matrix, and the production reliability review.
 - Add support for Avro / Protobuf with Schema Registry (including the built‑in `AvroSchemaConverter`)
 - Finalize `IRetryPolicy` (done) and extend `Lycia.Scheduling` module for delayed retries
 - Improve distributed tracing and observability

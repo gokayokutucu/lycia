@@ -1,6 +1,7 @@
 using Lycia.Extensions;
 using Lycia.Saga.Abstractions.Persistence;
 using Lycia.Saga.Abstractions;
+using Lycia.Saga.Abstractions.Persistence.Journal;
 using Lycia.Saga.Abstractions.Persistence.Reconciliation;
 using Moq;
 using Microsoft.Extensions.Configuration;
@@ -160,5 +161,6 @@ public class PersistenceTopologyTests
         services.AddScoped(_ => Mock.Of<ISagaStore>());
         services.AddScoped(_ => Mock.Of<IReconciliationStore>());
         services.AddScoped(_ => Mock.Of<IOperationalSagaProjectionStore>());
+        services.AddScoped(_ => Mock.Of<ISagaJournalStore>());
     }
 }
