@@ -33,7 +33,9 @@ public enum PersistenceCapabilityKind
     /// <summary>Outgoing-message intent persistence.</summary>
     Outbox,
     /// <summary>Durable intent used to reconcile a rebuildable operational projection.</summary>
-    Reconciliation
+    Reconciliation,
+    /// <summary>Canonical immutable saga transition history used for deterministic replay/rebuild.</summary>
+    Journal
 }
 
 /// <summary>Identifies whether saga state uses one normal store or a canonical/operational split.</summary>

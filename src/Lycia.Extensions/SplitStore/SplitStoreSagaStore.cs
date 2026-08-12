@@ -7,12 +7,17 @@ using Lycia.Common.SagaSteps;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Contexts;
 using Lycia.Saga.Abstractions.Messaging;
+using Lycia.Saga.Abstractions.Persistence.Journal;
 using Lycia.Saga.Abstractions.Persistence.Reconciliation;
 using Newtonsoft.Json;
 
 namespace Lycia.Extensions.SplitStore;
 
-internal sealed class SplitStoreSagaStore(ISagaStore canonicalStore, IReconciliationStore reconciliationStore)
+internal sealed class SplitStoreSagaStore(
+    ISagaStore canonicalStore,
+    IReconciliationStore reconciliationStore,
+    ISagaJournalStore journalStore,
+    ISagaJournalContextAccessor? journalContextAccessor)
     : ISagaStore, IVersionedSagaStore
 {
     public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
@@ -52,7 +57,9 @@ internal sealed class SplitStoreSagaStore(ISagaStore canonicalStore, IReconcilia
         var version = data.Version;
         if (version <= 0)
             throw new InvalidOperationException("The canonical SagaStore did not return an authoritative saga version.");
-        await AddIntentAsync(sagaId, data, Math.Max(0, version - 1), version).ConfigureAwait(false);
+        var expectedVersion = Math.Max(0, version - 1);
+        await AddIntentAsync(sagaId, data, expectedVersion, version).ConfigureAwait(false);
+        await AddJournalEntryAsync(sagaId, data, expectedVersion, version).ConfigureAwait(false);
     }
 
     public async Task<long> SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData data, long expectedVersion)
@@ -63,6 +70,7 @@ internal sealed class SplitStoreSagaStore(ISagaStore canonicalStore, IReconcilia
 
         var targetVersion = await versioned.SaveSagaDataAsync(sagaId, data, expectedVersion).ConfigureAwait(false);
         await AddIntentAsync(sagaId, data, expectedVersion, targetVersion).ConfigureAwait(false);
+        await AddJournalEntryAsync(sagaId, data, expectedVersion, targetVersion).ConfigureAwait(false);
         return targetVersion;
     }
 
@@ -95,6 +103,43 @@ internal sealed class SplitStoreSagaStore(ISagaStore canonicalStore, IReconcilia
             Status = ReconciliationStatus.Pending,
             CreatedAtUtc = DateTime.UtcNow
         });
+    }
+
+    private async Task AddJournalEntryAsync<TSagaData>(Guid sagaId, TSagaData data, long expectedVersion, long targetVersion)
+        where TSagaData : SagaData
+    {
+        var stepsSnapshot = await canonicalStore.GetSagaHandlerStepsAsync(sagaId).ConfigureAwait(false);
+        var context = journalContextAccessor?.Current;
+        var transitionType = data.FailedAt.HasValue
+            ? SagaJournalTransitionType.Failed
+            : data.IsCompleted
+                ? SagaJournalTransitionType.Completed
+                : targetVersion == 1
+                    ? SagaJournalTransitionType.Created
+                    : SagaJournalTransitionType.Updated;
+
+        await journalStore.AppendAsync(new SagaJournalEntry
+        {
+            JournalEntryId = Guid.NewGuid(),
+            TransitionId = CreateTransitionId(sagaId, targetVersion),
+            SagaId = sagaId,
+            SequenceNumber = targetVersion,
+            PreviousVersion = expectedVersion,
+            TargetVersion = targetVersion,
+            MessageId = context?.MessageId,
+            RequestId = context?.RequestId,
+            CorrelationId = context?.CorrelationId,
+            CausationId = context?.CausationId,
+            ParentMessageId = context?.ParentMessageId,
+            ApplicationId = context?.ApplicationId,
+            HandlerType = context?.HandlerType,
+            MessageType = context?.MessageType,
+            TransitionType = transitionType,
+            SagaDataTypeName = data.GetType().GetSimplifiedQualifiedName(),
+            SagaDataPayload = JsonConvert.SerializeObject(data),
+            StepsSnapshotPayload = stepsSnapshot.Count > 0 ? JsonConvert.SerializeObject(stepsSnapshot) : null,
+            CreatedAtUtc = DateTime.UtcNow
+        }).ConfigureAwait(false);
     }
 
     private static Guid CreateTransitionId(Guid sagaId, long targetVersion)

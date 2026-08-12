@@ -16,6 +16,7 @@ using Lycia.Saga.Abstractions.Handlers;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Abstractions.Middlewares;
 using Lycia.Saga.Abstractions.Persistence;
+using Lycia.Saga.Abstractions.Persistence.Journal;
 using Lycia.Saga.Exceptions;
 using Lycia.Saga.Helpers;
 using Lycia.Saga.Messaging;
@@ -167,6 +168,26 @@ public class SagaDispatcher(
         var inboxStore = serviceProvider.GetService<IInboxStore>();
         var sagaContextAccessor = serviceProvider.GetService<ISagaContextAccessor>();
         var previous = sagaContextAccessor?.Current;
+
+        // Framework-managed correlation metadata for the canonical journal (Phase 6). Never set by
+        // saga handler code. Cleared in finally like the other scoped accessors above.
+        var journalContextAccessor = serviceProvider.GetService<ISagaJournalContextAccessor>();
+        var previousJournalContext = journalContextAccessor?.Current;
+        if (journalContextAccessor != null)
+        {
+            journalContextAccessor.Current = new SagaJournalTransitionContext
+            {
+                MessageId = message.MessageId,
+                RequestId = message is IRequestRoutingMetadata routing ? routing.RequestId : null,
+                CorrelationId = message.CorrelationId,
+                CausationId = message.CausationId,
+                ParentMessageId = message.ParentMessageId == Guid.Empty ? null : message.ParentMessageId,
+                ApplicationId = message.ApplicationId,
+                HandlerType = handlerType.GetSimplifiedQualifiedName(),
+                MessageType = messageType.GetSimplifiedQualifiedName()
+            };
+        }
+
         try
         {
             // Inbox is optional. Under LocalAtomic its claim, handler persistence, Outbox capture,
@@ -240,6 +261,7 @@ public class SagaDispatcher(
         finally
         {
             if (sagaContextAccessor != null) sagaContextAccessor.Current = previous;
+            if (journalContextAccessor != null) journalContextAccessor.Current = previousJournalContext;
             if (sessionAccessor != null) sessionAccessor.Current = previousSession;
             if (ownedSession != null) await ownedSession.DisposeAsync();
         }
