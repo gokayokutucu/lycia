@@ -1,5 +1,8 @@
 using Lycia.Extensions;
 using Lycia.Saga.Abstractions.Persistence;
+using Lycia.Saga.Abstractions;
+using Lycia.Saga.Abstractions.Persistence.Reconciliation;
+using Moq;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -97,6 +100,33 @@ public class PersistenceTopologyTests
         Assert.Contains("Conflicting persistence boundary policies", exception.Message);
     }
 
+    [Fact]
+    public void Split_store_reports_explicit_canonical_and_operational_ownership()
+    {
+        var builder = CreateBuilder(out var services);
+        RegisterSplitStoreServices(builder, services);
+        builder.RequireAtomicBoundary().UseSplitStore();
+        using var provider = services.BuildServiceProvider();
+        var topology = provider.GetRequiredService<IPersistenceTopology>().Current;
+        Assert.Equal(PersistenceMode.SplitStore, topology.Mode);
+        Assert.Equal("PostgreSql", topology.CanonicalStore);
+        Assert.Equal("Redis", topology.OperationalStore);
+        Assert.True(topology.ReconciliationEnabled);
+        Assert.Equal(PersistenceExecutionStrategy.LocalAtomic, topology.ResolvedStrategy);
+    }
+
+    [Fact]
+    public void Split_store_rejects_independent_canonical_transactions()
+    {
+        var builder = CreateBuilder(out var services);
+        RegisterSplitStoreServices(builder, services);
+        builder.UseIndependentTransactions().UseSplitStore();
+        using var provider = services.BuildServiceProvider();
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            provider.GetRequiredService<IPersistenceTopology>().Current);
+        Assert.Contains("cannot use independent canonical transactions", exception.Message);
+    }
+
     private static PersistenceTopology Resolve(Action<LyciaPersistenceBuilder> configure)
     {
         var builder = CreateBuilder(out var services);
@@ -119,5 +149,16 @@ public class PersistenceTopologyTests
         builder.RegisterProviderMetadata(PersistenceCapabilityKind.SagaStore, provider, identity, true);
         builder.RegisterProviderMetadata(PersistenceCapabilityKind.Inbox, provider, identity, true);
         builder.RegisterProviderMetadata(PersistenceCapabilityKind.Outbox, provider, identity, true);
+    }
+
+    private static void RegisterSplitStoreServices(LyciaPersistenceBuilder builder, ServiceCollection services)
+    {
+        RegisterAll(builder, "PostgreSql", "db/checkout");
+        builder.RegisterProviderMetadata(PersistenceCapabilityKind.Reconciliation, "PostgreSql", "db/checkout", true);
+        builder.SelectSplitStoreCanonicalProvider("PostgreSql", "db/checkout");
+        builder.SelectSplitStoreOperationalProvider("Redis");
+        services.AddScoped(_ => Mock.Of<ISagaStore>());
+        services.AddScoped(_ => Mock.Of<IReconciliationStore>());
+        services.AddScoped(_ => Mock.Of<IOperationalSagaProjectionStore>());
     }
 }

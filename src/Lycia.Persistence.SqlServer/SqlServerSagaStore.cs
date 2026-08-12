@@ -374,22 +374,30 @@ public class SqlServerSagaStore(
             UPDATE {DataTable}
             SET DataJson = @dataJson, SagaDataType = @dataType, Version = Version + 1, IsCompleted = @isCompleted,
                 CompletedAtUtc = @completedAt, FailedAtUtc = @failedAt, ApplicationId = @applicationId, UpdatedAtUtc = SYSUTCDATETIME()
+            OUTPUT inserted.Version
             WHERE SagaId = @sagaId;
             """, lease.Transaction))
         {
             AddSagaDataParameters(update, sagaId, dataJson, dataType, data);
-            var rows = await update.ExecuteNonQueryAsync().ConfigureAwait(false);
-            if (rows > 0) return;
+            var version = await update.ExecuteScalarAsync().ConfigureAwait(false);
+            if (version != null)
+            {
+                data.Version = Convert.ToInt64(version);
+                await SynchronizeSerializedVersionAsync(lease.Connection, lease.Transaction, sagaId, data)
+                    .ConfigureAwait(false);
+                return;
+            }
         }
 
         try
         {
             using var insert = CreateCommand(lease.Connection, $"""
                 INSERT INTO {DataTable} (SagaId, ApplicationId, SagaDataType, DataJson, Version, IsCompleted, CompletedAtUtc, FailedAtUtc, UpdatedAtUtc)
+                OUTPUT inserted.Version
                 VALUES (@sagaId, @applicationId, @dataType, @dataJson, 1, @isCompleted, @completedAt, @failedAt, SYSUTCDATETIME());
                 """, lease.Transaction);
             AddSagaDataParameters(insert, sagaId, dataJson, dataType, data);
-            await insert.ExecuteNonQueryAsync().ConfigureAwait(false);
+            data.Version = Convert.ToInt64(await insert.ExecuteScalarAsync().ConfigureAwait(false));
         }
         catch (SqlException ex) when (IsUniqueViolation(ex))
         {
@@ -399,11 +407,29 @@ public class SqlServerSagaStore(
                 UPDATE {DataTable}
                 SET DataJson = @dataJson, SagaDataType = @dataType, Version = Version + 1, IsCompleted = @isCompleted,
                     CompletedAtUtc = @completedAt, FailedAtUtc = @failedAt, ApplicationId = @applicationId, UpdatedAtUtc = SYSUTCDATETIME()
+                OUTPUT inserted.Version
                 WHERE SagaId = @sagaId;
                 """, lease.Transaction);
             AddSagaDataParameters(update, sagaId, dataJson, dataType, data);
-            await update.ExecuteNonQueryAsync().ConfigureAwait(false);
+            data.Version = Convert.ToInt64(await update.ExecuteScalarAsync().ConfigureAwait(false));
         }
+
+        await SynchronizeSerializedVersionAsync(lease.Connection, lease.Transaction, sagaId, data)
+            .ConfigureAwait(false);
+    }
+
+    private async Task SynchronizeSerializedVersionAsync<TSagaData>(SqlConnection connection,
+        SqlTransaction? transaction, Guid sagaId, TSagaData data) where TSagaData : SagaData
+    {
+        using var command = CreateCommand(connection, $"""
+            UPDATE {DataTable}
+            SET DataJson = @dataJson
+            WHERE SagaId = @sagaId AND Version = @version;
+            """, transaction);
+        command.Parameters.AddWithValue("@dataJson", JsonHelper.SerializeSafe(data));
+        command.Parameters.AddWithValue("@sagaId", sagaId);
+        command.Parameters.AddWithValue("@version", data.Version);
+        await command.ExecuteNonQueryAsync().ConfigureAwait(false);
     }
 
     private void AddSagaDataParameters<TSagaData>(SqlCommand command, Guid sagaId, string dataJson, string dataType,

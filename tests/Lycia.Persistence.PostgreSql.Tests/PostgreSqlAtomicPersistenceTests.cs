@@ -5,6 +5,7 @@ using Lycia.Persistence.TestKit;
 using Lycia.Saga.Abstractions.Inbox;
 using Lycia.Saga.Abstractions.Outbox;
 using Lycia.Saga.Abstractions.Persistence;
+using Lycia.Saga.Abstractions.Persistence.Reconciliation;
 using Npgsql;
 
 namespace Lycia.Persistence.PostgreSql.Tests;
@@ -40,6 +41,36 @@ public class PostgreSqlAtomicPersistenceTests(PostgreSqlContainerFixture fixture
             await stores.Saga.GetStepStatusAsync(sagaId, messageId, typeof(DummyEvent),
                 typeof(PostgreSqlAtomicPersistenceTests)));
         Assert.NotNull(await stores.Outbox.GetByMessageIdAsync(messageId));
+    }
+
+    [Fact]
+    public async Task Shared_session_commits_canonical_state_and_reconciliation_intent_together()
+    {
+        var stores=CreateStores(); var sagaId=Guid.NewGuid(); var transitionId=Guid.NewGuid();
+        await using(var session=await stores.Factory.BeginAsync())
+        {
+            stores.Accessor.Current=session;
+            var data=new DummySagaData(); await stores.Saga.SaveSagaDataAsync(sagaId,data);
+            await stores.Reconciliation.AddAsync(Intent(transitionId,sagaId,data.Version));
+            await session.CommitAsync(); stores.Accessor.Current=null;
+        }
+        var claimed=await stores.Reconciliation.ClaimAsync("worker-a",10,3,TimeSpan.FromMinutes(1));
+        Assert.Contains(claimed,x=>x.TransitionId==transitionId&&x.TargetVersion==1);
+        var canonical = await stores.Saga.LoadSagaDataWithVersionAsync<DummySagaData>(sagaId);
+        Assert.Equal(canonical.Version, canonical.Data?.Version);
+    }
+
+    [Fact]
+    public async Task Rollback_removes_canonical_state_and_reconciliation_intent()
+    {
+        var stores=CreateStores(); var sagaId=Guid.NewGuid(); var transitionId=Guid.NewGuid();
+        await using(var session=await stores.Factory.BeginAsync())
+        {
+            stores.Accessor.Current=session; var data=new DummySagaData(); await stores.Saga.SaveSagaDataAsync(sagaId,data);
+            await stores.Reconciliation.AddAsync(Intent(transitionId,sagaId,data.Version)); await session.RollbackAsync(); stores.Accessor.Current=null;
+        }
+        Assert.Empty(await stores.Reconciliation.ClaimAsync("worker-b",10,3,TimeSpan.FromMinutes(1)));
+        Assert.Equal(0,(await stores.Saga.LoadSagaDataWithVersionAsync<DummySagaData>(sagaId)).Version);
     }
 
     [Theory]
@@ -108,14 +139,19 @@ public class PostgreSqlAtomicPersistenceTests(PostgreSqlContainerFixture fixture
         PostgreSqlSchemaMigrator.RunAsync(sagaOptions).GetAwaiter().GetResult();
         PostgreSqlInboxOutboxSchemaMigrator.RunAsync(fixture.ConnectionString, "public",
             SchemaManagementMode.ApplyMigrations).GetAwaiter().GetResult();
+        PostgreSqlReconciliationSchemaMigrator.RunAsync(sagaOptions).GetAwaiter().GetResult();
         var accessor = new LyciaPersistenceSessionAccessor();
         return new StoreSet(
             new PostgreSqlSagaStore(sagaOptions, null!, null!, null!, sessionAccessor: accessor),
             new PostgreSqlInboxStore(inboxOptions, accessor),
             new PostgreSqlOutboxStore(outboxOptions, accessor),
+            new PostgreSqlReconciliationStore(sagaOptions, accessor),
             new RelationalPersistenceSessionFactory(() => new NpgsqlConnection(fixture.ConnectionString)),
             accessor);
     }
+
+    private static SagaProjectionIntent Intent(Guid transitionId,Guid sagaId,long version)=>new()
+    {TransitionId=transitionId,SagaId=sagaId,ExpectedVersion=version-1,TargetVersion=version,SagaDataType=typeof(DummySagaData).AssemblyQualifiedName!,Payload=$"{{\"SagaId\":\"{sagaId}\",\"Version\":{version}}}",Status=ReconciliationStatus.Pending,CreatedAtUtc=DateTime.UtcNow};
 
     private static OutboxMessage NewOutbox(Guid messageId, Guid sagaId) =>
         new(messageId, typeof(DummyEvent).AssemblyQualifiedName!, "{}", "atomic-tests", sagaId);
@@ -124,6 +160,7 @@ public class PostgreSqlAtomicPersistenceTests(PostgreSqlContainerFixture fixture
         PostgreSqlSagaStore Saga,
         PostgreSqlInboxStore Inbox,
         PostgreSqlOutboxStore Outbox,
+        PostgreSqlReconciliationStore Reconciliation,
         RelationalPersistenceSessionFactory Factory,
         LyciaPersistenceSessionAccessor Accessor);
 }

@@ -26,6 +26,27 @@ internal static class RedisSagaStoreRegistrationExtensions
     /// </summary>
     public static void RegisterRedisSagaStore(IServiceCollection services)
     {
+        RegisterRedisConnection(services);
+
+        services.RemoveAll(typeof(ISagaStore));
+        services.AddScoped<ISagaStore>(sp =>
+        {
+            var storeOpts = sp.GetRequiredService<IOptions<SagaStoreOptions>>().Value;
+            var eventBus = sp.GetRequiredService<IEventBus>();
+            var idGen = sp.GetRequiredService<ISagaIdGenerator>();
+            var compCoord = sp.GetRequiredService<ISagaCompensationCoordinator>();
+            var redis = sp.GetRequiredService<IDatabase>();
+            return new RedisSagaStore(redis, eventBus, idGen, compCoord, storeOpts,
+                sp.GetService<IMessageScheduler>(), sp.GetService<IOutgoingMessagePipeline>());
+        });
+
+        // Redis cannot join a real cross-store transaction; register the non-atomic default so
+        // ILyciaPersistenceSessionFactory is always resolvable regardless of the selected provider.
+        services.TryAddSingleton<ILyciaPersistenceSessionFactory, NonAtomicPersistenceSessionFactory>();
+    }
+
+    internal static void RegisterRedisConnection(IServiceCollection services)
+    {
         services.TryAddSingleton<IConnectionMultiplexer>(sp =>
         {
             var storeOpts = sp.GetRequiredService<IOptions<SagaStoreOptions>>().Value;
@@ -52,21 +73,5 @@ internal static class RedisSagaStoreRegistrationExtensions
 
         services.TryAddScoped<IDatabase>(sp =>
             sp.GetRequiredService<IConnectionMultiplexer>().GetDatabase());
-
-        services.RemoveAll(typeof(ISagaStore));
-        services.AddScoped<ISagaStore>(sp =>
-        {
-            var storeOpts = sp.GetRequiredService<IOptions<SagaStoreOptions>>().Value;
-            var eventBus = sp.GetRequiredService<IEventBus>();
-            var idGen = sp.GetRequiredService<ISagaIdGenerator>();
-            var compCoord = sp.GetRequiredService<ISagaCompensationCoordinator>();
-            var redis = sp.GetRequiredService<IDatabase>();
-            return new RedisSagaStore(redis, eventBus, idGen, compCoord, storeOpts,
-                sp.GetService<IMessageScheduler>(), sp.GetService<IOutgoingMessagePipeline>());
-        });
-
-        // Redis cannot join a real cross-store transaction; register the non-atomic default so
-        // ILyciaPersistenceSessionFactory is always resolvable regardless of the selected provider.
-        services.TryAddSingleton<ILyciaPersistenceSessionFactory, NonAtomicPersistenceSessionFactory>();
     }
 }

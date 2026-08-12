@@ -413,10 +413,23 @@ public class PostgreSqlSagaStore(
                 completed_at_utc = EXCLUDED.completed_at_utc,
                 failed_at_utc = EXCLUDED.failed_at_utc,
                 application_id = EXCLUDED.application_id,
-                updated_at_utc = now();
+                updated_at_utc = now()
+            RETURNING version;
             """, lease.Transaction);
         AddSagaDataParameters(command, sagaId, dataJson, dataType, data);
-        await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+        data.Version = Convert.ToInt64(await command.ExecuteScalarAsync().ConfigureAwait(false));
+
+        // The database assigns the new version, so persist the now-authoritative value in the
+        // canonical JSON within the same transaction as the row/version update.
+        using var synchronizeJson = CreateCommand(lease.Connection, $"""
+            UPDATE {DataTable}
+            SET data_json = @dataJson
+            WHERE saga_id = @sagaId AND version = @version;
+            """, lease.Transaction);
+        AddJsonb(synchronizeJson, "dataJson", JsonHelper.SerializeSafe(data));
+        synchronizeJson.Parameters.AddWithValue("sagaId", sagaId);
+        synchronizeJson.Parameters.AddWithValue("version", data.Version);
+        await synchronizeJson.ExecuteNonQueryAsync().ConfigureAwait(false);
     }
 
     private void AddSagaDataParameters<TSagaData>(NpgsqlCommand command, Guid sagaId, string dataJson, string dataType,

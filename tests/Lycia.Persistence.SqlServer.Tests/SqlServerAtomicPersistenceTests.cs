@@ -5,6 +5,7 @@ using Lycia.Persistence.TestKit;
 using Lycia.Saga.Abstractions.Inbox;
 using Lycia.Saga.Abstractions.Outbox;
 using Lycia.Saga.Abstractions.Persistence;
+using Lycia.Saga.Abstractions.Persistence.Reconciliation;
 using Microsoft.Data.SqlClient;
 
 namespace Lycia.Persistence.SqlServer.Tests;
@@ -40,6 +41,28 @@ public class SqlServerAtomicPersistenceTests(SqlServerContainerFixture fixture)
             await stores.Saga.GetStepStatusAsync(sagaId, messageId, typeof(DummyEvent),
                 typeof(SqlServerAtomicPersistenceTests)));
         Assert.NotNull(await stores.Outbox.GetByMessageIdAsync(messageId));
+    }
+
+    [Fact]
+    public async Task Shared_session_commits_canonical_state_and_reconciliation_intent_together()
+    {
+        var stores=CreateStores(); var sagaId=Guid.NewGuid(); var transitionId=Guid.NewGuid();
+        await using(var session=await stores.Factory.BeginAsync())
+        { stores.Accessor.Current=session; var data=new DummySagaData(); await stores.Saga.SaveSagaDataAsync(sagaId,data);
+          await stores.Reconciliation.AddAsync(Intent(transitionId,sagaId,data.Version)); await session.CommitAsync(); stores.Accessor.Current=null; }
+        Assert.Contains(await stores.Reconciliation.ClaimAsync("worker-a",10,3,TimeSpan.FromMinutes(1)),x=>x.TransitionId==transitionId&&x.TargetVersion==1);
+        var canonical = await stores.Saga.LoadSagaDataWithVersionAsync<DummySagaData>(sagaId);
+        Assert.Equal(canonical.Version, canonical.Data?.Version);
+    }
+
+    [Fact]
+    public async Task Rollback_removes_canonical_state_and_reconciliation_intent()
+    {
+        var stores=CreateStores(); var sagaId=Guid.NewGuid(); var transitionId=Guid.NewGuid();
+        await using(var session=await stores.Factory.BeginAsync())
+        { stores.Accessor.Current=session; var data=new DummySagaData(); await stores.Saga.SaveSagaDataAsync(sagaId,data);
+          await stores.Reconciliation.AddAsync(Intent(transitionId,sagaId,data.Version)); await session.RollbackAsync(); stores.Accessor.Current=null; }
+        Assert.Empty(await stores.Reconciliation.ClaimAsync("worker-b",10,3,TimeSpan.FromMinutes(1)));
     }
 
     [Theory]
@@ -108,14 +131,19 @@ public class SqlServerAtomicPersistenceTests(SqlServerContainerFixture fixture)
         SqlServerSchemaMigrator.RunAsync(sagaOptions).GetAwaiter().GetResult();
         SqlServerInboxOutboxSchemaMigrator.RunAsync(fixture.ConnectionString, "dbo",
             SchemaManagementMode.ApplyMigrations).GetAwaiter().GetResult();
+        SqlServerReconciliationSchemaMigrator.RunAsync(sagaOptions).GetAwaiter().GetResult();
         var accessor = new LyciaPersistenceSessionAccessor();
         return new StoreSet(
             new SqlServerSagaStore(sagaOptions, null!, null!, null!, sessionAccessor: accessor),
             new SqlServerInboxStore(inboxOptions, accessor),
             new SqlServerOutboxStore(outboxOptions, accessor),
+            new SqlServerReconciliationStore(sagaOptions, accessor),
             new RelationalPersistenceSessionFactory(() => new SqlConnection(fixture.ConnectionString)),
             accessor);
     }
+
+    private static SagaProjectionIntent Intent(Guid transitionId,Guid sagaId,long version)=>new()
+    {TransitionId=transitionId,SagaId=sagaId,ExpectedVersion=version-1,TargetVersion=version,SagaDataType=typeof(DummySagaData).AssemblyQualifiedName!,Payload=$"{{\"SagaId\":\"{sagaId}\",\"Version\":{version}}}",Status=ReconciliationStatus.Pending,CreatedAtUtc=DateTime.UtcNow};
 
     private static OutboxMessage NewOutbox(Guid messageId, Guid sagaId) =>
         new(messageId, typeof(DummyEvent).AssemblyQualifiedName!, "{}", "atomic-tests", sagaId);
@@ -124,6 +152,7 @@ public class SqlServerAtomicPersistenceTests(SqlServerContainerFixture fixture)
         SqlServerSagaStore Saga,
         SqlServerInboxStore Inbox,
         SqlServerOutboxStore Outbox,
+        SqlServerReconciliationStore Reconciliation,
         RelationalPersistenceSessionFactory Factory,
         LyciaPersistenceSessionAccessor Accessor);
 }

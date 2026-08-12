@@ -4,6 +4,26 @@
 
 # Lycia
 
+## Split Store persistence
+
+Split Store explicitly makes PostgreSQL or SQL Server canonical and Redis an asynchronously reconciled,
+rebuildable operational projection. Inbox, canonical Saga state, Outbox, and reconciliation intent share
+one service-local relational transaction; Redis is never written before that commit.
+
+```csharp
+lycia.UsePersistence()
+    .WithPostgreSqlCanonicalSagaStore(o => o.ConnectionString = postgres)
+    .WithPostgreSqlInbox(o => o.ConnectionString = postgres)
+    .WithPostgreSqlOutbox(o => o.ConnectionString = postgres)
+    .WithRedisOperationalSagaStore(o => o.ConnectionString = redis)
+    .RequireAtomicBoundary()
+    .UseSplitStore();
+```
+
+Handler reads remain canonical, so Outbox dispatch is independent of Redis reconciliation. Redis loss
+can be repaired from the latest canonical materialization without executing handlers. This remains
+at-least-once delivery and is not Phase 6 historical replay.
+
 [![NuGet](https://img.shields.io/nuget/v/Lycia.svg)](https://www.nuget.org/packages/Lycia)
 [![NuGet Downloads](https://img.shields.io/nuget/dt/Lycia.svg)](https://www.nuget.org/packages/Lycia)
 ![Target Framework](https://img.shields.io/badge/.NET-netstandard2.0%20%7C%20net8.0%20%7C%20net9.0-blue)

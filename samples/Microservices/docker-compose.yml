@@ -1,0 +1,60 @@
+name: lycia-split-store-sample
+x-service: &service
+  build:
+    context: ../..
+    dockerfile: samples/Microservices/Dockerfile
+  restart: unless-stopped
+  depends_on:
+    rabbitmq: { condition: service_healthy }
+    postgres: { condition: service_healthy }
+  environment: &service-environment
+    ASPNETCORE_URLS: http://+:8080
+    RABBITMQ_CONNECTION: amqp://guest:guest@rabbitmq:5672
+
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    environment: { RABBITMQ_ERLANG_COOKIE: lyciasplitstoredevelopmentcookie2026 }
+    healthcheck: { test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"], interval: 5s, timeout: 5s, retries: 20 }
+  postgres:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: lycia, POSTGRES_PASSWORD: lycia-dev, POSTGRES_DB: postgres }
+    volumes: ["./init-databases.sql:/docker-entrypoint-initdb.d/10-databases.sql:ro"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U lycia -d postgres"], interval: 5s, timeout: 5s, retries: 20 }
+
+  checkout-redis: { image: redis:7.4-alpine, healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 3s, timeout: 3s, retries: 20 } }
+  order-redis: { image: redis:7.4-alpine, healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 3s, timeout: 3s, retries: 20 } }
+  inventory-redis: { image: redis:7.4-alpine, healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 3s, timeout: 3s, retries: 20 } }
+  payment-redis: { image: redis:7.4-alpine, healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 3s, timeout: 3s, retries: 20 } }
+  shipping-redis: { image: redis:7.4-alpine, healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 3s, timeout: 3s, retries: 20 } }
+
+  checkout:
+    <<: *service
+    build: { context: ../.., dockerfile: samples/Microservices/Dockerfile, args: { SERVICE: Checkout } }
+    ports: ["8080:8080"]
+    environment: { <<: *service-environment, APPLICATION_ID: CheckoutService, POSTGRES_CONNECTION: "Host=postgres;Database=checkout_db;Username=lycia;Password=lycia-dev", REDIS_CONNECTION: checkout-redis:6379 }
+    depends_on: { rabbitmq: { condition: service_healthy }, postgres: { condition: service_healthy }, checkout-redis: { condition: service_healthy } }
+  order:
+    <<: *service
+    build: { context: ../.., dockerfile: samples/Microservices/Dockerfile, args: { SERVICE: Order } }
+    ports: ["8081:8080"]
+    environment: { <<: *service-environment, APPLICATION_ID: OrderService, POSTGRES_CONNECTION: "Host=postgres;Database=order_db;Username=lycia;Password=lycia-dev", REDIS_CONNECTION: order-redis:6379 }
+    depends_on: { rabbitmq: { condition: service_healthy }, postgres: { condition: service_healthy }, order-redis: { condition: service_healthy } }
+  inventory:
+    <<: *service
+    build: { context: ../.., dockerfile: samples/Microservices/Dockerfile, args: { SERVICE: Inventory } }
+    ports: ["8082:8080"]
+    environment: { <<: *service-environment, APPLICATION_ID: InventoryService, POSTGRES_CONNECTION: "Host=postgres;Database=inventory_db;Username=lycia;Password=lycia-dev", REDIS_CONNECTION: inventory-redis:6379 }
+    depends_on: { rabbitmq: { condition: service_healthy }, postgres: { condition: service_healthy }, inventory-redis: { condition: service_healthy } }
+  payment:
+    <<: *service
+    build: { context: ../.., dockerfile: samples/Microservices/Dockerfile, args: { SERVICE: Payment } }
+    ports: ["8083:8080"]
+    environment: { <<: *service-environment, APPLICATION_ID: PaymentService, POSTGRES_CONNECTION: "Host=postgres;Database=payment_db;Username=lycia;Password=lycia-dev", REDIS_CONNECTION: payment-redis:6379 }
+    depends_on: { rabbitmq: { condition: service_healthy }, postgres: { condition: service_healthy }, payment-redis: { condition: service_healthy } }
+  shipping:
+    <<: *service
+    build: { context: ../.., dockerfile: samples/Microservices/Dockerfile, args: { SERVICE: Shipping } }
+    ports: ["8084:8080"]
+    environment: { <<: *service-environment, APPLICATION_ID: ShippingService, POSTGRES_CONNECTION: "Host=postgres;Database=shipping_db;Username=lycia;Password=lycia-dev", REDIS_CONNECTION: shipping-redis:6379 }
+    depends_on: { rabbitmq: { condition: service_healthy }, postgres: { condition: service_healthy }, shipping-redis: { condition: service_healthy } }
