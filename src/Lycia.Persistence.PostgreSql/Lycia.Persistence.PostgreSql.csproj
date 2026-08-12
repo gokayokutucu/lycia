@@ -3,7 +3,7 @@
     <PropertyGroup>
         <!-- Deviation from the other provider packages: Npgsql 8.x+ dropped netstandard2.0 support,
              so this package targets net8.0;net9.0 only. -->
-        <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
+        <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
         <LangVersion>preview</LangVersion>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
@@ -87,6 +87,12 @@
     <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
         <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.9" />
         <PackageReference Include="Microsoft.Extensions.Options" Version="9.0.9" />
+    </ItemGroup>
+
+    <!-- net10.0 specific packages -->
+    <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
+        <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.0" />
     </ItemGroup>
 
     <ItemGroup>

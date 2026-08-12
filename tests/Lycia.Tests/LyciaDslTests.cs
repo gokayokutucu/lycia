@@ -129,14 +129,14 @@ public class LyciaDslTests
         Assert.True(options.AllowDynamicDelays);
     }
 
-    // 7: WithWorker(...) applies worker configuration onto SchedulingOptions.Worker.
+    // 7: WithDispatch(...) applies dispatch configuration onto SchedulingOptions.Worker.
     [Fact]
-    public void Scheduling_WithWorker_Applies_Worker_Configuration()
+    public void Scheduling_WithDispatch_Applies_Worker_Configuration()
     {
         var services = new ServiceCollection();
         var builder = services.AddLycia(Configuration());
 
-        builder.AddScheduling().WithWorker(w =>
+        builder.AddScheduling().WithDispatch(w =>
         {
             w.LeaseDuration = TimeSpan.FromSeconds(30);
             w.LeaseRenewInterval = TimeSpan.FromSeconds(10);
@@ -145,6 +145,46 @@ public class LyciaDslTests
         var options = services.BuildServiceProvider().GetRequiredService<IOptions<SchedulingOptions>>().Value;
         Assert.Equal(TimeSpan.FromSeconds(30), options.Worker.LeaseDuration);
         Assert.Equal(TimeSpan.FromSeconds(10), options.Worker.LeaseRenewInterval);
+    }
+
+    // 7b: the obsolete WithWorker(...) compatibility wrapper configures the exact same options as
+    // WithDispatch(...) - no duplicate configuration logic, no divergent behavior.
+    [Fact]
+    public void Scheduling_Obsolete_WithWorker_Configures_Same_Options_As_WithDispatch()
+    {
+        var services = new ServiceCollection();
+        var builder = services.AddLycia(Configuration());
+
+#pragma warning disable CS0618 // intentionally exercising the obsolete compatibility wrapper
+        builder.AddScheduling().WithWorker(w =>
+        {
+            w.LeaseDuration = TimeSpan.FromSeconds(45);
+            w.BatchSize = 7;
+        });
+#pragma warning restore CS0618
+
+        var options = services.BuildServiceProvider().GetRequiredService<IOptions<SchedulingOptions>>().Value;
+        Assert.Equal(TimeSpan.FromSeconds(45), options.Worker.LeaseDuration);
+        Assert.Equal(7, options.Worker.BatchSize);
+    }
+
+    // 7c: WithDispatch/WithVacuum/WithPredefinedDelays/WithDynamicDelays chain fluently together.
+    [Fact]
+    public void Scheduling_WithDispatch_Chains_With_WithVacuum_And_Delay_Modes()
+    {
+        var services = new ServiceCollection();
+        var builder = services.AddLycia(Configuration());
+
+        var result = builder.AddScheduling()
+            .WithPredefinedDelays()
+            .WithDispatch(w => w.BatchSize = 25)
+            .WithVacuum(v => v.SchedulingResources.Enabled = true);
+
+        Assert.IsType<LyciaSchedulingBuilder>(result);
+        var options = services.BuildServiceProvider().GetRequiredService<IOptions<SchedulingOptions>>().Value;
+        Assert.False(options.AllowDynamicDelays);
+        Assert.Equal(25, options.Worker.BatchSize);
+        Assert.True(options.Vacuum.SchedulingResources.Enabled);
     }
 
     // 8: middleware fluent methods register/configure the existing ISagaMiddleware slots.

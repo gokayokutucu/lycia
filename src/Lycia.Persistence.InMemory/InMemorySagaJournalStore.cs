@@ -17,6 +17,7 @@ public sealed class InMemorySagaJournalStore : ISagaJournalStore
     private readonly List<Guid> _sagaIdsInsertionOrder = [];
     private readonly object _lock = new();
 
+    /// <inheritdoc />
     public Task AppendAsync(SagaJournalEntry entry, CancellationToken cancellationToken = default)
     {
         if (entry == null) throw new ArgumentNullException(nameof(entry));
@@ -44,6 +45,7 @@ public sealed class InMemorySagaJournalStore : ISagaJournalStore
         return Task.CompletedTask;
     }
 
+    /// <inheritdoc />
     public Task<IReadOnlyList<SagaJournalEntry>> ReadAsync(Guid sagaId, long afterVersion, int maxCount,
         CancellationToken cancellationToken = default)
     {
@@ -60,6 +62,7 @@ public sealed class InMemorySagaJournalStore : ISagaJournalStore
         }
     }
 
+    /// <inheritdoc />
     public Task<long> GetLatestVersionAsync(Guid sagaId, CancellationToken cancellationToken = default)
     {
         lock (_lock)
@@ -70,6 +73,7 @@ public sealed class InMemorySagaJournalStore : ISagaJournalStore
         }
     }
 
+    /// <inheritdoc />
     public Task<IReadOnlyList<Guid>> EnumerateSagaIdsAsync(Guid? afterSagaId, int maxCount,
         CancellationToken cancellationToken = default)
     {

@@ -28,6 +28,10 @@ stores in one database resolve `LocalAtomic`; mixed providers resolve `Independe
 `RequireAtomicBoundary()` as a startup assertion or `UseIndependentTransactions()` as an explicit
 opt-out. This is a service-local Lycia boundary, not distributed or exactly-once processing.
 
+`AddLycia` also registers `ILyciaReliabilityDiagnostics`, a safe, secret-free snapshot of the active
+persistence topology (provider names, resolved transaction boundary, which of Inbox/Outbox/journal/
+rebuild are enabled) for diagnostics and startup logging.
+
 ## Package split
 
 RabbitMQ-specific code (event bus, listener, topology, TTL + DLX scheduling strategy) moved to

@@ -66,3 +66,13 @@ Canonicalization can rename queues and routing keys. Drain and stop old consumer
 the canonical topology, then remove obsolete resources; Lycia never deletes or dual-binds them. Another
 independently bound RabbitMQ queue can still receive the same key, so ownership is a Lycia invariant,
 not broker-global exclusivity. Delivery is at least once.
+
+## Outbox confirmation status
+
+`RabbitMqEventBus` does not implement `IConfirmedEventBus`: RabbitMQ.Client does not currently expose
+a supported way to await broker confirmation for an individual publish. A completed Outbox dispatch
+attempt through RabbitMQ therefore stays `ConfirmationUnknown` rather than `Published`, and is
+redispatched under the normal bounded-retry/backoff window like any other unconfirmed attempt. This
+is a deliberate, honestly-documented limitation, not a bug — `MessageId`/`OutboxId` remain stable
+across redispatch, so consumers only need to stay idempotent, the same requirement Lycia already has
+everywhere.

@@ -362,8 +362,15 @@ public class PostgreSqlSagaStore(
         var loaded = await TryLoadSagaDataAsync<TSagaData>(sagaId).ConfigureAwait(false);
         if (loaded != null) return loaded;
 
-        var emptyData = new TSagaData();
-        await SaveSagaDataAsync(sagaId, emptyData).ConfigureAwait(false);
+        // Do not persist a canonical row here: a Load with no prior data must be a pure read with no
+        // write side effect. Eagerly writing a version-1 row on Load (as this used to do) bypasses
+        // Split Store's journal/intent bookkeeping in SplitStoreSagaStore.SaveSagaDataAsync, which only
+        // runs for explicit Save calls. That produced a canonical version 1 with no corresponding
+        // journal entry - a permanent journal gap (previousVersion=1 instead of 0 on the first real,
+        // journaled transition) that made every fresh saga fail /debug/sagas/{sagaId}/verify and
+        // rebuild-from-journal with JournalGap. The real version 1 write now happens through the first
+        // explicit SaveSagaDataAsync call, which is correctly journaled as the Created transition.
+        var emptyData = new TSagaData { SagaId = sagaId };
         return emptyData;
     }
 

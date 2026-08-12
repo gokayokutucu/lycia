@@ -130,7 +130,7 @@ public sealed class SchedulerWorker(
         {
             var attempt = record.AttemptCount + 1;
             var terminal = attempt >= options.Value.Worker.MaxDispatchAttempts;
-            var retryAt = terminal ? (DateTimeOffset?)null : clock.UtcNow.Add(options.Value.Worker.RetryBackoff);
+            var retryAt = terminal ? (DateTimeOffset?)null : clock.UtcNow.Add(RetryDelay(options.Value.Worker, attempt));
             await store.FailAsync(record.ScheduleId, claim.LeaseOwner, claim.FencingToken,
                 exception.GetType().Name + ": " + exception.Message, retryAt, cancellationToken).ConfigureAwait(false);
             SchedulingMetrics.Failures.Add(1,
@@ -140,6 +140,22 @@ public sealed class SchedulerWorker(
                 "Scheduling dispatch failed for {ScheduleId} message {MessageId} attempt {Attempt}; terminal={Terminal}",
                 record.ScheduleId, record.MessageId, attempt, terminal);
         }
+    }
+
+    private readonly Random _random = new();
+
+    /// <summary>
+    /// Capped exponential backoff with jitter, mirroring <c>OutboxWorker</c>/<c>ReconciliationWorker</c>'s
+    /// retry shape: delay grows with each failed attempt up to <see cref="SchedulerWorkerOptions.MaxRetryBackoff"/>,
+    /// with bounded random jitter added to avoid synchronized retry storms across replicas.
+    /// </summary>
+    private TimeSpan RetryDelay(SchedulerWorkerOptions value, int attempt)
+    {
+        var exponent = Math.Min(attempt - 1, 20);
+        var milliseconds = Math.Min(value.MaxRetryBackoff.TotalMilliseconds,
+            value.RetryBackoff.TotalMilliseconds * Math.Pow(2, exponent));
+        var jitter = value.MaxJitter <= TimeSpan.Zero ? 0 : _random.NextDouble() * value.MaxJitter.TotalMilliseconds;
+        return TimeSpan.FromMilliseconds(milliseconds + jitter);
     }
 
     private async Task RenewLeaseAsync(ScheduleClaim claim, CancellationToken cancellationToken)

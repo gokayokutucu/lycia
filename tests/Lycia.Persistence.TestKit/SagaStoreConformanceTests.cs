@@ -20,6 +20,15 @@ public abstract class SagaStoreConformanceTests
     /// <summary>Creates a fresh <see cref="ISagaStore"/> instance for a single test. Must not share state across tests.</summary>
     protected abstract ISagaStore CreateStore();
 
+    /// <summary>
+    /// Whether two <see cref="CreateStore"/> results observe the same canonical data, the way two
+    /// separate service processes/connections would against a real external store (Redis, SQL Server,
+    /// PostgreSQL). <c>false</c> for providers whose "fresh, isolated instance" is also isolated
+    /// storage (InMemory) - two in-process instances never share state by design, so tests that model
+    /// multiple independent writers against one store do not apply to them.
+    /// </summary>
+    protected virtual bool SupportsCrossInstanceSharedStorage => true;
+
     private static readonly Type StepType = typeof(DummyEvent);
     private static readonly Type HandlerType = typeof(DummySagaHandler);
 
@@ -230,5 +239,42 @@ public abstract class SagaStoreConformanceTests
         }));
 
         Assert.Equal(1, results.Count(succeeded => succeeded));
+    }
+
+    [Fact]
+    public async Task SaveSagaDataAsync_Two_Independent_Store_Instances_Stale_Writer_Reports_Correct_Versions()
+    {
+        // Two separate ISagaStore instances stand in for two separate service processes/connections,
+        // as opposed to SaveSagaDataAsync_Concurrent_Writers_Should_Have_Exactly_One_Winner above,
+        // which proves the single-winner outcome but not the exact version numbers the loser sees.
+        if (!SupportsCrossInstanceSharedStorage) return;
+
+        var storeA = CreateStore();
+        var storeB = CreateStore();
+        var versionedA = AsVersioned(storeA);
+        var versionedB = AsVersioned(storeB);
+        if (versionedA is null || versionedB is null) return;
+
+        var sagaId = Guid.NewGuid();
+        var v1 = await versionedA.SaveSagaDataAsync(sagaId, new DummySagaData { Payload = "base" }, 0);
+        Assert.Equal(1, v1);
+
+        // Both instances independently load the same current version.
+        var (_, loadedVersionA) = await versionedA.LoadSagaDataWithVersionAsync<DummySagaData>(sagaId);
+        var (_, loadedVersionB) = await versionedB.LoadSagaDataWithVersionAsync<DummySagaData>(sagaId);
+        Assert.Equal(1, loadedVersionA);
+        Assert.Equal(1, loadedVersionB);
+
+        // A advances the saga first.
+        var v2 = await versionedA.SaveSagaDataAsync(sagaId, new DummySagaData { Payload = "writer-a" }, loadedVersionA);
+        Assert.Equal(2, v2);
+
+        // B is now stale and must fail with the exact expected/actual versions it raced against.
+        var ex = await Assert.ThrowsAsync<SagaConcurrencyException>(() =>
+            versionedB.SaveSagaDataAsync(sagaId, new DummySagaData { Payload = "writer-b" }, loadedVersionB));
+
+        Assert.Equal(sagaId, ex.SagaId);
+        Assert.Equal(1, ex.ExpectedVersion);
+        Assert.Equal(2, ex.ActualVersion);
     }
 }

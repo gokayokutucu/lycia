@@ -332,8 +332,13 @@ public class SqlServerSagaStore(
         var loaded = await TryLoadSagaDataAsync<TSagaData>(sagaId).ConfigureAwait(false);
         if (loaded != null) return loaded;
 
-        var emptyData = new TSagaData();
-        await SaveSagaDataAsync(sagaId, emptyData).ConfigureAwait(false);
+        // Do not persist a canonical row here: a Load with no prior data must be a pure read with no
+        // write side effect. Eagerly writing a version-1 row on Load bypasses Split Store's
+        // journal/intent bookkeeping (which only runs for explicit Save calls), producing a canonical
+        // version 1 with no corresponding journal entry - a permanent journal gap. See the identical
+        // fix and full explanation in PostgreSqlSagaStore.LoadSagaDataAsync, which reproduced and
+        // confirmed this live via /debug/sagas/{sagaId}/verify returning JournalGap for every fresh saga.
+        var emptyData = new TSagaData { SagaId = sagaId };
         return emptyData;
     }
 

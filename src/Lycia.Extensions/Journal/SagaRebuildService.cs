@@ -21,6 +21,7 @@ public sealed class SagaRebuildService(
     ISagaStore canonicalStore,
     JournalEntryUpcastChain upcastChain) : ISagaRebuildService
 {
+    /// <inheritdoc />
     public async Task<SagaRebuildOutcome> RebuildSagaAsync(Guid sagaId, CancellationToken cancellationToken = default)
     {
         var (state, failureKind, reason) = await ReplayAsync(sagaId, 200, cancellationToken).ConfigureAwait(false);
@@ -42,6 +43,7 @@ public sealed class SagaRebuildService(
         return SagaRebuildOutcome.Success(sagaId, state.Version);
     }
 
+    /// <inheritdoc />
     public async Task<SagaBulkOperationSummary> RebuildAllAsync(SagaRebuildBatchOptions? options = null,
         IProgress<SagaRebuildProgress>? progress = null, CancellationToken cancellationToken = default)
     {
@@ -49,6 +51,7 @@ public sealed class SagaRebuildService(
             outcome => outcome.Succeeded, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
     public async Task<SagaVerificationOutcome> VerifySagaAsync(Guid sagaId, CancellationToken cancellationToken = default)
     {
         var (state, failureKind, reason) = await ReplayAsync(sagaId, 200, cancellationToken).ConfigureAwait(false);
@@ -88,6 +91,7 @@ public sealed class SagaRebuildService(
         };
     }
 
+    /// <inheritdoc />
     public async Task<SagaBulkOperationSummary> VerifyAllAsync(SagaRebuildBatchOptions? options = null,
         IProgress<SagaRebuildProgress>? progress = null, CancellationToken cancellationToken = default)
     {

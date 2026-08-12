@@ -71,6 +71,48 @@ public class PostgreSqlJournalAtomicPersistenceTests(PostgreSqlContainerFixture 
         Assert.Equal(0, count);
     }
 
+    [Fact]
+    public async Task Journal_constraint_violation_rolls_back_the_whole_transaction_including_canonical_state()
+    {
+        // Unlike the manual-RollbackAsync test above, this forces a genuine ADO.NET constraint
+        // violation (uq_lycia_saga_journal_version on saga_id+target_version) inside AppendAsync while
+        // enlisted in the same session as a canonical SagaStore save, proving the failure is not
+        // silently swallowed and genuinely takes the whole processing transaction down with it.
+        var stores = CreateStores();
+        var sagaId = Guid.NewGuid();
+
+        var seedTransitionId = Guid.NewGuid();
+        await using (var seedSession = await stores.Factory.BeginAsync())
+        {
+            stores.Accessor.Current = seedSession;
+            var seedData = new DummySagaData();
+            await stores.Saga.SaveSagaDataAsync(sagaId, seedData);
+            await stores.Journal.AppendAsync(BuildEntry(sagaId, 0, seedData.Version, seedTransitionId));
+            await seedSession.CommitAsync();
+            stores.Accessor.Current = null;
+        }
+        Assert.Equal(1, (await stores.Saga.LoadSagaDataWithVersionAsync<DummySagaData>(sagaId)).Version);
+
+        await using (var session = await stores.Factory.BeginAsync())
+        {
+            stores.Accessor.Current = session;
+            var data = new DummySagaData();
+            await stores.Saga.SaveSagaDataAsync(sagaId, data); // would become version 2 if committed
+
+            var conflictingTransitionId = Guid.NewGuid();
+            await Assert.ThrowsAsync<PostgresException>(() =>
+                stores.Journal.AppendAsync(BuildEntry(sagaId, 0, 1, conflictingTransitionId)));
+
+            await session.RollbackAsync();
+            stores.Accessor.Current = null;
+        }
+
+        Assert.Equal(1, (await stores.Saga.LoadSagaDataWithVersionAsync<DummySagaData>(sagaId)).Version);
+        var entries = await stores.Journal.ReadAsync(sagaId, 0, 10);
+        var entry = Assert.Single(entries);
+        Assert.Equal(seedTransitionId, entry.TransitionId);
+    }
+
     private StoreSet CreateStores()
     {
         var sagaOptions = new PostgreSqlSagaStoreOptions
