@@ -982,11 +982,13 @@ compare-and-set for Redis. Exactly one SagaStore provider may be selected per ap
 selecting a second throws immediately at configuration time. SQL Server and PostgreSQL manage their
 own schema via an embedded migration (`ApplyMigrations` by default).
 
+Also implemented: Split Store (`.UseSplitStore()`, PostgreSQL/SQL Server canonical + Redis operational,
+see "Split Store persistence" above) and the canonical journal + deterministic replay/rebuild engine
+(see "Canonical Journal + Replay/Rebuild" below).
+
 Not yet built — still future work, not implemented and not to be assumed available:
 
-- split-store Redis + relational mode (`WithSplitStore()`)
-- deterministic replay / Redis rebuild from canonical history
-- reconciliation workers, leases and fencing
+- broad distributed leases/fencing beyond the minimum rebuild-safety CAS already in place
 - provider capability reporting and persistence health checks beyond `ISagaStoreHealthCheck`
 
 ### Inbox and Outbox
@@ -1020,11 +1022,82 @@ Still planned (not implemented):
 
 - RabbitMQ publisher-confirm mode (Kafka and NATS JetStream confirmations are integrated; Core NATS
   and RabbitMQ remain conservatively `ConfirmationUnknown`)
-- canonical incoming/outgoing journals
-- reconciliation workers, leases and fencing
 - fail-closed processing guarantees beyond what SagaStore already provides
-- bounded recovery
-- Redis saga-state rebuild from canonical relational history
+- bounded recovery beyond the journal-based rebuild described below
+
+### Canonical Journal + Replay/Rebuild
+
+Split Store requires rebuildability, so `.UseSplitStore()` now also requires a registered
+`ISagaJournalStore` — an append-only, immutable canonical transition history distinct from the Phase 5
+reconciliation intent (which only re-queues the *latest* row and is not retained ordered history).
+Implemented for **SQL Server** and **PostgreSQL** (Redis is the rebuild target, never the canonical
+journal); an **InMemory** journal exists for deterministic tests.
+
+```csharp
+lycia.UsePersistence()
+    .WithPostgreSqlCanonicalSagaStore(o => o.ConnectionString = postgres)   // also registers the journal store
+    .WithPostgreSqlInbox(o => o.ConnectionString = postgres)
+    .WithPostgreSqlOutbox(o => o.ConnectionString = postgres)
+    .WithRedisOperationalSagaStore(o => o.ConnectionString = redis)
+    .RequireAtomicBoundary()
+    .UseSplitStore();
+```
+
+- **Ordering authority**: `SagaId` + `SequenceNumber`. `SequenceNumber` and the existing `SagaData.Version`
+  are deliberately the same value — Lycia already has one authoritative per-saga monotonic counter, and
+  the journal reuses it instead of inventing a second ordering axis. `CreatedAtUtc` is diagnostic metadata
+  only, never used for ordering or gap detection.
+- **Atomicity**: journal append happens inside `SplitStoreSagaStore`, in the same call that already writes
+  the reconciliation intent, so under `LocalAtomic` both commit or roll back with Inbox/SagaStore/Outbox as
+  one unit. A rolled-back transaction leaves no journal row.
+- **Entry shape**: each `SagaJournalEntry` carries the full post-transition `SagaData` *and* a full
+  snapshot of the saga's step log (not a delta) — this is a deliberate choice to keep the reducer a direct
+  projection instead of a fold, and lets rebuild read only a saga's *latest* entry once ordered continuity
+  has been validated, rather than replaying every historical entry. Correlation metadata (MessageId,
+  RequestId, CorrelationId, CausationId, ParentMessageId, ApplicationId, HandlerType, MessageType) is
+  captured by `SagaDispatcher` before invoking a handler (`ISagaJournalContextAccessor`, framework-managed,
+  never set by handler code) and is best-effort — `null` when a journal write happens outside a dispatched
+  message context.
+- **Reducer** (`ISagaJournalReducer`): pure `Reduce(previous, entry) -> newState`. Never resolves
+  `IEventBus`, executes a handler, publishes, writes Inbox/Outbox, schedules a message, reads
+  `DateTime.UtcNow` as business input, or generates a new identity. The same ordered journal always
+  produces the same state.
+- **Rebuild engine** (`ISagaRebuildService`, one engine for both automatic recovery and manual/operator
+  rebuild): `RebuildSagaAsync`/`RebuildAllAsync` (bounded pages, per-saga failure isolation, progress
+  reporting, cancellation, resumable cursor) and `VerifySagaAsync`/`VerifyAllAsync` (non-mutating —
+  `Healthy`/`MissingProjection`/`VersionMismatch`/`StateMismatch`/`JournalGap`/`SchemaUnsupported`/
+  `CorruptEntry`). Continuity is validated while replaying (gap/backward-transition/wrong-SagaId
+  detection) — a corrupt journal is reported clearly, never silently best-effort reconstructed. Rebuild
+  installs through the *same* `IOperationalSagaProjectionStore` CAS/version-fencing Split Store
+  reconciliation already uses, so a stale rebuild can never overwrite a newer live projection, and
+  rebuilding the same saga twice is a safe no-op (no version bump, no new journal entries).
+- **Schema evolution**: `IJournalEntryUpcaster`/`JournalEntryUpcastChain` upgrade older
+  `JournalSchemaVersion` entries deterministically before reduction; a missing upcaster fails the
+  rebuild/verify clearly instead of guessing.
+- **Side-effect isolation**: `SagaRebuildService`'s dependencies are the journal store, reducer,
+  operational-projection store, canonical SagaStore, and upcast chain — it has no dependency capable of
+  invoking a handler, publishing/sending a message, or writing Inbox/Outbox, which is verified by a
+  dedicated test inspecting its constructor, not only by a runtime side-effect counter.
+- **Debug visibility** (Microservices sample): `GET /debug/sagas/{sagaId}/journal` (safe metadata only —
+  sequence, transition kind, message id, handler, target version, schema version; no payload dump),
+  `POST /debug/sagas/{sagaId}/rebuild-from-journal`, `GET /debug/sagas/{sagaId}/verify` — distinct from
+  the Phase 5 `/debug/projections/{sagaId}/restore`, which restores from the latest canonical row, not
+  ordered journal replay.
+
+Not yet built — still future work, not implemented and not to be assumed available:
+
+- a durable snapshot table (deferred: because each journal entry already stores full post-transition
+  state rather than a delta, rebuild already reads only the latest entry once continuity is validated —
+  the acceleration a snapshot table would provide is largely already realized architecturally; the
+  interfaces do not block adding one later)
+- wiring SagaStore + Inbox + Outbox operations to actually share replay-time atomicity with the journal
+  beyond the append itself
+- persistent, queryable rebuild-operation tracking (a resumable cursor exists; a separate operational
+  `RebuildOperation` table does not)
+- a live, orchestrated Microservices docker-compose HTTP end-to-end run exercising these endpoints under
+  a full RabbitMQ/PostgreSQL/Redis stack — the equivalent proof (real SQL Server/PostgreSQL/Redis
+  containers, atomic rollback, rebuild-after-Redis-loss, side-effect isolation) is instead validated at
+  the persistence-provider integration-test level
 
 ### Workflow Visualization
 
