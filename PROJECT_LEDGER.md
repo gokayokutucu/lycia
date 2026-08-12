@@ -141,7 +141,7 @@ awaits independent architecture review and the reliability red team before final
   (net8.0 and net9.0); InMemory persistence suite 45/45 (net9.0); all affected packages pack cleanly
   including a net10.0 lib folder; `git diff --check` clean. Feature commits `035ef0e`, `ce4f19a`,
   `4a02432`, `86da67f`, `4f3f744`, `ea81f09` (plus `69b61e2` for the `WithDispatch` rename and retry
-  backoff parity); merged into `dev` as `<pending>`.
+  backoff parity); merged into `dev` as `6e6d989`.
 
 # FINALIZATION
 
