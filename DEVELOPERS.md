@@ -1,5 +1,13 @@
 # Lycia Developer Documentation
 
+## Split Store development
+
+The Split Store request path commits relational state and a `SagaProjectionIntent`; it never dual-writes
+Redis. `ReconciliationWorker` uses provider-native claims and installs complete target states through
+Redis CAS. Saga version—not time—orders work: equal versions are idempotent and older versions are
+superseded. `RestoreLatestAsync` requeues the current canonical materialization and does not implement
+the Phase 6 journal/replay contract. The executable failure proof lives under `samples/Microservices`.
+
 This document provides an in-depth look into the architecture, components, configuration, and internals of the Lycia Saga Infrastructure. It complements the public-facing `README.md` with implementation details, design decisions, and extensibility points.
 
 ---

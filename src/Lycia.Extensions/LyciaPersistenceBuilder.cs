@@ -2,9 +2,12 @@
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 using Lycia.Outbox;
+using Lycia.Extensions.SplitStore;
+using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Inbox;
 using Lycia.Saga.Abstractions.Outbox;
 using Lycia.Saga.Abstractions.Persistence;
+using Lycia.Saga.Abstractions.Persistence.Reconciliation;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -117,6 +120,61 @@ public sealed class LyciaPersistenceBuilder
 
         GetTopologyConfiguration().SetStore(new PersistenceStoreDescriptor(
             capability, providerName, connectionIdentity, supportsRelationalLocalTransaction));
+    }
+
+    /// <summary>Marks a relational SagaStore as canonical for an explicitly selected Split Store.</summary>
+    public void SelectSplitStoreCanonicalProvider(string providerName, string connectionIdentity)
+    {
+        GetTopologyConfiguration().SetSplitStoreCanonical(new PersistenceStoreDescriptor(
+            PersistenceCapabilityKind.SagaStore, providerName, connectionIdentity, true));
+    }
+
+    /// <summary>Marks Redis as the rebuildable operational Saga projection provider.</summary>
+    public void SelectSplitStoreOperationalProvider(string providerName) =>
+        GetTopologyConfiguration().SetSplitStoreOperational(providerName);
+
+    /// <summary>
+    /// Enables explicit Split Store ownership: relational SagaStore state is canonical and Redis is an
+    /// asynchronously reconciled, rebuildable operational projection. Independent canonical transactions
+    /// are rejected because the reconciliation intent must commit with Inbox, SagaStore, and Outbox.
+    /// </summary>
+    public LyciaPersistenceBuilder UseSplitStore()
+    {
+        var configuration = GetTopologyConfiguration();
+        configuration.EnableSplitStore();
+
+        if (!Services.Any(x => x.ServiceType == typeof(IReconciliationStore)))
+            throw new InvalidOperationException("Split Store requires a canonical relational reconciliation store.");
+        if (!Services.Any(x => x.ServiceType == typeof(IOperationalSagaProjectionStore)))
+            throw new InvalidOperationException("Split Store requires a Redis operational saga projection store.");
+
+        var canonicalDescriptor = Services.LastOrDefault(x => x.ServiceType == typeof(ISagaStore))
+            ?? throw new InvalidOperationException("Split Store requires a canonical relational SagaStore.");
+        Services.Remove(canonicalDescriptor);
+        Services.AddScoped<ISagaStore>(sp => new SplitStoreSagaStore(
+            CreateService(sp, canonicalDescriptor), sp.GetRequiredService<IReconciliationStore>()));
+        Services.TryAddScoped<ISagaProjectionReconciler, SagaProjectionReconciler>();
+        Services.TryAddEnumerable(ServiceDescriptor.Singleton<Microsoft.Extensions.Hosting.IHostedService,
+            ReconciliationWorker>());
+        return this;
+    }
+
+    /// <summary>Configures bounded retries, polling, and stale-claim recovery for Split Store reconciliation.</summary>
+    public LyciaPersistenceBuilder WithReconciliationWorker(Action<ReconciliationWorkerOptions> configure)
+    {
+        if (configure == null) throw new ArgumentNullException(nameof(configure));
+        Services.Configure(configure);
+        return this;
+    }
+
+    private static ISagaStore CreateService(IServiceProvider serviceProvider, ServiceDescriptor descriptor)
+    {
+        if (descriptor.ImplementationInstance is ISagaStore instance) return instance;
+        if (descriptor.ImplementationFactory != null)
+            return (ISagaStore)descriptor.ImplementationFactory(serviceProvider);
+        if (descriptor.ImplementationType != null)
+            return (ISagaStore)ActivatorUtilities.GetServiceOrCreateInstance(serviceProvider, descriptor.ImplementationType);
+        throw new InvalidOperationException("The canonical SagaStore registration cannot be activated.");
     }
 
     /// <summary>Requires all enabled Lycia persistence stores to share one service-local atomic boundary.</summary>

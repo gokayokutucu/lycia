@@ -31,7 +31,18 @@ public enum PersistenceCapabilityKind
     /// <summary>Incoming-message idempotency persistence.</summary>
     Inbox,
     /// <summary>Outgoing-message intent persistence.</summary>
-    Outbox
+    Outbox,
+    /// <summary>Durable intent used to reconcile a rebuildable operational projection.</summary>
+    Reconciliation
+}
+
+/// <summary>Identifies whether saga state uses one normal store or a canonical/operational split.</summary>
+public enum PersistenceMode
+{
+    /// <summary>One selected SagaStore owns state.</summary>
+    Standard,
+    /// <summary>A relational store is canonical and Redis is an asynchronously reconciled projection.</summary>
+    SplitStore
 }
 
 /// <summary>Safe, secret-free metadata describing an enabled persistence store.</summary>
@@ -68,12 +79,20 @@ public sealed class PersistenceTopology
         PersistenceBoundaryPolicy boundaryPolicy,
         PersistenceExecutionStrategy resolvedStrategy,
         IReadOnlyList<PersistenceStoreDescriptor> stores,
-        string reason)
+        string reason,
+        PersistenceMode mode = PersistenceMode.Standard,
+        string? canonicalStore = null,
+        string? operationalStore = null,
+        bool reconciliationEnabled = false)
     {
         BoundaryPolicy = boundaryPolicy;
         ResolvedStrategy = resolvedStrategy;
         Stores = stores;
         Reason = reason;
+        Mode = mode;
+        CanonicalStore = canonicalStore;
+        OperationalStore = operationalStore;
+        ReconciliationEnabled = reconciliationEnabled;
     }
 
     /// <summary>The configured boundary policy.</summary>
@@ -87,6 +106,18 @@ public sealed class PersistenceTopology
 
     /// <summary>A secret-free explanation of the selected strategy.</summary>
     public string Reason { get; }
+
+    /// <summary>The selected persistence ownership model.</summary>
+    public PersistenceMode Mode { get; }
+
+    /// <summary>The secret-free canonical provider name for Split Store, when enabled.</summary>
+    public string? CanonicalStore { get; }
+
+    /// <summary>The secret-free operational provider name for Split Store, when enabled.</summary>
+    public string? OperationalStore { get; }
+
+    /// <summary>Whether durable operational projection reconciliation is enabled.</summary>
+    public bool ReconciliationEnabled { get; }
 
     /// <summary>Whether the enabled stores share one local relational transaction boundary.</summary>
     public bool AtomicBoundaryAvailable => ResolvedStrategy == PersistenceExecutionStrategy.LocalAtomic;

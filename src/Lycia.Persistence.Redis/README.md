@@ -2,6 +2,10 @@
 
 Redis-backed `ISagaStore` provider for the [Lycia](https://github.com/gokayokutucu/lycia) saga framework.
 
+`WithRedisSagaStore` retains standalone canonical Redis behavior. Split Store uses the distinct
+`WithRedisOperationalSagaStore` API, whose data is rebuildable and only receives versioned canonical
+relational state through durable reconciliation.
+
 ## Usage
 
 ```csharp
