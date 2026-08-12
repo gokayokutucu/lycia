@@ -143,6 +143,53 @@ public class SqlServerAtomicPersistenceTests(SqlServerContainerFixture fixture)
     }
 
     [Fact]
+    public async Task Journal_constraint_violation_rolls_back_the_whole_transaction_including_canonical_state()
+    {
+        // Unlike the manual-RollbackAsync tests above, this forces a genuine ADO.NET constraint
+        // violation (UQ_LyciaSagaJournal_SagaVersion on SagaId+TargetVersion) inside AppendAsync while
+        // enlisted in the same session as a canonical SagaStore save, proving the failure is not
+        // silently swallowed and genuinely takes the whole processing transaction down with it.
+        var stores = CreateStores();
+        var sagaId = Guid.NewGuid();
+
+        var seedTransitionId = Guid.NewGuid();
+        await using (var seedSession = await stores.Factory.BeginAsync())
+        {
+            stores.Accessor.Current = seedSession;
+            var seedData = new DummySagaData();
+            await stores.Saga.SaveSagaDataAsync(sagaId, seedData);
+            await stores.Journal.AppendAsync(NewJournalEntry(seedTransitionId, sagaId, 0, seedData.Version));
+            await seedSession.CommitAsync();
+            stores.Accessor.Current = null;
+        }
+        Assert.Equal(1, (await stores.Saga.LoadSagaDataWithVersionAsync<DummySagaData>(sagaId)).Version);
+
+        await using (var session = await stores.Factory.BeginAsync())
+        {
+            stores.Accessor.Current = session;
+            var data = new DummySagaData();
+            await stores.Saga.SaveSagaDataAsync(sagaId, data); // would become version 2 if committed
+
+            // A different TransitionId claiming the already-used TargetVersion 1 collides with the
+            // unique (SagaId, TargetVersion) constraint; the dedup check in AppendAsync only skips
+            // exact TransitionId re-deliveries, so this is a genuine constraint failure.
+            var conflictingTransitionId = Guid.NewGuid();
+            await Assert.ThrowsAsync<SqlException>(() =>
+                stores.Journal.AppendAsync(NewJournalEntry(conflictingTransitionId, sagaId, 0, 1)));
+
+            await session.RollbackAsync();
+            stores.Accessor.Current = null;
+        }
+
+        // Canonical state must still be at version 1: the journal failure took the whole transaction
+        // down, including the SaveSagaDataAsync call that ran earlier in the same session.
+        Assert.Equal(1, (await stores.Saga.LoadSagaDataWithVersionAsync<DummySagaData>(sagaId)).Version);
+        var entries = await stores.Journal.ReadAsync(sagaId, 0, 10);
+        var entry = Assert.Single(entries);
+        Assert.Equal(seedTransitionId, entry.TransitionId);
+    }
+
+    [Fact]
     public void Connection_identity_ignores_order_and_secrets_but_distinguishes_database()
     {
         var first = SqlServerConnectionIdentity.Create(
