@@ -23,27 +23,22 @@ Git rules. Agents must update this file as phases move through the milestone.
 - Atomic SagaStore + Inbox + Outbox behavior must be honest about provider capabilities. Do not
   represent InMemory or Redis as sharing a relational transaction.
 - Stable message identities and Inbox idempotency are the duplicate-delivery safety boundary.
-- Split Store canonical ownership belongs to the later Split Store phase.
+- In Split Store mode, relational persistence is canonical and Redis is rebuildable operational state;
+  reconciliation never turns Redis into request-path authority.
 - Replay/rebuild must be deterministic and must not invoke business handlers.
 
 # ACTIVE
 
-## Phase 5 — Split Store + Reconciliation
+## Phase 6 — Canonical Journal + Replay / Rebuild
 
-- Define the supported Redis operational/materialized-state and relational canonical-persistence model.
-- Remove unsafe request-path dual-write assumptions.
-- Commit relational canonical state first, then reconcile into Redis in a controlled way.
-- Make operational-state and canonical-state ownership explicit.
-- Do not implement replay beyond what the split-store design requires.
+- Introduce a canonical immutable transition/history model with deterministic per-saga ordering.
+- Define a deterministic reducer and replay/rebuild that does not invoke business handlers.
+- Rebuild Redis/materialized state while preserving message identity and saga-version semantics.
+- Broker delivery is not the canonical journal.
 
 # NEXT
 
-1. **Phase 6 — Canonical Journal + Replay / Rebuild**
-   - Introduce a canonical immutable transition/history model with deterministic per-saga ordering.
-   - Define a deterministic reducer and replay/rebuild that does not invoke business handlers.
-   - Rebuild Redis/materialized state while preserving message identity and saga-version semantics.
-   - Broker delivery is not the canonical journal.
-2. **Phase 7 — Reliability Hardening**
+1. **Phase 7 — Reliability Hardening**
    - Address remaining persistence-recovery edge cases, including unknown outcomes and stale ownership
      where still applicable.
    - Add leases/fencing only where actually required, plus recovery coordination.
@@ -81,6 +76,13 @@ Git rules. Agents must update this file as phases move through the milestone.
   Rollback fault windows, indeterminate commit handling, provider regressions, and package consumers
   were validated without cross-service or exactly-once claims. Feature commit `3ce6eaf`; merged into
   `dev` as `a0ab41e`.
+- **Phase 5 — Split Store + Reconciliation:** explicit relational-canonical/Redis-operational topology,
+  canonical-transaction reconciliation intents, bounded claim/retry recovery, version-fenced idempotent
+  Redis projection, current-state restoration without handlers, PostgreSQL and SQL Server providers,
+  and a real five-service RabbitMQ/PostgreSQL/Redis sample. Redis outage, restoration, duplicate delivery,
+  downstream failure boundaries, targeted responses, and local package consumers were validated without
+  dual-write, cross-service-transaction, replay, or exactly-once claims. Feature commits `d90db45` and
+  `4a80258`; merged into `dev` as `ae66b3e`.
 
 # FINALIZATION
 
@@ -91,8 +93,8 @@ Status: NOT READY
 Required before `dev` -> `main`:
 
 - Phase 4 Atomic Persistence Boundary — COMPLETE
-- Phase 5 Split Store + Reconciliation — ACTIVE
-- Phase 6 Canonical Journal + Replay / Rebuild — PENDING
+- Phase 5 Split Store + Reconciliation — COMPLETE
+- Phase 6 Canonical Journal + Replay / Rebuild — ACTIVE
 - Phase 7 Reliability Hardening — PENDING
 - Full regression validation — PENDING
 - Package validation — PENDING
