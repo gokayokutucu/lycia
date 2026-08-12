@@ -29,21 +29,17 @@ Git rules. Agents must update this file as phases move through the milestone.
 
 # ACTIVE
 
-## Phase 6 — Canonical Journal + Replay / Rebuild
+## Phase 7 — Reliability Hardening
 
-- Introduce a canonical immutable transition/history model with deterministic per-saga ordering.
-- Define a deterministic reducer and replay/rebuild that does not invoke business handlers.
-- Rebuild Redis/materialized state while preserving message identity and saga-version semantics.
-- Broker delivery is not the canonical journal.
+- Address remaining persistence-recovery edge cases, including unknown outcomes and stale ownership
+  where still applicable.
+- Add leases/fencing only where actually required, plus recovery coordination.
+- Harden bounded operational reconciliation and retry behavior.
+- Add targeted capability and health reporting where needed, and prepare the production reliability audit.
 
 # NEXT
 
-1. **Phase 7 — Reliability Hardening**
-   - Address remaining persistence-recovery edge cases, including unknown outcomes and stale ownership
-     where still applicable.
-   - Add leases/fencing only where actually required, plus recovery coordination.
-   - Harden bounded operational reconciliation and retry behavior.
-   - Add targeted capability and health reporting where needed, and prepare the production reliability audit.
+(No further phases queued behind Phase 7 at this time.)
 
 # HOLD / BACKLOG
 
@@ -83,6 +79,28 @@ Git rules. Agents must update this file as phases move through the milestone.
   downstream failure boundaries, targeted responses, and local package consumers were validated without
   dual-write, cross-service-transaction, replay, or exactly-once claims. Feature commits `d90db45` and
   `4a80258`; merged into `dev` as `ae66b3e`.
+- **Phase 6 — Canonical Journal + Replay / Rebuild:** an append-only, immutable canonical transition
+  journal (SQL Server `dbo.LyciaSagaJournal`, PostgreSQL `lycia_saga_journal`; Redis is the rebuild
+  target, never the canonical journal store) distinct from the Phase 5 reconciliation intent, which
+  only re-queues the latest row and is not retained ordered history. `SagaId` + `SequenceNumber` is the
+  ordering authority, deliberately identical to the existing `SagaData.Version` counter rather than a
+  second axis. Journal append happens inside `SplitStoreSagaStore` in the same call that already writes
+  the reconciliation intent, so it commits or rolls back with Inbox/SagaStore/Outbox as one
+  `LocalAtomic` unit; `UseSplitStore()` now requires a registered `ISagaJournalStore`. A pure,
+  side-effect-free `ISagaJournalReducer` (each entry carries a full post-transition SagaData + step-log
+  snapshot, not a delta) and a single `ISagaRebuildService` (rebuild one/all with per-saga failure
+  isolation, progress, cancellation, a resumable cursor; non-mutating verify with
+  Healthy/MissingProjection/VersionMismatch/StateMismatch/JournalGap/SchemaUnsupported/CorruptEntry
+  classification) reuse the existing `IOperationalSagaProjectionStore` CAS/version-fencing writer for
+  installation, so rebuild and normal reconciliation share one Redis-installation guarantee.
+  `IJournalEntryUpcaster` schema evolution, continuity/corruption detection, and a construction-based
+  side-effect-isolation proof (no handler/transport/Inbox/Outbox dependency in `SagaRebuildService`) were
+  added. SQL Server and PostgreSQL real-container tests validated atomic append/rollback (no phantom
+  journal history), concurrent-same-version single-winner append, idempotent duplicate-transition
+  append, and rebuild-after-Redis-loss against real Redis. A full live Microservices docker-compose HTTP
+  E2E was not run; the equivalent proof was validated at the persistence-provider integration-test
+  level instead, and is recorded as a Phase 7 follow-up if a live run is later wanted. Feature commits
+  `9cfbb46`, `c55e8f2`, `5c6c578`, `484c78c`, `6db807c`, `b5d0c81`; merged into `dev` as `ba04e48`.
 
 # FINALIZATION
 
@@ -94,8 +112,8 @@ Required before `dev` -> `main`:
 
 - Phase 4 Atomic Persistence Boundary — COMPLETE
 - Phase 5 Split Store + Reconciliation — COMPLETE
-- Phase 6 Canonical Journal + Replay / Rebuild — ACTIVE
-- Phase 7 Reliability Hardening — PENDING
+- Phase 6 Canonical Journal + Replay / Rebuild — COMPLETE
+- Phase 7 Reliability Hardening — ACTIVE
 - Full regression validation — PENDING
 - Package validation — PENDING
 - Documentation validation — PENDING
