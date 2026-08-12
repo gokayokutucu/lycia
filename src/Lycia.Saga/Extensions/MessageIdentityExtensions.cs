@@ -33,7 +33,7 @@ public static class MessageIdentityExtensions
         response.RequestId = request.MessageId;
         var requestedEndpoint = request is IRequestRoutingMetadata routing &&
                                 !string.IsNullOrWhiteSpace(routing.ResponseEndpoint)
-            ? routing.ResponseEndpoint
+            ? routing.ResponseEndpoint!
             : responseEndpoint;
         response.ResponseEndpoint = EndpointIdentity.Normalize(requestedEndpoint);
         PropagateWorkflow(response, request, sagaId);
