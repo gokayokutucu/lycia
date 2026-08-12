@@ -6,6 +6,7 @@ using Lycia.Persistence.Relational.Internal.Sessions;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Persistence;
 using Lycia.Saga.Abstractions.Outbox;
+using Lycia.Saga.Abstractions.Persistence.Journal;
 using Lycia.Saga.Abstractions.Persistence.Reconciliation;
 using Lycia.Saga.Abstractions.Scheduling;
 using Microsoft.Data.SqlClient;
@@ -34,6 +35,10 @@ public static class SqlServerSagaStoreDslExtensions
         var identity=SqlServerConnectionIdentity.Create(options.ConnectionString);
         persistence.SelectSplitStoreCanonicalProvider("SqlServer",identity);
         persistence.RegisterProviderMetadata(PersistenceCapabilityKind.Reconciliation,"SqlServer",identity,true);
+        SqlServerJournalSchemaMigrator.RunAsync(options).GetAwaiter().GetResult();
+        persistence.Services.RemoveAll(typeof(ISagaJournalStore));
+        persistence.Services.AddScoped<ISagaJournalStore>(sp => new SqlServerSagaJournalStore(options,sp.GetService<ILyciaPersistenceSessionAccessor>()));
+        persistence.RegisterProviderMetadata(PersistenceCapabilityKind.Journal,"SqlServer",identity,true);
         return persistence;
     }
     /// <summary>

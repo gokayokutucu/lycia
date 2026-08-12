@@ -1,0 +1,25 @@
+CREATE TABLE dbo.LyciaSagaJournal (
+    JournalEntryId UNIQUEIDENTIFIER NOT NULL,
+    TransitionId UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+    SagaId UNIQUEIDENTIFIER NOT NULL,
+    SequenceNumber BIGINT NOT NULL,
+    PreviousVersion BIGINT NOT NULL,
+    TargetVersion BIGINT NOT NULL,
+    MessageId UNIQUEIDENTIFIER NULL,
+    RequestId UNIQUEIDENTIFIER NULL,
+    CorrelationId UNIQUEIDENTIFIER NULL,
+    CausationId UNIQUEIDENTIFIER NULL,
+    ParentMessageId UNIQUEIDENTIFIER NULL,
+    ApplicationId NVARCHAR(300) NULL,
+    HandlerType NVARCHAR(1000) NULL,
+    MessageType NVARCHAR(1000) NULL,
+    MessageSchemaVersion INT NOT NULL CONSTRAINT DF_LyciaSagaJournal_MessageSchemaVersion DEFAULT (1),
+    JournalSchemaVersion INT NOT NULL CONSTRAINT DF_LyciaSagaJournal_JournalSchemaVersion DEFAULT (1),
+    TransitionType INT NOT NULL,
+    SagaDataTypeName NVARCHAR(1000) NOT NULL,
+    SagaDataPayload NVARCHAR(MAX) NOT NULL,
+    StepsSnapshotPayload NVARCHAR(MAX) NULL,
+    CreatedAtUtc DATETIME2(3) NOT NULL CONSTRAINT DF_LyciaSagaJournal_Created DEFAULT (SYSUTCDATETIME()),
+    CONSTRAINT UQ_LyciaSagaJournal_SagaVersion UNIQUE (SagaId, TargetVersion)
+);
+CREATE INDEX IX_LyciaSagaJournal_SagaId_Sequence ON dbo.LyciaSagaJournal (SagaId, SequenceNumber);
