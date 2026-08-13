@@ -43,3 +43,36 @@ Phase 6 historical replay; it never invokes business handlers or creates broker 
 
 Inspect canonical state with `docker compose exec postgres psql -U lycia -d checkout_db` and operational
 state with `docker compose exec checkout-redis redis-cli GET saga:data:<saga-id>`.
+
+## Distributed tracing (Jaeger)
+
+The stack includes Jaeger, receiving OTLP spans from all five services (each reporting a distinct
+service name: `CheckoutService`, `OrderService`, `InventoryService`, `PaymentService`,
+`ShippingService`). Open the UI at **http://localhost:16686** after a checkout to see one connected
+trace spanning the whole workflow, including the Outbox dispatch hop between each service. Jaeger
+being unavailable never fails a checkout — the OTLP exporter drops spans in the background.
+
+## RabbitMQ management UI
+
+**http://localhost:15672** (guest / guest).
+
+## Resetting local state
+
+`./reset-state.sh` resets service-local PostgreSQL + Redis state for one or more services, with
+explicit opt-in RabbitMQ reset (RabbitMQ is shared by every service, so it is never reset
+implicitly):
+
+```bash
+./reset-state.sh checkout           # Checkout's PostgreSQL DB + Redis only
+./reset-state.sh checkout payment   # multiple services
+./reset-state.sh all                # every service's PostgreSQL + Redis, RabbitMQ untouched
+./reset-state.sh rabbitmq           # only the shared broker
+./reset-state.sh --help             # full usage and safety notes
+```
+
+## Manual architecture review
+
+See [MANUAL_TESTING.md](MANUAL_TESTING.md) for a full walkthrough: starting the stack, creating a
+checkout, inspecting PostgreSQL/Redis/RabbitMQ/Jaeger, and step-by-step procedures for the happy
+path, Redis outage/recovery, journal-based rebuild, duplicate delivery, Inventory/Payment failure,
+and process restart.

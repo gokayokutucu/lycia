@@ -3,6 +3,7 @@
 // https://www.apache.org/licenses/LICENSE-2.0
 using Lycia.Outbox;
 using Lycia.Extensions.Serialization;
+using Lycia.Observability;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Abstractions.Outbox;
@@ -59,7 +60,7 @@ public class OutboxDispatcherTests
         var store = new InMemoryOutboxStore();
         var bus = new RecordingEventBus();
         var serializer = new NewtonsoftJsonMessageSerializer();
-        var dispatcher = new OutboxDispatcher(store, bus, serializer, NullLogger<OutboxDispatcher>.Instance);
+        var dispatcher = new OutboxDispatcher(store, bus, serializer, new LyciaActivitySourceHolder(), NullLogger<OutboxDispatcher>.Instance);
 
         var evt = new DispatcherProbeEvent { Payload = "hello" };
         await new OutboxOutgoingMessagePipeline(store, serializer).Publish(evt, null, null);
@@ -80,7 +81,7 @@ public class OutboxDispatcherTests
         var store = new InMemoryOutboxStore();
         var bus = new RecordingEventBus();
         var serializer = new NewtonsoftJsonMessageSerializer();
-        var dispatcher = new OutboxDispatcher(store, bus, serializer, NullLogger<OutboxDispatcher>.Instance);
+        var dispatcher = new OutboxDispatcher(store, bus, serializer, new LyciaActivitySourceHolder(), NullLogger<OutboxDispatcher>.Instance);
 
         var messageId = Guid.NewGuid();
         await store.AddAsync(new Saga.Abstractions.Outbox.OutboxMessage(messageId, "NoSuch.Type, NoSuchAssembly", "{}", "TestApp", null));
@@ -98,7 +99,7 @@ public class OutboxDispatcherTests
         var store = new InMemoryOutboxStore();
         var bus = new ThrowingEventBus();
         var serializer = new NewtonsoftJsonMessageSerializer();
-        var dispatcher = new OutboxDispatcher(store, bus, serializer, NullLogger<OutboxDispatcher>.Instance);
+        var dispatcher = new OutboxDispatcher(store, bus, serializer, new LyciaActivitySourceHolder(), NullLogger<OutboxDispatcher>.Instance);
 
         var evt = new DispatcherProbeEvent { Payload = "hello" };
         await new OutboxOutgoingMessagePipeline(store, serializer).Publish(evt, null, null);
@@ -117,7 +118,7 @@ public class OutboxDispatcherTests
         var bus = new RecordingEventBus();
         var serializer = new NewtonsoftJsonMessageSerializer();
         var pipeline = new OutboxOutgoingMessagePipeline(store, serializer);
-        var dispatcher = new OutboxDispatcher(store, bus, serializer, NullLogger<OutboxDispatcher>.Instance);
+        var dispatcher = new OutboxDispatcher(store, bus, serializer, new LyciaActivitySourceHolder(), NullLogger<OutboxDispatcher>.Instance);
         var correlationId = Guid.NewGuid();
         var causationId = Guid.NewGuid();
         var parentMessageId = Guid.NewGuid();
@@ -169,7 +170,7 @@ public class OutboxDispatcherTests
         var store = new InMemoryOutboxStore();
         var bus = new RecordingEventBus();
         var serializer = new NewtonsoftJsonMessageSerializer();
-        var dispatcher = new OutboxDispatcher(store, bus, serializer, NullLogger<OutboxDispatcher>.Instance);
+        var dispatcher = new OutboxDispatcher(store, bus, serializer, new LyciaActivitySourceHolder(), NullLogger<OutboxDispatcher>.Instance);
         await store.AddAsync(new OutboxMessage(Guid.NewGuid(), "NoSuch.Type, NoSuchAssembly", "{}", "TestApp", null));
         var healthy = new DispatcherProbeEvent { Payload = "continue" };
         await new OutboxOutgoingMessagePipeline(store, serializer).Publish(healthy, null, null);
@@ -189,7 +190,7 @@ public class OutboxDispatcherTests
         var serializer = new NewtonsoftJsonMessageSerializer();
         var pipeline = new OutboxOutgoingMessagePipeline(store, serializer);
         var dispatcher = new OutboxDispatcher(store, new ThrowingEventBus(), serializer,
-            NullLogger<OutboxDispatcher>.Instance);
+            new LyciaActivitySourceHolder(), NullLogger<OutboxDispatcher>.Instance);
         var evt = new DispatcherProbeEvent { Payload = "stable" };
         await pipeline.Publish(evt, null, null);
 

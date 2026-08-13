@@ -1,5 +1,6 @@
 using Lycia.Observability;
 using OpenTelemetry;
+using OpenTelemetry.Context.Propagation;
 
 namespace Lycia.Extensions.OpenTelemetry;
 
@@ -27,6 +28,17 @@ public static class LyciaOpenTelemetryExtensions
     public static OpenTelemetryBuilder AddLyciaTracing(
         this OpenTelemetryBuilder builder)
     {
+        // Lycia's cross-transport propagation helper (LyciaTracePropagation, used to carry W3C trace
+        // context across RabbitMQ/NATS/Kafka message boundaries) reads and writes through
+        // Propagators.DefaultTextMapPropagator. The OpenTelemetry SDK does not set this global default
+        // on its own, so without this call every message hop silently starts a disconnected root trace
+        // instead of continuing the caller's trace - Inject/Extract no-op against the SDK's default
+        // no-op propagator.
+        Sdk.SetDefaultTextMapPropagator(new CompositeTextMapPropagator([
+            new TraceContextPropagator(),
+            new BaggagePropagator()
+        ]));
+
         // Traces
         builder.WithTracing(tp => tp.AddSource(LyciaActivitySourceHolder.Name));
 
