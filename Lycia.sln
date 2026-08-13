@@ -129,7 +129,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Persistence.Redis", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Persistence.Redis.Tests", "tests\Lycia.Persistence.Redis.Tests\Lycia.Persistence.Redis.Tests.csproj", "{4ECBED45-EB46-4C75-9C06-85775D00DE09}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Microservices", "Microservices", "{10000000-0000-4000-8000-000000000001}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "microservices", "microservices", "{10000000-0000-4000-8000-000000000001}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Microservices.Contracts", "samples\Microservices\Shared.Contracts\Shared.Contracts.csproj", "{10000000-0000-4000-8000-000000000002}"
 EndProject
