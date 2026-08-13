@@ -1,6 +1,7 @@
 // Copyright 2023 Lycia Contributors
 // Licensed under the Apache License, Version 2.0
 
+using Lycia.Observability;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Abstractions.Outbox;
 using Lycia.Saga.Abstractions.Serializers;
@@ -46,6 +47,13 @@ public sealed class OutboxOutgoingMessagePipeline(IOutboxStore store, IMessageSe
             ApplicationId = message.ApplicationId,
             SagaId = sagaId ?? message.SagaId
         };
+
+        // Capture the current Activity's trace context into the durable envelope. Outbox dispatch is
+        // decoupled in time (and Activity.Current) from the call that created this intent - without
+        // this, OutboxDispatcher's later publish call would re-inject whatever Activity happens to be
+        // current in the background worker at that moment (usually none), producing a disconnected
+        // trace instead of continuing the caller's.
+        LyciaTracePropagation.Inject(envelope.Headers);
 
         if (request != null)
         {

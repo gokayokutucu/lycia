@@ -3,6 +3,7 @@
 // https://www.apache.org/licenses/LICENSE-2.0
 
 using Lycia.Extensions.Serialization;
+using Lycia.Observability;
 using Lycia.Outbox;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Messaging;
@@ -31,6 +32,7 @@ public class OutboxWorkerTests
         services.AddSingleton<Lycia.Saga.Abstractions.Serializers.IMessageSerializer>(serializer);
         services.AddSingleton<Microsoft.Extensions.Logging.ILogger<OutboxDispatcher>>(
             NullLogger<OutboxDispatcher>.Instance);
+        services.AddSingleton<LyciaActivitySourceHolder>();
         services.AddScoped<IOutboxDispatcher, OutboxDispatcher>();
         await using var provider = services.BuildServiceProvider();
         var worker = new OutboxWorker(provider.GetRequiredService<IServiceScopeFactory>(),

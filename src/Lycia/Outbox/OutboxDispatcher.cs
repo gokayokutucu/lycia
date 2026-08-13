@@ -1,8 +1,10 @@
 // Copyright 2023 Lycia Contributors
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
+using System.Diagnostics;
 using System.Reflection;
 using Lycia.Common.SagaSteps;
+using Lycia.Observability;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Abstractions.Outbox;
@@ -14,7 +16,7 @@ namespace Lycia.Outbox;
 
 /// <inheritdoc cref="IOutboxDispatcher" />
 public class OutboxDispatcher(IOutboxStore outboxStore, IEventBus eventBus, IMessageSerializer serializer,
-    ILogger<OutboxDispatcher> logger)
+    LyciaActivitySourceHolder activitySourceHolder, ILogger<OutboxDispatcher> logger)
     : IOutboxDispatcher
 {
     /// <inheritdoc />
@@ -110,6 +112,15 @@ public class OutboxDispatcher(IOutboxStore outboxStore, IEventBus eventBus, IMes
     private async Task DispatchSemanticAsync(OutboxEnvelope envelope, Type messageType, object message,
         CancellationToken cancellationToken)
     {
+        // Restore the trace context captured at envelope creation time (see
+        // OutboxOutgoingMessagePipeline.CaptureAsync) so the transport's own Activity.Current-based
+        // header injection continues the original caller's trace instead of starting a disconnected
+        // one from whatever happens to be current on this background dispatch loop.
+        var parentContext = LyciaTracePropagation.Extract(envelope.Headers);
+        using var activity = parentContext != default
+            ? activitySourceHolder.Source.StartActivity($"Outbox.{envelope.Operation}", ActivityKind.Producer, parentContext)
+            : null;
+
         var target = eventBus is IConfirmedEventBus ? typeof(IConfirmedEventBus) : typeof(IEventBus);
         var instance = eventBus;
         var handlerType = string.IsNullOrWhiteSpace(envelope.HandlerType)

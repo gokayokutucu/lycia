@@ -846,6 +846,7 @@ The [samples/](samples) directory contains runnable examples.
 | `Sample.Order.Orchestration.Consumer` | Stateful coordinated saga with asynchronous targeted responses |
 | `Sample.Order.Choreography.Consumer` | Stateless event-driven reactive saga |
 | `Sample.Order.Orchestration.Seq.Consumer` | Sequential coordinated saga with compensation |
+| [`Microservices`](samples/Microservices) | Five-service Split Store proof (RabbitMQ + PostgreSQL + per-service Redis + Jaeger tracing); see its [README](samples/Microservices/README.md) and [manual architecture-review guide](samples/Microservices/MANUAL_TESTING.md) |
 
 Samples demonstrate:
 

@@ -1,4 +1,5 @@
 using Lycia.Extensions;
+using Lycia.Extensions.OpenTelemetry;
 using Lycia.Extensions.RabbitMq;
 using Lycia.Persistence.PostgreSql;
 using Lycia.Persistence.Redis;
@@ -8,6 +9,8 @@ using Lycia.Saga.Abstractions.Persistence.Journal;
 using Lycia.Saga.Abstractions.Persistence.Reconciliation;
 using Lycia.Samples.Microservices.Contracts;
 using Npgsql;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 namespace Lycia.Samples.Microservices;
 
@@ -24,17 +27,43 @@ internal static class ServiceBootstrap
             ?? throw new InvalidOperationException("REDIS_CONNECTION is required.");
         var rabbit = Environment.GetEnvironmentVariable("RABBITMQ_CONNECTION")
             ?? "amqp://guest:guest@rabbitmq:5672";
+        // OTEL_EXPORTER_OTLP_ENDPOINT follows the standard OpenTelemetry SDK environment variable name.
+        // Left unset, no OTLP exporter is registered and tracing stays local-only (ActivitySource still
+        // runs; there is just nothing to export to). The OTLP exporter itself batches and exports spans
+        // in the background, so an unreachable collector/Jaeger never fails a business request.
+        var otlpEndpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT");
         builder.Configuration.AddInMemoryCollection(new Dictionary<string,string?> { ["ApplicationId"] = applicationId });
+
+        builder.Services
+            .AddOpenTelemetry()
+            .ConfigureResource(resource => resource.AddService(serviceName: applicationId))
+            .AddLyciaTracing()
+            .WithTracing(tracing =>
+            {
+                tracing.AddAspNetCoreInstrumentation();
+                if (!string.IsNullOrWhiteSpace(otlpEndpoint))
+                    tracing.AddOtlpExporter(options => options.Endpoint = new Uri(otlpEndpoint));
+            });
 
         builder.Services.AddLycia(builder.Configuration, lycia =>
         {
             lycia.AddSagas().FromCurrentAssembly();
-            lycia.UseTransport().RabbitMq(o => { o.ApplicationId=applicationId; o.ConnectionString=rabbit; });
+            lycia
+                .UseTransport()
+                .RabbitMq(o =>
+                {
+                    o.ApplicationId=applicationId;
+                    o.ConnectionString=rabbit;
+                });
             lycia.UsePersistence()
                 .WithPostgreSqlCanonicalSagaStore(o => o.ConnectionString=postgres)
                 .WithPostgreSqlInbox(o => o.ConnectionString=postgres)
                 .WithPostgreSqlOutbox(o => o.ConnectionString=postgres)
-                .WithRedisOperationalSagaStore(o => { o.ApplicationId=applicationId; o.ConnectionString=redis; })
+                .WithRedisOperationalSagaStore(o =>
+                {
+                    o.ApplicationId=applicationId;
+                    o.ConnectionString=redis;
+                })
                 .RequireAtomicBoundary()
                 .UseSplitStore();
         });
