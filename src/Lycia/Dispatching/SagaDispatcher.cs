@@ -197,9 +197,18 @@ public class SagaDispatcher(
                 var beginResult = await inboxStore.TryBeginAsync(message.MessageId, handlerType, cancellationToken);
                 if (beginResult != InboxBeginResult.Started)
                 {
-                    logger.LogInformation(
-                        "Inbox: message {MessageId} for handler {HandlerType} is already {InboxResult}; skipping duplicate execution.",
-                        message.MessageId, handlerType.Name, beginResult);
+                    // AlreadyCompleted/AlreadyProcessing are the ordinary duplicate-delivery paths.
+                    // AlreadyFailed means this delivery is being dropped while the previous attempt's
+                    // failure is still inside its suppression window, which is worth noticing.
+                    if (beginResult == InboxBeginResult.AlreadyFailed)
+                        logger.LogWarning(
+                            "Inbox: message {MessageId} for handler {HandlerType} previously failed and is still within its " +
+                            "claim-recovery window; skipping this delivery. It becomes retryable once that window elapses.",
+                            message.MessageId, handlerType.Name);
+                    else
+                        logger.LogInformation(
+                            "Inbox: message {MessageId} for handler {HandlerType} is already {InboxResult}; skipping duplicate execution.",
+                            message.MessageId, handlerType.Name, beginResult);
                     if (ownedSession != null) await ownedSession.RollbackAsync(cancellationToken);
                     return;
                 }

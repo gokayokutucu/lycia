@@ -47,14 +47,8 @@ public class SqlServerInboxStore(SqlServerInboxOptions options,
         var existingStatus = await SelectStatusAsync(lease.Connection, lease.Transaction, messageId, handlerTypeName,
             cancellationToken, lockForInsert: lease.Transaction != null).ConfigureAwait(false);
         if (existingStatus != InboxMessageStatus.None)
-        {
-            return existingStatus switch
-            {
-                InboxMessageStatus.Completed => InboxBeginResult.AlreadyCompleted,
-                InboxMessageStatus.Failed => InboxBeginResult.AlreadyFailed,
-                _ => InboxBeginResult.AlreadyProcessing
-            };
-        }
+            return await ResolveExistingAsync(lease, messageId, handlerTypeName, existingStatus, cancellationToken)
+                .ConfigureAwait(false);
 
         try
         {
@@ -75,14 +69,42 @@ public class SqlServerInboxStore(SqlServerInboxOptions options,
                     cancellationToken)
                 .ConfigureAwait(false);
 
-            return existingStatus switch
-            {
-                InboxMessageStatus.Processing => InboxBeginResult.AlreadyProcessing,
-                InboxMessageStatus.Completed => InboxBeginResult.AlreadyCompleted,
-                InboxMessageStatus.Failed => InboxBeginResult.AlreadyFailed,
-                _ => InboxBeginResult.Started
-            };
+            if (existingStatus == InboxMessageStatus.None) return InboxBeginResult.Started;
+            return await ResolveExistingAsync(lease, messageId, handlerTypeName, existingStatus, cancellationToken)
+                .ConfigureAwait(false);
         }
+    }
+
+    // Decides what an already-present record means for this delivery. Completed is an ordinary duplicate
+    // and stays suppressed. Anything else may be a claim stranded by a dead process, or a failed attempt
+    // whose suppression window has passed, so it is taken over instead of being skipped forever - without
+    // this, a crash between claim and completion makes every later redelivery a silent no-op and the work
+    // is lost. The takeover is a single predicated UPDATE so concurrent redeliveries cannot all win it.
+    private async Task<InboxBeginResult> ResolveExistingAsync(
+        RelationalConnectionLease<SqlConnection, SqlTransaction> lease, Guid messageId, string handlerTypeName,
+        InboxMessageStatus existingStatus, CancellationToken cancellationToken)
+    {
+        if (existingStatus == InboxMessageStatus.Completed) return InboxBeginResult.AlreadyCompleted;
+
+        using var takeOver = CreateCommand(lease.Connection, $"""
+            UPDATE {InboxTable}
+            SET Status = @processing, FailureInfoJson = NULL, UpdatedAtUtc = SYSUTCDATETIME()
+            WHERE MessageId = @messageId AND HandlerType = @handlerType
+              AND Status IN (@processing, @failed)
+              AND UpdatedAtUtc <= @staleBefore;
+            """, lease.Transaction);
+        takeOver.Parameters.AddWithValue("@messageId", messageId);
+        takeOver.Parameters.AddWithValue("@handlerType", handlerTypeName);
+        takeOver.Parameters.AddWithValue("@processing", (int)InboxMessageStatus.Processing);
+        takeOver.Parameters.AddWithValue("@failed", (int)InboxMessageStatus.Failed);
+        takeOver.Parameters.AddWithValue("@staleBefore", DateTime.UtcNow.Subtract(options.ClaimRecoveryTimeout));
+
+        if (await takeOver.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0)
+            return InboxBeginResult.Started;
+
+        return existingStatus == InboxMessageStatus.Failed
+            ? InboxBeginResult.AlreadyFailed
+            : InboxBeginResult.AlreadyProcessing;
     }
 
     /// <inheritdoc />

@@ -28,6 +28,39 @@ public class RedisInboxStore(IDatabase redisDb, InboxOptions? options) : IInboxS
     private static string Key(Guid messageId, Type handlerType) =>
         $"inbox:{handlerType.GetSimplifiedQualifiedName()}:{messageId}";
 
+    // Takes over a claim abandoned by a dead process, or retries a failed attempt whose suppression
+    // window has passed, in one atomic step. Redis runs a script single-threaded, so exactly one of
+    // several concurrent redeliveries can win the takeover — a read-then-write would let them all win
+    // and run the handler concurrently, which is precisely what the Inbox exists to prevent.
+    // Returns: 0 = took over (caller must process), 1 = already completed, 2 = still processing,
+    // 3 = failed and still inside its suppression window.
+    private static readonly string TakeOverScript = @"
+local key = KEYS[1]
+local newRecord = ARGV[1]
+local staleBeforeUnixMs = tonumber(ARGV[2])
+local completedStatus = tonumber(ARGV[3])
+local failedStatus = tonumber(ARGV[4])
+local existing = redis.call('get', key)
+if not existing then
+  redis.call('set', key, newRecord)
+  return 0
+end
+local ok, decoded = pcall(cjson.decode, existing)
+if not ok or not decoded then
+  redis.call('set', key, newRecord)
+  return 0
+end
+if decoded['Status'] == completedStatus then
+  return 1
+end
+local updatedAt = tonumber(decoded['UpdatedAtUnixMs'] or 0)
+if updatedAt > staleBeforeUnixMs then
+  if decoded['Status'] == failedStatus then return 3 end
+  return 2
+end
+redis.call('set', key, newRecord)
+return 0";
+
     /// <inheritdoc />
     public async Task<InboxBeginResult> TryBeginAsync(Guid messageId, Type handlerType, CancellationToken cancellationToken = default)
     {
@@ -38,21 +71,19 @@ public class RedisInboxStore(IDatabase redisDb, InboxOptions? options) : IInboxS
         var claimed = await redisDb.StringSetAsync(key, json, when: When.NotExists);
         if (claimed) return InboxBeginResult.Started;
 
-        // Another caller already holds (or previously held) this key. The atomic SETNX above already
-        // decided mutual exclusion; this read only needs to report which state the loser observes.
-        var existingJson = await redisDb.StringGetAsync(key);
-        if (!existingJson.HasValue)
-        {
-            // Extremely narrow race: the winner's key expired/was removed between our failed SETNX and
-            // this read. Treat as if we lost to an in-progress claim, the safest conservative answer.
-            return InboxBeginResult.AlreadyProcessing;
-        }
+        // Someone already holds (or previously held) this key. A terminal Completed record means this is
+        // an ordinary duplicate delivery; anything else may be a claim stranded by a crashed process, so
+        // fall through to the atomic takeover check rather than skipping the work forever.
+        var staleBefore = new DateTimeOffset(DateTime.UtcNow.Subtract(_options.ClaimRecoveryTimeout))
+            .ToUnixTimeMilliseconds();
+        var outcome = (long)await redisDb.ScriptEvaluateAsync(TakeOverScript, [key],
+            [json, staleBefore, (int)InboxMessageStatus.Completed, (int)InboxMessageStatus.Failed]);
 
-        var existing = JsonConvert.DeserializeObject<InboxRecord>(existingJson!);
-        return (existing?.Status ?? InboxMessageStatus.Processing) switch
+        return outcome switch
         {
-            InboxMessageStatus.Completed => InboxBeginResult.AlreadyCompleted,
-            InboxMessageStatus.Failed => InboxBeginResult.AlreadyFailed,
+            0 => InboxBeginResult.Started,
+            1 => InboxBeginResult.AlreadyCompleted,
+            3 => InboxBeginResult.AlreadyFailed,
             _ => InboxBeginResult.AlreadyProcessing
         };
     }
@@ -83,13 +114,7 @@ public class RedisInboxStore(IDatabase redisDb, InboxOptions? options) : IInboxS
         var existingJson = await redisDb.StringGetAsync(key);
         var existing = existingJson.HasValue ? JsonConvert.DeserializeObject<InboxRecord>(existingJson!) : null;
 
-        var record = new InboxRecord
-        {
-            Status = status,
-            FailureInfo = failureInfo,
-            CreatedAtUtc = existing?.CreatedAtUtc ?? DateTime.UtcNow,
-            UpdatedAtUtc = DateTime.UtcNow
-        };
+        var record = InboxRecord.WithStatus(status, failureInfo, existing?.CreatedAtUtc);
 
         await redisDb.StringSetAsync(key, JsonConvert.SerializeObject(record));
 
@@ -104,10 +129,27 @@ public class RedisInboxStore(IDatabase redisDb, InboxOptions? options) : IInboxS
         public DateTime CreatedAtUtc { get; set; }
         public DateTime UpdatedAtUtc { get; set; }
 
-        public static InboxRecord NewProcessing()
+        /// <summary>
+        /// <see cref="UpdatedAtUtc"/> as Unix milliseconds. Stored redundantly because the claim-takeover
+        /// script has to compare staleness inside Lua, where a numeric field is unambiguous and a
+        /// serialized DateTime string is not.
+        /// </summary>
+        public long UpdatedAtUnixMs { get; set; }
+
+        public static InboxRecord NewProcessing() => WithStatus(InboxMessageStatus.Processing, null, null);
+
+        public static InboxRecord WithStatus(InboxMessageStatus status, SagaStepFailureInfo? failureInfo,
+            DateTime? createdAtUtc)
         {
             var now = DateTime.UtcNow;
-            return new InboxRecord { Status = InboxMessageStatus.Processing, CreatedAtUtc = now, UpdatedAtUtc = now };
+            return new InboxRecord
+            {
+                Status = status,
+                FailureInfo = failureInfo,
+                CreatedAtUtc = createdAtUtc ?? now,
+                UpdatedAtUtc = now,
+                UpdatedAtUnixMs = new DateTimeOffset(now).ToUnixTimeMilliseconds()
+            };
         }
     }
 }

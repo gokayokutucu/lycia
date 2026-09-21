@@ -34,6 +34,14 @@ public class PostgreSqlInboxOptions
     /// <summary>Command timeout, in seconds, applied to every command issued by the store.</summary>
     public int CommandTimeoutSeconds { get; set; } = 30;
 
+    /// <summary>
+    /// How long an Inbox claim may stay in <c>Processing</c>, or a record in <c>Failed</c>, before
+    /// another delivery of the same message may claim it again. Defaults to 5 minutes. Configure it
+    /// longer than the slowest expected handler execution; see
+    /// <c>Lycia.Extensions.Configurations.InboxOptions.ClaimRecoveryTimeout</c> for the full rationale.
+    /// </summary>
+    public TimeSpan ClaimRecoveryTimeout { get; set; } = TimeSpan.FromMinutes(5);
+
     /// <summary>Controls whether/how the store manages its own schema at startup.</summary>
     public SchemaManagementMode SchemaManagement { get; set; } = SchemaManagementMode.ApplyMigrations;
 

@@ -17,4 +17,23 @@ public class InboxOptions
 
     /// <summary>Gets or sets how long completed/failed Inbox records are retained before cleanup.</summary>
     public TimeSpan? RetentionPeriod { get; set; }
+
+    /// <summary>
+    /// Gets or sets how long an Inbox claim may stay in <c>Processing</c>, or a record in <c>Failed</c>,
+    /// before another delivery of the same message is allowed to claim it again. Defaults to 5 minutes.
+    /// </summary>
+    /// <remarks>
+    /// Without this recovery window a process that dies after committing its claim but before completing
+    /// the handler leaves the record in <c>Processing</c> permanently, and every later redelivery is
+    /// skipped as a duplicate — silently dropping the work. It equally makes a <c>Failed</c> record
+    /// retryable, so a message replayed from a dead-letter queue is actually reprocessed instead of being
+    /// suppressed forever. <c>Completed</c> is never reclaimable: suppressing duplicates of successfully
+    /// committed work is the Inbox's whole purpose.
+    /// <para>
+    /// Configure this longer than the slowest expected handler execution (including middleware retries).
+    /// Setting it shorter than a legitimately long-running handler lets a concurrent redelivery take the
+    /// claim over while the first execution is still in flight, which would run the handler twice.
+    /// </para>
+    /// </remarks>
+    public TimeSpan ClaimRecoveryTimeout { get; set; } = TimeSpan.FromMinutes(5);
 }

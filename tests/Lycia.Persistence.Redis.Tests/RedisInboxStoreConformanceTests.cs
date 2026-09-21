@@ -10,11 +10,12 @@ namespace Lycia.Persistence.Redis.Tests;
 [Collection(RedisSagaStoreCollection.Name)]
 public class RedisInboxStoreConformanceTests(RedisSagaStoreFixture fixture) : InboxStoreConformanceTests
 {
-    protected override IInboxStore CreateStore()
+    protected override IInboxStore CreateStore(TimeSpan claimRecoveryTimeout)
     {
         var options = new InboxOptions
         {
-            RetentionPeriod = TimeSpan.FromMinutes(5)
+            RetentionPeriod = TimeSpan.FromMinutes(5),
+            ClaimRecoveryTimeout = claimRecoveryTimeout
         };
 
         return new RedisInboxStore(fixture.Database, options);
