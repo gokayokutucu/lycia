@@ -88,7 +88,10 @@ public sealed class ActivityTracingMiddleware(
         try
         {
             await next().ConfigureAwait(false);
-            current?.SetTag("lycia.saga.step.status", "Completed");
+            // A handler that catches its own exception and records a failed step returns normally; the
+            // compensation coordinator has already tagged that outcome, so don't overwrite it.
+            if (current?.GetTagItem("lycia.saga.step.status") == null)
+                current?.SetTag("lycia.saga.step.status", "Completed");
         }
         catch (Exception ex)
         {
