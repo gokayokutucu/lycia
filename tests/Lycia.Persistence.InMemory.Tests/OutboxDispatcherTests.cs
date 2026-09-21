@@ -3,6 +3,7 @@
 // https://www.apache.org/licenses/LICENSE-2.0
 using Lycia.Outbox;
 using Lycia.Extensions.Serialization;
+using Lycia.Observability;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Abstractions.Outbox;
@@ -59,7 +60,7 @@ public class OutboxDispatcherTests
         var store = new InMemoryOutboxStore();
         var bus = new RecordingEventBus();
         var serializer = new NewtonsoftJsonMessageSerializer();
-        var dispatcher = new OutboxDispatcher(store, bus, serializer, NullLogger<OutboxDispatcher>.Instance);
+        var dispatcher = new OutboxDispatcher(store, bus, serializer, new LyciaActivitySourceHolder(), NullLogger<OutboxDispatcher>.Instance);
 
         var evt = new DispatcherProbeEvent { Payload = "hello" };
         await new OutboxOutgoingMessagePipeline(store, serializer).Publish(evt, null, null);
@@ -80,7 +81,7 @@ public class OutboxDispatcherTests
         var store = new InMemoryOutboxStore();
         var bus = new RecordingEventBus();
         var serializer = new NewtonsoftJsonMessageSerializer();
-        var dispatcher = new OutboxDispatcher(store, bus, serializer, NullLogger<OutboxDispatcher>.Instance);
+        var dispatcher = new OutboxDispatcher(store, bus, serializer, new LyciaActivitySourceHolder(), NullLogger<OutboxDispatcher>.Instance);
 
         var messageId = Guid.NewGuid();
         await store.AddAsync(new Saga.Abstractions.Outbox.OutboxMessage(messageId, "NoSuch.Type, NoSuchAssembly", "{}", "TestApp", null));
@@ -98,7 +99,7 @@ public class OutboxDispatcherTests
         var store = new InMemoryOutboxStore();
         var bus = new ThrowingEventBus();
         var serializer = new NewtonsoftJsonMessageSerializer();
-        var dispatcher = new OutboxDispatcher(store, bus, serializer, NullLogger<OutboxDispatcher>.Instance);
+        var dispatcher = new OutboxDispatcher(store, bus, serializer, new LyciaActivitySourceHolder(), NullLogger<OutboxDispatcher>.Instance);
 
         var evt = new DispatcherProbeEvent { Payload = "hello" };
         await new OutboxOutgoingMessagePipeline(store, serializer).Publish(evt, null, null);
@@ -117,7 +118,7 @@ public class OutboxDispatcherTests
         var bus = new RecordingEventBus();
         var serializer = new NewtonsoftJsonMessageSerializer();
         var pipeline = new OutboxOutgoingMessagePipeline(store, serializer);
-        var dispatcher = new OutboxDispatcher(store, bus, serializer, NullLogger<OutboxDispatcher>.Instance);
+        var dispatcher = new OutboxDispatcher(store, bus, serializer, new LyciaActivitySourceHolder(), NullLogger<OutboxDispatcher>.Instance);
         var correlationId = Guid.NewGuid();
         var causationId = Guid.NewGuid();
         var parentMessageId = Guid.NewGuid();
@@ -169,7 +170,7 @@ public class OutboxDispatcherTests
         var store = new InMemoryOutboxStore();
         var bus = new RecordingEventBus();
         var serializer = new NewtonsoftJsonMessageSerializer();
-        var dispatcher = new OutboxDispatcher(store, bus, serializer, NullLogger<OutboxDispatcher>.Instance);
+        var dispatcher = new OutboxDispatcher(store, bus, serializer, new LyciaActivitySourceHolder(), NullLogger<OutboxDispatcher>.Instance);
         await store.AddAsync(new OutboxMessage(Guid.NewGuid(), "NoSuch.Type, NoSuchAssembly", "{}", "TestApp", null));
         var healthy = new DispatcherProbeEvent { Payload = "continue" };
         await new OutboxOutgoingMessagePipeline(store, serializer).Publish(healthy, null, null);
@@ -189,17 +190,26 @@ public class OutboxDispatcherTests
         var serializer = new NewtonsoftJsonMessageSerializer();
         var pipeline = new OutboxOutgoingMessagePipeline(store, serializer);
         var dispatcher = new OutboxDispatcher(store, new ThrowingEventBus(), serializer,
-            NullLogger<OutboxDispatcher>.Instance);
+            new LyciaActivitySourceHolder(), NullLogger<OutboxDispatcher>.Instance);
         var evt = new DispatcherProbeEvent { Payload = "stable" };
         await pipeline.Publish(evt, null, null);
 
-        for (var attempt = 0; attempt < 3; attempt++)
-            Assert.Equal(1, (await dispatcher.DispatchPendingBatchAsync(maxAttempts: 3)).ConfirmationUnknown);
-        Assert.Equal(0, (await dispatcher.DispatchPendingBatchAsync(maxAttempts: 3)).Claimed);
+        // recoveryTimeout: Zero makes each unconfirmed attempt immediately re-claimable, which is what
+        // lets this test drive the whole attempt budget without waiting out a real recovery window.
+        // The first two attempts stay retryable; the third is the last permitted one, so it terminalizes.
+        for (var attempt = 0; attempt < 2; attempt++)
+            Assert.Equal(1, (await dispatcher.DispatchPendingBatchAsync(50, default, 3, TimeSpan.Zero))
+                .ConfirmationUnknown);
+
+        Assert.Equal(1, (await dispatcher.DispatchPendingBatchAsync(50, default, 3, TimeSpan.Zero)).Abandoned);
+        Assert.Equal(0, (await dispatcher.DispatchPendingBatchAsync(50, default, 3, TimeSpan.Zero)).Claimed);
 
         var durable = await store.GetByMessageIdAsync(evt.MessageId);
         Assert.Equal(evt.MessageId, durable!.MessageId);
         Assert.Equal(3, durable.RetryCount);
-        Assert.Equal(OutboxMessageStatus.ConfirmationUnknown, durable.Status);
+        // Exhausted attempts must not leave the row in the non-terminal ConfirmationUnknown status, where
+        // no claim query would ever return it again and nothing records why it stopped.
+        Assert.Equal(OutboxMessageStatus.Abandoned, durable.Status);
+        Assert.NotNull(durable.FailureInfo);
     }
 }

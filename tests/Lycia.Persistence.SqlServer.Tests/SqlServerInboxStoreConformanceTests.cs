@@ -10,12 +10,16 @@ namespace Lycia.Persistence.SqlServer.Tests;
 [Collection("SqlServerContainer")]
 public class SqlServerInboxStoreConformanceTests(SqlServerContainerFixture fixture) : InboxStoreConformanceTests
 {
-    protected override IInboxStore CreateStore()
+    protected override IInboxStore CreateStore(TimeSpan claimRecoveryTimeout)
     {
         var connectionString = fixture.ConnectionString;
         SqlServerInboxOutboxSchemaMigrator.RunAsync(connectionString, "dbo", SchemaManagementMode.ApplyMigrations)
             .GetAwaiter().GetResult();
 
-        return new SqlServerInboxStore(new SqlServerInboxOptions { ConnectionString = connectionString });
+        return new SqlServerInboxStore(new SqlServerInboxOptions
+        {
+            ConnectionString = connectionString,
+            ClaimRecoveryTimeout = claimRecoveryTimeout
+        });
     }
 }

@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 
+using System.Diagnostics;
 using System.Text;
 using Lycia.Common.Enums;
 using Lycia.Common.SagaSteps;
@@ -14,6 +15,7 @@ using Lycia.Saga.Abstractions.Serializers;
 using Lycia.Saga.Helpers;
 using Lycia.Saga.Messaging.Handlers;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
 namespace Lycia.Compensating;
@@ -59,6 +61,7 @@ public class SagaCompensationCoordinator(
 
         await sagaStore.LogStepAsync(sagaId, message.MessageId, message.ParentMessageId, failedStepType,
             StepStatus.Failed, handlerType, message, failInfo);
+        ReportStepFailure(sagaId, failedStepType, handlerType, message, failInfo);
 
         stepKeyValuePair = await sagaStore.GetSagaHandlerStepAsync(sagaId, message.MessageId);
         if (!stepKeyValuePair.HasValue) return;
@@ -80,6 +83,40 @@ public class SagaCompensationCoordinator(
         await InvokeCompensationHandlerAsync(sagaId, handler, stepType, sagaStore, messageObject, eventBus, cancellationToken);
     }
 
+
+    /// <summary>
+    /// Makes a failed step visible in logs and traces. The saga handler base classes catch the business
+    /// exception and record it as a failed step instead of letting it propagate, so the dispatch itself
+    /// returns normally: without this, the only trace of the failure would be the durable step record,
+    /// and the handler span would report the step as completed.
+    /// </summary>
+    private void ReportStepFailure(Guid sagaId, Type failedStepType, Type handlerType, IMessage message,
+        SagaStepFailureInfo? failInfo)
+    {
+        var reason = failInfo?.Reason ?? "Saga step failed";
+        var exceptionType = failInfo?.ExceptionType;
+        var exceptionMessage = FirstLine(failInfo?.ExceptionDetail);
+
+        serviceProvider.GetService<ILogger<SagaCompensationCoordinator>>()?.LogWarning(
+            "Saga step {StepType} failed in handler {Handler} [SagaId={SagaId}, MessageId={MessageId}]: {Reason} " +
+            "{ExceptionType} {ExceptionMessage} The failure is recorded and compensation is starting.",
+            failedStepType.Name, handlerType.Name, sagaId, message.MessageId, reason, exceptionType, exceptionMessage);
+
+        var activity = Activity.Current;
+        if (activity == null) return;
+        activity.SetStatus(ActivityStatusCode.Error, exceptionMessage ?? reason);
+        activity.SetTag("lycia.saga.step.status", nameof(StepStatus.Failed));
+        activity.SetTag("lycia.saga.step.failure_reason", reason);
+        if (exceptionType != null) activity.SetTag("exception.type", exceptionType);
+        if (exceptionMessage != null) activity.SetTag("exception.message", exceptionMessage);
+    }
+
+    private static string? FirstLine(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var newLine = text!.IndexOfAny(['\r', '\n']);
+        return newLine < 0 ? text : text.Substring(0, newLine);
+    }
 
     /// <summary>
     /// Compensates the parent saga step of the specified step type.

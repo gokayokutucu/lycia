@@ -5,6 +5,7 @@ using Lycia.Extensions;
 using Lycia.Outbox;
 using Lycia.Saga.Abstractions.Inbox;
 using Lycia.Saga.Abstractions.Outbox;
+using Lycia.Saga.Abstractions.Persistence;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -36,7 +37,10 @@ public static class SqlServerInboxOutboxDslExtensions
         persistence.SelectInboxProvider("SqlServer");
 
         persistence.Services.RemoveAll(typeof(IInboxStore));
-        persistence.Services.AddScoped<IInboxStore>(_ => new SqlServerInboxStore(options));
+        persistence.Services.AddScoped<IInboxStore>(sp => new SqlServerInboxStore(options,
+            sp.GetService<ILyciaPersistenceSessionAccessor>()));
+        persistence.RegisterProviderMetadata(PersistenceCapabilityKind.Inbox, "SqlServer",
+            SqlServerConnectionIdentity.Create(options.ConnectionString), true);
 
         return persistence;
     }
@@ -60,7 +64,10 @@ public static class SqlServerInboxOutboxDslExtensions
         persistence.SelectOutboxProvider("SqlServer");
 
         persistence.Services.RemoveAll(typeof(IOutboxStore));
-        persistence.Services.AddScoped<IOutboxStore>(_ => new SqlServerOutboxStore(options));
+        persistence.Services.AddScoped<IOutboxStore>(sp => new SqlServerOutboxStore(options,
+            sp.GetService<ILyciaPersistenceSessionAccessor>()));
+        persistence.RegisterProviderMetadata(PersistenceCapabilityKind.Outbox, "SqlServer",
+            SqlServerConnectionIdentity.Create(options.ConnectionString), true);
         return persistence.ActivateOutboxPipeline();
     }
 }

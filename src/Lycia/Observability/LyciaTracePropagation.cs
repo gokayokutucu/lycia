@@ -46,12 +46,36 @@ public static class LyciaTracePropagation
             headers,
             static (carrier, key) =>
             {
-                if (!carrier.TryGetValue(key, out var raw) || raw is not byte[] bytes)
-                    return [];
+                if (!carrier.TryGetValue(key, out var raw)) return [];
 
-                return [Encoding.UTF8.GetString(bytes)];
+                // Live RabbitMQ delivery gives the byte[] written by Inject directly. A header that
+                // passed through the durable Outbox envelope (JSON round-trip via Newtonsoft) loses
+                // that runtime type: byte[] serializes as a Base64 JSON string, and generic object?
+                // deserialization has no schema to recover it as byte[] again, so it comes back as a
+                // plain string instead. Handle both so trace context survives Outbox-mediated hops too.
+                return raw switch
+                {
+                    byte[] bytes => [Encoding.UTF8.GetString(bytes)],
+                    string base64 when TryDecodeBase64Utf8(base64, out var decoded) => [decoded],
+                    string plain => [plain],
+                    _ => []
+                };
             });
 
         return context.ActivityContext;
+    }
+
+    private static bool TryDecodeBase64Utf8(string base64, out string decoded)
+    {
+        try
+        {
+            decoded = Encoding.UTF8.GetString(Convert.FromBase64String(base64));
+            return true;
+        }
+        catch (FormatException)
+        {
+            decoded = string.Empty;
+            return false;
+        }
     }
 }

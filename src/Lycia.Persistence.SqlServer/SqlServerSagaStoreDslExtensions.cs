@@ -6,6 +6,8 @@ using Lycia.Persistence.Relational.Internal.Sessions;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Persistence;
 using Lycia.Saga.Abstractions.Outbox;
+using Lycia.Saga.Abstractions.Persistence.Journal;
+using Lycia.Saga.Abstractions.Persistence.Reconciliation;
 using Lycia.Saga.Abstractions.Scheduling;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,6 +22,25 @@ namespace Lycia.Persistence.SqlServer;
 /// </summary>
 public static class SqlServerSagaStoreDslExtensions
 {
+    /// <summary>Selects SQL Server as the relational canonical side of an explicit Split Store.</summary>
+    public static LyciaPersistenceBuilder WithSqlServerCanonicalSagaStore(this LyciaPersistenceBuilder persistence,
+        Action<SqlServerSagaStoreOptions>? configure = null)
+    {
+        WithSqlServerSagaStore(persistence, configure);
+        var options = persistence.Services.Last(x => x.ServiceType == typeof(SqlServerSagaStoreOptions)).ImplementationInstance as SqlServerSagaStoreOptions
+            ?? throw new InvalidOperationException("SQL Server canonical options were not registered.");
+        SqlServerReconciliationSchemaMigrator.RunAsync(options).GetAwaiter().GetResult();
+        persistence.Services.RemoveAll(typeof(IReconciliationStore));
+        persistence.Services.AddScoped<IReconciliationStore>(sp => new SqlServerReconciliationStore(options,sp.GetService<ILyciaPersistenceSessionAccessor>()));
+        var identity=SqlServerConnectionIdentity.Create(options.ConnectionString);
+        persistence.SelectSplitStoreCanonicalProvider("SqlServer",identity);
+        persistence.RegisterProviderMetadata(PersistenceCapabilityKind.Reconciliation,"SqlServer",identity,true);
+        SqlServerJournalSchemaMigrator.RunAsync(options).GetAwaiter().GetResult();
+        persistence.Services.RemoveAll(typeof(ISagaJournalStore));
+        persistence.Services.AddScoped<ISagaJournalStore>(sp => new SqlServerSagaJournalStore(options,sp.GetService<ILyciaPersistenceSessionAccessor>()));
+        persistence.RegisterProviderMetadata(PersistenceCapabilityKind.Journal,"SqlServer",identity,true);
+        return persistence;
+    }
     /// <summary>
     /// Selects SQL Server as the SagaStore provider, applies its schema according to
     /// <see cref="SqlServerSagaStoreOptions.SchemaManagement"/>, and registers <see cref="SqlServerSagaStore"/>.
@@ -39,6 +60,8 @@ public static class SqlServerSagaStoreDslExtensions
             throw new InvalidOperationException("SqlServerSagaStoreOptions.ConnectionString is required.");
 
         SqlServerSchemaMigrator.RunAsync(options).GetAwaiter().GetResult();
+        persistence.Services.RemoveAll(typeof(SqlServerSagaStoreOptions));
+        persistence.Services.AddSingleton(options);
 
         persistence.Services.RemoveAll(typeof(ISagaStore));
         persistence.Services.AddScoped<ISagaStore>(sp => new SqlServerSagaStore(
@@ -47,13 +70,14 @@ public static class SqlServerSagaStoreDslExtensions
             sp.GetRequiredService<ISagaIdGenerator>(),
             sp.GetRequiredService<ISagaCompensationCoordinator>(),
             sp.GetService<IMessageScheduler>(),
-            sp.GetService<IOutgoingMessagePipeline>()));
+            sp.GetService<IOutgoingMessagePipeline>(),
+            sp.GetService<ILyciaPersistenceSessionAccessor>()));
 
-        // Prepares the relational transaction boundary for a future atomic Saga+Inbox+Outbox commit.
-        // Not yet wired into SagaStore/Inbox/Outbox operations - see the Strong Consistency roadmap item.
         persistence.Services.RemoveAll(typeof(ILyciaPersistenceSessionFactory));
         persistence.Services.AddScoped<ILyciaPersistenceSessionFactory>(_ =>
             new RelationalPersistenceSessionFactory(() => new SqlConnection(options.ConnectionString)));
+        persistence.RegisterProviderMetadata(PersistenceCapabilityKind.SagaStore, "SqlServer",
+            SqlServerConnectionIdentity.Create(options.ConnectionString), true);
 
         return persistence;
     }

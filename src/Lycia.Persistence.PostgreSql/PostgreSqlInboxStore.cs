@@ -4,27 +4,30 @@
 using Lycia.Common.Helpers;
 using Lycia.Common.SagaSteps;
 using Lycia.Extensions;
+using Lycia.Persistence.Relational.Internal.Sessions;
 using Lycia.Saga.Abstractions.Inbox;
+using Lycia.Saga.Abstractions.Persistence;
 using Npgsql;
 using NpgsqlTypes;
 
 namespace Lycia.Persistence.PostgreSql;
 
 /// <summary>PostgreSQL backed implementation of <see cref="IInboxStore"/>.</summary>
-public class PostgreSqlInboxStore(PostgreSqlInboxOptions options) : IInboxStore
+public class PostgreSqlInboxStore(PostgreSqlInboxOptions options,
+    ILyciaPersistenceSessionAccessor? sessionAccessor = null) : IInboxStore
 {
-    private const string UniqueViolationSqlState = "23505";
-    private const string InboxTable = PostgreSqlInboxOptions.InboxTable;
+    private string InboxTable => options.QualifiedInboxTable;
 
     private readonly string _connectionString = options.BuildEffectiveConnectionString();
 
     private NpgsqlConnection CreateConnection() => new(_connectionString);
 
-    private NpgsqlCommand CreateCommand(NpgsqlConnection connection, string sql)
+    private NpgsqlCommand CreateCommand(NpgsqlConnection connection, string sql, NpgsqlTransaction? transaction = null)
     {
         var command = connection.CreateCommand();
         command.CommandText = sql;
         command.CommandTimeout = options.CommandTimeoutSeconds;
+        if (transaction != null) command.Transaction = transaction;
         return command;
     }
 
@@ -41,32 +44,48 @@ public class PostgreSqlInboxStore(PostgreSqlInboxOptions options) : IInboxStore
     {
         var handlerTypeName = handlerType.GetSimplifiedQualifiedName();
 
-        using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var lease = await RelationalConnectionLease<NpgsqlConnection, NpgsqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
 
-        try
-        {
-            using var insert = CreateCommand(connection, $"""
+        using var insert = CreateCommand(lease.Connection, $"""
                 INSERT INTO {InboxTable} (message_id, handler_type, status, created_at_utc, updated_at_utc)
-                VALUES (@messageId, @handlerType, @status, now(), now());
-                """);
-            insert.Parameters.AddWithValue("messageId", messageId);
-            insert.Parameters.AddWithValue("handlerType", handlerTypeName);
-            insert.Parameters.AddWithValue("status", (int)InboxMessageStatus.Processing);
-            await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                VALUES (@messageId, @handlerType, @status, now(), now())
+                ON CONFLICT (message_id, handler_type) DO NOTHING;
+                """, lease.Transaction);
+        insert.Parameters.AddWithValue("messageId", messageId);
+        insert.Parameters.AddWithValue("handlerType", handlerTypeName);
+        insert.Parameters.AddWithValue("status", (int)InboxMessageStatus.Processing);
+        var inserted = await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        if (inserted > 0) return InboxBeginResult.Started;
 
+        // A record already exists. Take it over when it is a claim stranded by a dead process, or a failed
+        // attempt whose suppression window has passed — otherwise a crash between claim and completion
+        // would make every later redelivery skip the work permanently. One predicated UPDATE keeps the
+        // takeover atomic, so concurrent redeliveries cannot all decide to process the same message.
+        // Completed is deliberately excluded: that is the duplicate suppression the Inbox exists for.
+        using var takeOver = CreateCommand(lease.Connection, $"""
+                UPDATE {InboxTable}
+                SET status = @processing, failure_info_json = NULL, updated_at_utc = now()
+                WHERE message_id = @messageId AND handler_type = @handlerType
+                  AND (status = @processing OR status = @failed)
+                  AND updated_at_utc <= @staleBefore;
+                """, lease.Transaction);
+        takeOver.Parameters.AddWithValue("messageId", messageId);
+        takeOver.Parameters.AddWithValue("handlerType", handlerTypeName);
+        takeOver.Parameters.AddWithValue("processing", (int)InboxMessageStatus.Processing);
+        takeOver.Parameters.AddWithValue("failed", (int)InboxMessageStatus.Failed);
+        takeOver.Parameters.AddWithValue("staleBefore", DateTime.UtcNow.Subtract(options.ClaimRecoveryTimeout));
+        if (await takeOver.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0)
             return InboxBeginResult.Started;
-        }
-        catch (PostgresException ex) when (ex.SqlState == UniqueViolationSqlState)
+
+        var status = await SelectStatusAsync(lease.Connection, lease.Transaction, messageId, handlerTypeName,
+            cancellationToken).ConfigureAwait(false);
+        return status switch
         {
-            var status = await SelectStatusAsync(connection, messageId, handlerTypeName, cancellationToken).ConfigureAwait(false);
-            return status switch
-            {
-                InboxMessageStatus.Completed => InboxBeginResult.AlreadyCompleted,
-                InboxMessageStatus.Failed => InboxBeginResult.AlreadyFailed,
-                _ => InboxBeginResult.AlreadyProcessing
-            };
-        }
+            InboxMessageStatus.Completed => InboxBeginResult.AlreadyCompleted,
+            InboxMessageStatus.Failed => InboxBeginResult.AlreadyFailed,
+            _ => InboxBeginResult.AlreadyProcessing
+        };
     }
 
     /// <inheritdoc />
@@ -82,14 +101,13 @@ public class PostgreSqlInboxStore(PostgreSqlInboxOptions options) : IInboxStore
     {
         var handlerTypeName = handlerType.GetSimplifiedQualifiedName();
 
-        using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-
-        using var command = CreateCommand(connection, $"""
+        await using var lease = await RelationalConnectionLease<NpgsqlConnection, NpgsqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
+        using var command = CreateCommand(lease.Connection, $"""
             UPDATE {InboxTable}
             SET status = @status, failure_info_json = @failureInfo, updated_at_utc = now()
             WHERE message_id = @messageId AND handler_type = @handlerType;
-            """);
+            """, lease.Transaction);
         command.Parameters.AddWithValue("messageId", messageId);
         command.Parameters.AddWithValue("handlerType", handlerTypeName);
         command.Parameters.AddWithValue("status", (int)status);
@@ -100,18 +118,20 @@ public class PostgreSqlInboxStore(PostgreSqlInboxOptions options) : IInboxStore
     /// <inheritdoc />
     public async Task<InboxMessageStatus> GetStatusAsync(Guid messageId, Type handlerType, CancellationToken cancellationToken = default)
     {
-        using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        return await SelectStatusAsync(connection, messageId, handlerType.GetSimplifiedQualifiedName(), cancellationToken)
+        await using var lease = await RelationalConnectionLease<NpgsqlConnection, NpgsqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
+        return await SelectStatusAsync(lease.Connection, lease.Transaction, messageId,
+                handlerType.GetSimplifiedQualifiedName(), cancellationToken)
             .ConfigureAwait(false);
     }
 
-    private async Task<InboxMessageStatus> SelectStatusAsync(NpgsqlConnection connection, Guid messageId,
+    private async Task<InboxMessageStatus> SelectStatusAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction,
+        Guid messageId,
         string handlerTypeName, CancellationToken cancellationToken)
     {
         using var command = CreateCommand(connection, $"""
             SELECT status FROM {InboxTable} WHERE message_id = @messageId AND handler_type = @handlerType;
-            """);
+            """, transaction);
         command.Parameters.AddWithValue("messageId", messageId);
         command.Parameters.AddWithValue("handlerType", handlerTypeName);
 

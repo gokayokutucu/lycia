@@ -23,6 +23,15 @@ public interface IInboxStore
     /// Attempts to claim (MessageId, HandlerType) for processing. Idempotent: repeated calls for the
     /// same pair return the pair's current terminal/in-progress state instead of claiming again.
     /// </summary>
+    /// <remarks>
+    /// A <c>Completed</c> record is never reclaimable — suppressing duplicates of successfully committed
+    /// work is the Inbox's purpose. A record stuck in <c>Processing</c> (a process that died after
+    /// committing its claim but before finishing the handler) or sitting in <c>Failed</c> becomes
+    /// claimable again once it is older than the provider's configured claim-recovery window, and the
+    /// takeover must be atomic so concurrent redeliveries cannot all decide to process the same message.
+    /// Without that recovery the first crash or handler failure would make every later redelivery of
+    /// that message a permanent no-op, silently dropping the work.
+    /// </remarks>
     Task<InboxBeginResult> TryBeginAsync(Guid messageId, Type handlerType, CancellationToken cancellationToken = default);
 
     /// <summary>Marks a previously-started (MessageId, HandlerType) pair as successfully processed.</summary>

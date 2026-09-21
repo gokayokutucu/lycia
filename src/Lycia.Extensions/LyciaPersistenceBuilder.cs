@@ -2,8 +2,14 @@
 // Licensed under the Apache License, Version 2.0
 // https://www.apache.org/licenses/LICENSE-2.0
 using Lycia.Outbox;
+using Lycia.Extensions.Journal;
+using Lycia.Extensions.SplitStore;
+using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Inbox;
 using Lycia.Saga.Abstractions.Outbox;
+using Lycia.Saga.Abstractions.Persistence;
+using Lycia.Saga.Abstractions.Persistence.Journal;
+using Lycia.Saga.Abstractions.Persistence.Reconciliation;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -32,6 +38,7 @@ public sealed class LyciaPersistenceBuilder
     {
         Services = services;
         Configuration = configuration;
+        EnsureTopologyServices();
     }
 
     /// <summary>
@@ -60,6 +67,7 @@ public sealed class LyciaPersistenceBuilder
 
         Services.RemoveAll(typeof(LyciaSagaStoreProviderMarker));
         Services.AddSingleton(new LyciaSagaStoreProviderMarker(providerName));
+        RegisterProviderMetadata(PersistenceCapabilityKind.SagaStore, providerName, null, false);
     }
 
     /// <summary>
@@ -67,16 +75,19 @@ public sealed class LyciaPersistenceBuilder
     /// Inbox provider was already selected, so at most one Inbox implementation is ever active.
     /// </summary>
     public void SelectInboxProvider(string providerName) =>
-        SelectCapabilityProvider<LyciaInboxProviderMarker>("Inbox", providerName, n => new LyciaInboxProviderMarker(n));
+        SelectCapabilityProvider<LyciaInboxProviderMarker>("Inbox", providerName, n => new LyciaInboxProviderMarker(n),
+            PersistenceCapabilityKind.Inbox);
 
     /// <summary>
     /// Marks <paramref name="providerName"/> as the selected Outbox provider. Throws if a different
     /// Outbox provider was already selected, so at most one Outbox implementation is ever active.
     /// </summary>
     public void SelectOutboxProvider(string providerName) =>
-        SelectCapabilityProvider<LyciaOutboxProviderMarker>("Outbox", providerName, n => new LyciaOutboxProviderMarker(n));
+        SelectCapabilityProvider<LyciaOutboxProviderMarker>("Outbox", providerName, n => new LyciaOutboxProviderMarker(n),
+            PersistenceCapabilityKind.Outbox);
 
-    private void SelectCapabilityProvider<TMarker>(string capabilityName, string providerName, Func<string, TMarker> createMarker)
+    private void SelectCapabilityProvider<TMarker>(string capabilityName, string providerName,
+        Func<string, TMarker> createMarker, PersistenceCapabilityKind capability)
         where TMarker : class, ICapabilityProviderMarker
     {
         if (string.IsNullOrWhiteSpace(providerName))
@@ -96,6 +107,125 @@ public sealed class LyciaPersistenceBuilder
 
         Services.RemoveAll(typeof(TMarker));
         Services.AddSingleton(createMarker(providerName));
+        RegisterProviderMetadata(capability, providerName, null, false);
+    }
+
+    /// <summary>
+    /// Contributes safe provider metadata used to resolve the service-local persistence boundary.
+    /// Provider packages should call this after selecting their store implementation.
+    /// </summary>
+    public void RegisterProviderMetadata(PersistenceCapabilityKind capability, string providerName,
+        string? connectionIdentity, bool supportsRelationalLocalTransaction)
+    {
+        if (string.IsNullOrWhiteSpace(providerName))
+            throw new ArgumentException("Persistence provider name must not be empty.", nameof(providerName));
+
+        GetTopologyConfiguration().SetStore(new PersistenceStoreDescriptor(
+            capability, providerName, connectionIdentity, supportsRelationalLocalTransaction));
+    }
+
+    /// <summary>Marks a relational SagaStore as canonical for an explicitly selected Split Store.</summary>
+    public void SelectSplitStoreCanonicalProvider(string providerName, string connectionIdentity)
+    {
+        GetTopologyConfiguration().SetSplitStoreCanonical(new PersistenceStoreDescriptor(
+            PersistenceCapabilityKind.SagaStore, providerName, connectionIdentity, true));
+    }
+
+    /// <summary>Marks Redis as the rebuildable operational Saga projection provider.</summary>
+    public void SelectSplitStoreOperationalProvider(string providerName) =>
+        GetTopologyConfiguration().SetSplitStoreOperational(providerName);
+
+    /// <summary>
+    /// Enables explicit Split Store ownership: relational SagaStore state is canonical and Redis is an
+    /// asynchronously reconciled, rebuildable operational projection. Independent canonical transactions
+    /// are rejected because the reconciliation intent must commit with Inbox, SagaStore, and Outbox.
+    /// </summary>
+    public LyciaPersistenceBuilder UseSplitStore()
+    {
+        var configuration = GetTopologyConfiguration();
+        configuration.EnableSplitStore();
+
+        if (!Services.Any(x => x.ServiceType == typeof(IReconciliationStore)))
+            throw new InvalidOperationException("Split Store requires a canonical relational reconciliation store.");
+        if (!Services.Any(x => x.ServiceType == typeof(IOperationalSagaProjectionStore)))
+            throw new InvalidOperationException("Split Store requires a Redis operational saga projection store.");
+        if (!Services.Any(x => x.ServiceType == typeof(ISagaJournalStore)))
+            throw new InvalidOperationException(
+                "Split Store requires a canonical relational Saga journal store. Rebuildability is not optional " +
+                "once Split Store is enabled — register a journal store via the canonical provider's " +
+                "With...CanonicalSagaStore(...) extension before calling UseSplitStore().");
+
+        var canonicalDescriptor = Services.LastOrDefault(x => x.ServiceType == typeof(ISagaStore))
+            ?? throw new InvalidOperationException("Split Store requires a canonical relational SagaStore.");
+        Services.Remove(canonicalDescriptor);
+        Services.AddScoped<ISagaStore>(sp => new SplitStoreSagaStore(
+            CreateService(sp, canonicalDescriptor),
+            sp.GetRequiredService<IReconciliationStore>(),
+            sp.GetRequiredService<ISagaJournalStore>(),
+            sp.GetService<ISagaJournalContextAccessor>()));
+        Services.TryAddScoped<ISagaProjectionReconciler, SagaProjectionReconciler>();
+        Services.TryAddEnumerable(ServiceDescriptor.Singleton<Microsoft.Extensions.Hosting.IHostedService,
+            ReconciliationWorker>());
+
+        Services.TryAddSingleton<ISagaJournalReducer, SagaJournalReducer>();
+        Services.TryAddSingleton(sp => new JournalEntryUpcastChain(sp.GetServices<IJournalEntryUpcaster>()));
+        Services.TryAddScoped<ISagaRebuildService, SagaRebuildService>();
+        return this;
+    }
+
+    /// <summary>Configures bounded retries, polling, and stale-claim recovery for Split Store reconciliation.</summary>
+    public LyciaPersistenceBuilder WithReconciliationWorker(Action<ReconciliationWorkerOptions> configure)
+    {
+        if (configure == null) throw new ArgumentNullException(nameof(configure));
+        Services.Configure(configure);
+        return this;
+    }
+
+    private static ISagaStore CreateService(IServiceProvider serviceProvider, ServiceDescriptor descriptor)
+    {
+        if (descriptor.ImplementationInstance is ISagaStore instance) return instance;
+        if (descriptor.ImplementationFactory != null)
+            return (ISagaStore)descriptor.ImplementationFactory(serviceProvider);
+        if (descriptor.ImplementationType != null)
+            return (ISagaStore)ActivatorUtilities.GetServiceOrCreateInstance(serviceProvider, descriptor.ImplementationType);
+        throw new InvalidOperationException("The canonical SagaStore registration cannot be activated.");
+    }
+
+    /// <summary>Requires all enabled Lycia persistence stores to share one service-local atomic boundary.</summary>
+    public LyciaPersistenceBuilder RequireAtomicBoundary()
+    {
+        GetTopologyConfiguration().SetPolicy(PersistenceBoundaryPolicy.RequireAtomic);
+        return this;
+    }
+
+    /// <summary>
+    /// Forces independent store operations even when the enabled relational stores could share one transaction.
+    /// This intentionally gives up the atomic Lycia persistence boundary.
+    /// </summary>
+    public LyciaPersistenceBuilder UseIndependentTransactions()
+    {
+        GetTopologyConfiguration().SetPolicy(PersistenceBoundaryPolicy.ForceIndependent);
+        return this;
+    }
+
+    private void EnsureTopologyServices()
+    {
+        _ = GetTopologyConfiguration();
+        Services.TryAddScoped<ILyciaPersistenceSessionAccessor, LyciaPersistenceSessionAccessor>();
+        Services.TryAddSingleton<IPersistenceTopology, PersistenceTopologyProvider>();
+        Services.TryAddEnumerable(ServiceDescriptor.Singleton<Microsoft.Extensions.Hosting.IHostedService,
+            PersistenceTopologyValidationHostedService>());
+    }
+
+    private PersistenceTopologyConfiguration GetTopologyConfiguration()
+    {
+        var existing = Services.LastOrDefault(x => x.ServiceType == typeof(PersistenceTopologyConfiguration))
+            ?.ImplementationInstance as PersistenceTopologyConfiguration;
+        if (existing != null) return existing;
+
+        var configuration = new PersistenceTopologyConfiguration();
+        Services.AddSingleton(configuration);
+        return configuration;
     }
 
     /// <summary>

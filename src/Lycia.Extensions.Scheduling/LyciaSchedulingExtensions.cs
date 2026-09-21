@@ -94,6 +94,9 @@ public sealed class SchedulingOptionsValidator : IValidateOptions<SchedulingOpti
             failures.Add("Worker.LeaseRenewInterval must be shorter than Worker.LeaseDuration.");
         if (options.Worker.MaxDispatchAttempts <= 0) failures.Add("Worker.MaxDispatchAttempts must be positive.");
         if (options.Worker.RetryBackoff < TimeSpan.Zero) failures.Add("Worker.RetryBackoff cannot be negative.");
+        if (options.Worker.MaxRetryBackoff < options.Worker.RetryBackoff)
+            failures.Add("Worker.MaxRetryBackoff must be greater than or equal to Worker.RetryBackoff.");
+        if (options.Worker.MaxJitter < TimeSpan.Zero) failures.Add("Worker.MaxJitter cannot be negative.");
         if (options.Worker.ShutdownDrainTimeout <= TimeSpan.Zero)
             failures.Add("Worker.ShutdownDrainTimeout must be positive.");
         if (options.Vacuum.SchedulingResources.Interval <= TimeSpan.Zero)

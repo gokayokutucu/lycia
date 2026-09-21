@@ -31,7 +31,11 @@ public static class MessageIdentityExtensions
             response.MessageId = GuidV7.NewGuidV7();
 
         response.RequestId = request.MessageId;
-        response.ResponseEndpoint = responseEndpoint;
+        var requestedEndpoint = request is IRequestRoutingMetadata routing &&
+                                !string.IsNullOrWhiteSpace(routing.ResponseEndpoint)
+            ? routing.ResponseEndpoint!
+            : responseEndpoint;
+        response.ResponseEndpoint = EndpointIdentity.Normalize(requestedEndpoint);
         PropagateWorkflow(response, request, sagaId);
     }
 

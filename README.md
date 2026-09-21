@@ -6,7 +6,7 @@
 
 [![NuGet](https://img.shields.io/nuget/v/Lycia.svg)](https://www.nuget.org/packages/Lycia)
 [![NuGet Downloads](https://img.shields.io/nuget/dt/Lycia.svg)](https://www.nuget.org/packages/Lycia)
-![Target Framework](https://img.shields.io/badge/.NET-netstandard2.0%20%7C%20net8.0%20%7C%20net9.0-blue)
+![Target Framework](https://img.shields.io/badge/.NET-netstandard2.0%20%7C%20net8.0%20%7C%20net9.0%20%7C%20net10.0-blue)
 [![Build](https://github.com/gokayokutucu/lycia/actions/workflows/dotnet.yml/badge.svg)](https://github.com/gokayokutucu/lycia/actions/workflows/dotnet.yml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![GitHub release](https://img.shields.io/github/v/release/gokayokutucu/lycia)](https://github.com/gokayokutucu/lycia/releases)
@@ -15,94 +15,91 @@
 
 It provides:
 
-- coordinated sagas for orchestration
-- reactive sagas for choreography
-- durable saga state and compensation tracking
-- strongly typed command ownership
-- asynchronous targeted responses
-- configurable middleware
-- transport-independent scheduling
-- RabbitMQ, NATS and Kafka integrations
-- OpenTelemetry tracing hooks
+- coordinated sagas for orchestration and reactive sagas for choreography
+- durable saga state with optimistic concurrency and compensation tracking
+- strongly typed command ownership and asynchronous targeted responses
+- RabbitMQ, NATS and Kafka transports
+- SagaStore providers for Redis, SQL Server, PostgreSQL and in-memory testing
+- an optional Inbox (duplicate-delivery suppression) and Outbox (durable outgoing intent)
+- a service-local atomic persistence boundary for SQL Server and PostgreSQL
+- Split Store: relational canonical state with a rebuildable Redis operational projection
+- a canonical transition journal with deterministic rebuild and verification
+- transport-independent durable scheduling
+- a configurable middleware pipeline and OpenTelemetry tracing
 
-Lycia is designed for distributed systems where workflows span multiple services, messages may be delivered more than once, replicas process work concurrently and failures can occur between individual steps.
+Lycia is designed for distributed systems where workflows span multiple services, messages may be
+delivered more than once, replicas process work concurrently and failures can occur between individual
+steps.
 
-The framework follows **at-least-once delivery semantics**. It does not claim exactly-once application processing. Handlers and external side effects must remain idempotent.
+**Lycia follows at-least-once delivery semantics. It does not claim exactly-once processing.** Handlers
+and external side effects must remain idempotent. The Inbox, the Outbox and the atomic persistence
+boundary narrow the windows in which duplicates or lost intent can occur; none of them changes that
+fundamental guarantee.
 
-For implementation details, compensation behavior, transport topology and integration-test strategies, see [DEVELOPERS.md](DEVELOPERS.md).
+For architecture, internals and contributor documentation, see [DEVELOPERS.md](DEVELOPERS.md).
 
 ---
 
 ## Packages
 
-Lycia is split into focused packages.
-
 | Package | Purpose |
 | --- | --- |
-| `Lycia` | Core saga abstractions, handlers, dispatching, compensation and saga context |
-| `Lycia.Extensions` | Transport- and persistence-independent registration, configuration, middleware, serialization, logging, retry |
-| `Lycia.Extensions.RabbitMq` | RabbitMQ EventBus, topology, queues, exchanges, bindings, DLQ behavior and RabbitMQ TTL/DLX scheduling strategy |
-| `Lycia.Extensions.Scheduling` | Durable transport-independent scheduling, scheduler workers, Redis schedule storage, manifests, leases and vacuum workers |
-| `Lycia.Extensions.Nats` | NATS Core and JetStream transport integration |
-| `Lycia.Extensions.Kafka` | Kafka transport integration |
-| `Lycia.Extensions.OpenTelemetry` | OpenTelemetry tracing and propagation integration |
-| `Lycia.Persistence.InMemory` | In-memory `ISagaStore`/`IInboxStore`/`IOutboxStore` provider. Tests and local development only — not durable production storage |
-| `Lycia.Persistence.Redis` | Redis-backed `ISagaStore`/`IInboxStore`/`IOutboxStore` provider with atomic optimistic concurrency and Lua-script Inbox/Outbox claims |
-| `Lycia.Persistence.SqlServer` | SQL Server-backed `ISagaStore`/`IInboxStore`/`IOutboxStore` provider with embedded schema migration |
-| `Lycia.Persistence.PostgreSql` | PostgreSQL-backed `ISagaStore`/`IInboxStore`/`IOutboxStore` provider with embedded schema migration |
+| `Lycia` | Core saga runtime: handlers, dispatching, saga context, compensation, the Outbox dispatcher, middleware and the in-memory SagaStore/event bus used for tests |
+| `Lycia.Extensions` | The `AddLycia` registration DSL, configuration, middleware slots, retry, serialization, persistence-boundary resolution, Split Store and reliability diagnostics |
+| `Lycia.Extensions.RabbitMq` | RabbitMQ transport: event bus, listener, topology, dead-lettering and the TTL + DLX scheduling strategy |
+| `Lycia.Extensions.Nats` | NATS JetStream (default) and Core NATS transport |
+| `Lycia.Extensions.Kafka` | Kafka transport |
+| `Lycia.Extensions.Scheduling` | Durable, transport-independent scheduling: dispatch worker, Redis and in-memory schedule stores, leases and fencing, vacuum |
+| `Lycia.Extensions.OpenTelemetry` | OpenTelemetry tracing and W3C trace-context propagation |
+| `Lycia.Persistence.InMemory` | In-memory SagaStore, Inbox, Outbox and journal registration. Tests and local development only — not durable |
+| `Lycia.Persistence.Redis` | Redis SagaStore, Inbox and Outbox, and the Split Store operational projection |
+| `Lycia.Persistence.SqlServer` | SQL Server SagaStore, Inbox, Outbox, reconciliation and journal stores with embedded schema migration |
+| `Lycia.Persistence.PostgreSql` | PostgreSQL SagaStore, Inbox, Outbox, reconciliation and journal stores with embedded schema migration |
 
-RabbitMQ and scheduling are intentionally separate packages.
+Every package targets `netstandard2.0`, `net8.0`, `net9.0` and `net10.0`, except
+`Lycia.Persistence.PostgreSql`, which targets `net8.0`, `net9.0` and `net10.0`.
 
-`Lycia.Extensions.Scheduling` does not depend on RabbitMQ. Transport-specific scheduling strategies remain inside their transport packages.
-
-`Lycia.Extensions` does not depend on any concrete persistence-provider package. Each
-`Lycia.Persistence.*` package contributes its own `With...SagaStore()` method to the shared
-`LyciaPersistenceBuilder` DSL type, the same way transport packages extend `LyciaTransportBuilder`.
+`Lycia.Extensions` never depends on a transport, scheduling or persistence-provider package. Each of
+those packages contributes its own methods to the shared DSL builders (for example
+`Lycia.Extensions.RabbitMq` adds `.RabbitMq()` to `UseTransport()`), so IntelliSense only shows what is
+actually installed.
 
 ---
 
 ## Installation
-
-Install the core and shared extensions packages:
 
 ```bash
 dotnet add package Lycia
 dotnet add package Lycia.Extensions
 ```
 
-Install one transport package:
+Add one transport:
 
 ```bash
 dotnet add package Lycia.Extensions.RabbitMq
+# or: Lycia.Extensions.Nats / Lycia.Extensions.Kafka
 ```
 
-Install exactly one SagaStore persistence provider:
+Add a persistence provider. A SagaStore provider is required:
 
 ```bash
-dotnet add package Lycia.Persistence.Redis
-# or: Lycia.Persistence.InMemory / Lycia.Persistence.SqlServer / Lycia.Persistence.PostgreSql
+dotnet add package Lycia.Persistence.PostgreSql
+# or: Lycia.Persistence.SqlServer / Lycia.Persistence.Redis / Lycia.Persistence.InMemory
 ```
 
-Optional packages:
+Optional:
 
 ```bash
 dotnet add package Lycia.Extensions.Scheduling
 dotnet add package Lycia.Extensions.OpenTelemetry
 ```
 
-NATS and Kafka transports are available separately:
-
-```bash
-dotnet add package Lycia.Extensions.Nats
-dotnet add package Lycia.Extensions.Kafka
-```
-
 ---
 
-## Minimal Setup
+## Quick Start
 
-Register Lycia, discover saga handlers and select a transport with the nested fluent DSL. The
-callback boundary itself finalizes registration, so there is no separate `.Build()` call:
+Everything is registered through one nested, fluent DSL. The callback boundary finalizes registration,
+so there is no `.Build()` call:
 
 ```csharp
 services.AddLycia(configuration, lycia =>
@@ -117,42 +114,31 @@ services.AddLycia(configuration, lycia =>
 
     lycia
         .UsePersistence()
-            .WithRedisSagaStore(options =>
-            {
-                options.ConnectionString = configuration.GetConnectionString("Redis");
-            });
+            .WithPostgreSqlSagaStore(options =>
+                options.ConnectionString = configuration.GetConnectionString("Lycia"));
 });
 ```
 
-The DSL is nested by concern but stays fluent: `AddSagas()` starts saga discovery,
-`UseTransport()` selects a transport provider, `UsePersistence()` selects the SagaStore provider,
-`AddScheduling()` (from `Lycia.Extensions.Scheduling`) configures durable scheduling, and
-`AddMiddleware()` configures the logging/retry/tracing pipeline. Transport and persistence
-registration are both explicit — `AddLycia` does not pick a transport or a SagaStore for you.
-Selecting two different transport providers on the same registration (for example
-`UseTransport().RabbitMq()` followed by `UseTransport().Nats()`) fails clearly instead of silently
-letting the second call win, and the same guard applies to `UsePersistence()`:
-`.WithRedisSagaStore(...)` followed by `.WithPostgreSqlSagaStore(...)` throws
-`"Multiple SagaStore providers were configured..."` rather than silently keeping the last one.
-Exactly one SagaStore provider is required; if none is selected, resolving `ISagaStore` throws a
-clear configuration error naming the missing provider packages, instead of silently falling back
-to an in-memory store.
+The DSL is organized by concern:
 
-Provider selection is always an explicit method call — never a configuration string. Configuration
-(`IConfiguration`/`IOptions`) may still supply provider *values* such as connection strings, schema
-names, timeouts, and credentials, as shown above.
+| Entry point | Configures |
+| --- | --- |
+| `AddSagas()` | handler discovery (`FromCurrentAssembly()`, `FromAssemblies(...)`) |
+| `UseTransport()` | the transport provider (`RabbitMq()`, `Nats(...)`, `Kafka(...)`, or `InMemory()` for tests) |
+| `UsePersistence()` | the SagaStore, optional Inbox/Outbox, the persistence boundary and Split Store |
+| `AddScheduling()` | durable scheduling (from `Lycia.Extensions.Scheduling`) |
+| `AddMiddleware()` | the logging, retry and tracing pipeline |
 
-`Lycia.Extensions` never depends on a transport, scheduling, or persistence-provider package.
-Each package contributes its own methods to the shared `LyciaTransportBuilder` /
-`LyciaPersistenceBuilder` / `LyciaBuilder` DSL types instead (for example
-`Lycia.Extensions.RabbitMq` adds `.RabbitMq()` to `UseTransport()`), so IntelliSense stays scoped
-to what is actually installed.
+Transport and persistence selection are always explicit method calls, never configuration strings.
+Configuration may still supply values such as connection strings, schema names and timeouts. Selecting
+two different transports, or two SagaStore providers, fails at configuration time instead of silently
+keeping the last one. If no SagaStore provider is selected, resolving `ISagaStore` throws a
+configuration error naming the provider packages.
 
 <details>
-<summary>Migrating from the older direct APIs</summary>
+<summary>Older flat registration API</summary>
 
-The previous flat form still compiles and is now a thin, `[Obsolete]`-marked wrapper around the
-same registration logic:
+The earlier flat form still compiles as an `[Obsolete]` wrapper around the same registration logic:
 
 ```csharp
 services
@@ -163,9 +149,8 @@ services
 services.AddLyciaRabbitMq();
 ```
 
-`AddLyciaRabbitMq()`, `AddLyciaNats(...)`, `AddLyciaKafka(...)`, `AddLyciaScheduling(...)`, and
-`AddLyciaInMemoryScheduling(...)` continue to work unchanged; each obsolete warning names its DSL
-replacement.
+`AddLyciaRabbitMq()`, `AddLyciaNats(...)`, `AddLyciaKafka(...)`, `AddLyciaScheduling(...)` and
+`AddLyciaInMemoryScheduling(...)` keep working; each obsolete warning names its DSL replacement.
 
 </details>
 
@@ -173,63 +158,38 @@ replacement.
 
 ## Saga Models
 
-Lycia supports two saga models.
+### Coordinated saga
 
-### Coordinated Saga
-
-A coordinated saga uses a central orchestrator and durable `TSagaData`.
-
-Use it when:
-
-- workflow order must be explicit
-- responses determine subsequent commands
-- compensation must follow a controlled path
-- workflow state must survive process restarts
-- multiple replicas may continue the same saga
-
-### Reactive Saga
-
-A reactive saga implements choreography.
-
-Each handler reacts independently to an event without a central orchestrator or cross-step `TSagaData`.
-
-Use it when:
-
-- services should remain autonomous
-- multiple independent subscribers react to the same fact
-- no central component should own the complete workflow
-- eventual consistency is acceptable
-
----
-
-## Coordinated Saga Example
+A coordinated saga uses a central orchestrator and durable `TSagaData`. Use it when workflow order must
+be explicit, responses determine subsequent commands, compensation must follow a controlled path, and
+workflow state must survive process restarts and be continued by any replica.
 
 ```csharp
 public sealed class CreateInvoiceSagaHandler
     : StartCoordinatedSagaHandler<CreateInvoiceCommand, CreateInvoiceSagaData>
 {
-    public override async Task HandleAsync(
+    public override async Task HandleStartAsync(
         CreateInvoiceCommand command,
         CancellationToken cancellationToken = default)
     {
         await Context.Send(
-            new ReserveCreditCommand
-            {
-                InvoiceId = command.InvoiceId
-            },
+            new ReserveCreditCommand { InvoiceId = command.InvoiceId },
             cancellationToken);
 
-        await Context.MarkAsComplete<CreateInvoiceCommand>(
-            cancellationToken);
+        await Context.MarkAsComplete<CreateInvoiceCommand>(cancellationToken);
     }
 }
 ```
 
-Coordinated sagas persist state between message deliveries. The next step may execute on another process, container or Kubernetes replica.
+A saga's first handler derives from a `Start...` base class and implements `HandleStartAsync`; later
+steps implement `HandleAsync`. Coordinated sagas persist state between deliveries, so the next step may
+run on another process, container or Kubernetes replica.
 
----
+### Reactive saga
 
-## Reactive Saga Example
+A reactive saga implements choreography: each handler reacts to an event independently, without a
+central orchestrator or cross-step `TSagaData`. Use it when services should remain autonomous, several
+subscribers react to the same fact, and eventual consistency is acceptable.
 
 ```csharp
 public sealed class InventorySagaHandler
@@ -241,14 +201,10 @@ public sealed class InventorySagaHandler
         CancellationToken cancellationToken = default)
     {
         await Context.Publish(
-            new InventoryReservedEvent
-            {
-                OrderId = message.OrderId
-            },
+            new InventoryReservedEvent { OrderId = message.OrderId },
             cancellationToken);
 
-        await Context.MarkAsComplete<OrderCreatedEvent>(
-            cancellationToken);
+        await Context.MarkAsComplete<OrderCreatedEvent>(cancellationToken);
     }
 
     public Task CompensateAsync(
@@ -261,30 +217,32 @@ public sealed class InventorySagaHandler
 }
 ```
 
-Reactive sagas are stateless at the Lycia saga-data level. Each event is processed independently.
+### Handler failures
+
+When a handler throws, the saga handler base classes catch the exception, record the step as `Failed`
+in the SagaStore and start compensation; the message itself is acknowledged, not redelivered. The
+failure is logged as a warning and the handler's trace span is marked as an error with `exception.*`
+tags. Cancellation records the step as `Cancelled`.
 
 ---
 
 ## Strongly Typed Command Ownership
 
-Commands declare one logical owner through an endpoint marker.
-
-No queue name, destination string or handler class name is passed to `Send`.
+Commands declare one logical owner through an endpoint marker. No queue name, destination string or
+handler class name is passed to `Send`.
 
 ```csharp
 public interface IStockServiceCommand : ICommandEndpoint
 {
 }
 
-public sealed class ReserveStockCommand
-    : CommandBase,
-      IStockServiceCommand
+public sealed class ReserveStockCommand : CommandBase, IStockServiceCommand
 {
-    public Guid OrderId { get; init; }
+    public Guid OrderId { get; set; }
 }
 ```
 
-The command handler belongs to the application that owns the endpoint:
+The handler belongs to the application that owns the endpoint:
 
 ```csharp
 public sealed class ReserveStockHandler
@@ -294,83 +252,37 @@ public sealed class ReserveStockHandler
         ReserveStockCommand command,
         CancellationToken cancellationToken = default)
     {
-        return Context.MarkAsComplete<ReserveStockCommand>(
-            cancellationToken);
+        return Context.MarkAsComplete<ReserveStockCommand>(cancellationToken);
     }
 }
 ```
 
-Send the command without transport-specific routing information:
+Send the command without routing information:
 
 ```csharp
-await Context.Send(
-    new ReserveStockCommand
-    {
-        OrderId = orderId
-    },
-    cancellationToken);
+await Context.Send(new ReserveStockCommand { OrderId = orderId }, cancellationToken);
 ```
 
-`IStockServiceCommand` resolves deterministically to the logical owner `StockService`.
+`IStockServiceCommand` resolves deterministically to the logical owner `StockService`, and the owning
+host must use an equivalent canonical `ApplicationId`. Startup validation rejects commands without an
+owner endpoint or with several, handlers registered in the wrong logical application, and several
+handler types claiming the same owned command in one application.
 
-The owning host must use an equivalent canonical `ApplicationId`.
-
-Startup validation rejects:
-
-- commands without an owner endpoint
-- commands with multiple owner endpoints
-- handlers registered in the wrong logical application
-- multiple handler types claiming the same owned command in one application
-
-Commands represent intentions and have one logical owner. Events represent facts and may have multiple subscribers.
+Commands represent intentions and have one logical owner. Events represent facts and may have many
+subscribers.
 
 ---
 
 ## Canonical Application Identity
 
-Application identities are normalized using invariant lowercase rules.
+Application identities are normalized with invariant lowercase rules. `StockService`, `stock-service`,
+`stock_service`, `STOCK.SERVICE` and `stock service` all normalize to `stockservice`: dashes,
+underscores, dots and whitespace are ignored, and at least one alphanumeric character is required.
 
-The following values are equivalent:
-
-```text
-StockService
-stock-service
-stock_service
-STOCK.SERVICE
-stock service
-```
-
-They normalize to:
-
-```text
-stockservice
-```
-
-Dashes, underscores, dots and whitespace are ignored. Values must contain at least one alphanumeric character.
-
-Every replica of the same logical application must use the same `ApplicationId`.
-
-```text
-Correct:
-
-StockService replica 1 -> StockService
-StockService replica 2 -> StockService
-StockService replica 3 -> StockService
-```
-
-Do not encode replica identity into `ApplicationId`:
-
-```text
-Incorrect:
-
-StockService-1
-StockService-2
-StockService-3
-```
-
-Correctly configured replicas share the same queue, durable consumer or consumer group and compete for work.
-
-The invariant is:
+Every replica of a logical application must use the same `ApplicationId`. Do not encode replica
+identity into it — `StockService-1` and `StockService-2` are different logical applications with
+independent subscriptions. Correctly configured replicas share the same queue, durable consumer or
+consumer group and compete for work:
 
 > One logical handler type, many runtime handler instances.
 
@@ -378,7 +290,8 @@ The invariant is:
 
 ## Transport Semantics
 
-Lycia exposes the same messaging semantics across transports while allowing each transport package to implement its native topology.
+Lycia exposes the same messaging semantics across transports while each transport package implements
+its native topology.
 
 | Message kind | RabbitMQ | NATS | Kafka |
 | --- | --- | --- | --- |
@@ -386,7 +299,7 @@ Lycia exposes the same messaging semantics across transports while allowing each
 | Event | Fan-out to one queue per subscription | One durable consumer per subscription | One consumer group per subscription |
 | Response | Targeted requester queue | Targeted response subject | Targeted response topic/group |
 
-Example command topology:
+Example command addresses:
 
 | Transport | Address |
 | --- | --- |
@@ -394,173 +307,311 @@ Example command topology:
 | NATS | Subject `command.StockService.ReserveStockCommand` |
 | Kafka | Topic `lycia.command.StockService.ReserveStockCommand` |
 
-Lycia does not create one queue, subject, topic or consumer group per saga instance.
+Lycia never creates a queue, subject, topic or consumer group per saga instance.
+
+### RabbitMQ
+
+```csharp
+lycia
+    .UseTransport()
+        .RabbitMq(); // or .RabbitMq(options => { ... }) for code-first overrides
+```
+
+The RabbitMQ package owns the event bus, queue/exchange/binding declaration, dead-lettering,
+header normalization and the fixed TTL + DLX scheduling buckets. Consumers expose an explicit readiness
+signal once their queues, bindings and consumers are registered, which avoids startup races where a
+message could be published before its binding exists.
+
+RabbitMQ publishes are currently reported to the Outbox as `ConfirmationUnknown` rather than
+`Published`, because the transport abstraction does not yet await a per-publish broker confirmation for
+RabbitMQ. See [Outbox](#outbox) for what that means operationally. This is the current validated
+behavior and may be revisited.
+
+### NATS and Kafka
+
+NATS uses JetStream by default, with explicit acknowledgements, bounded redelivery and durable
+consumers; Core NATS is available for intentionally ephemeral workloads. Kafka commits an offset only
+after the handler acknowledges, and ordering is partition-scoped (partition key `CorrelationId`, then
+`SagaId`, then `MessageId`). Kafka's idempotent `acks=all` producer and NATS JetStream report positive
+broker acceptance, so Outbox messages sent through them become `Published`.
 
 ---
 
 ## Asynchronous Targeted Responses
 
-Lycia does not use synchronous RPC-style waiting for saga steps.
-
-Responses are asynchronous messages targeted to the logical application that is waiting for them.
+Lycia does not use synchronous RPC-style waiting for saga steps. Responses are asynchronous messages
+targeted to the logical application waiting for them:
 
 ```csharp
 await Context.Respond(
     request,
-    new InventoryReservedResponse
-    {
-        OrderId = request.OrderId
-    },
+    new InventoryReservedResponse { OrderId = request.OrderId },
     cancellationToken);
 ```
 
-A response:
+A response has its own `MessageId`, preserves the workflow `CorrelationId` and `SagaId`, uses
+`RequestId` to identify the request it answers and `ResponseEndpoint` to route back to the requester,
+and may be consumed by any replica of the requester application.
 
-- has its own `MessageId`
-- preserves the workflow `CorrelationId`
-- preserves the durable `SagaId`
-- uses `RequestId` to identify the request it answers
-- uses `ResponseEndpoint` to route back to the requester
-- may be consumed by any replica of the requester application
+Responses must be sent with `Respond`. Publishing an `IResponse` through `Context.Publish` fails
+explicitly, because responses are targeted continuations, not broadcast facts. `ReplyTo` remains an
+obsolete compatibility alias for `ResponseEndpoint`.
 
-Responses must be sent with `Respond`.
-
-Publishing an `IResponse` through `Context.Publish` fails explicitly because responses are targeted continuations, not broadcast facts.
-
-`ReplyTo` remains an obsolete compatibility alias for `ResponseEndpoint`.
+A saga step never depends on the process that sent the preceding message staying alive: if replica A
+sends a command and stops, replica B receives the response, loads the saga from the SagaStore and
+continues the workflow.
 
 ---
 
 ## Message Identity
 
-Lycia separates concrete message identity, request-response identity, workflow correlation and compensation lineage.
-
 | Field | Meaning |
 | --- | --- |
-| `MessageId` | Unique identity and idempotency key of the concrete message |
-| `RequestId` | Identifies the request answered by a response |
-| `CorrelationId` | Groups the complete business workflow |
-| `CausationId` | Identifies the direct message that caused this message |
-| `ParentMessageId` | Defines saga-step and compensation lineage |
-| `SagaId` | Identifies the durable saga instance |
-| `ResponseEndpoint` | Identifies the logical requester application |
-
-Example:
+| `MessageId` | Identity of one concrete message. Stable across retry, redelivery and recovery of that same message; used for deduplication, idempotency, replay and logging |
+| `RequestId` | A request carries its own `MessageId`; a response carries the `MessageId` of the request it answers |
+| `CorrelationId` | Stable identity of the business workflow; may span several sagas |
+| `CausationId` | The message that directly caused this one |
+| `ParentMessageId` | Saga-step and compensation lineage |
+| `SagaId` | Identity of the durable saga instance |
+| `ResponseEndpoint` | The logical application waiting for a response |
 
 ```text
-CreateOrderCommand
-MessageId        = M1
-RequestId        = M1
-CorrelationId    = C1
-CausationId      = null
-ParentMessageId  = empty
-SagaId           = S1
+CreateOrderCommand       MessageId = M1  RequestId = M1  CorrelationId = C1  CausationId = null  ParentMessageId = empty  SagaId = S1
+OrderCreatedResponse     MessageId = M2  RequestId = M1  CorrelationId = C1  CausationId = M1    ParentMessageId = M1     SagaId = S1
+ReserveInventoryCommand  MessageId = M3  RequestId = M3  CorrelationId = C1  CausationId = M2    ParentMessageId = M2     SagaId = S1
 ```
 
-```text
-OrderCreatedResponse
-MessageId        = M2
-RequestId        = M1
-CorrelationId    = C1
-CausationId      = M1
-ParentMessageId  = M1
-SagaId           = S1
-```
-
-```text
-ReserveInventoryCommand
-MessageId        = M3
-RequestId        = M3
-CorrelationId    = C1
-CausationId      = M2
-ParentMessageId  = M2
-SagaId           = S1
-```
-
-Compensation traverses `ParentMessageId`.
-
-`CausationId` is used for direct causal tracing and does not replace the compensation lineage.
+A retried, redelivered, Outbox-redispatched or schedule-dispatched message keeps its `MessageId`; a new
+`MessageId` always means a new message. Compensation traverses `ParentMessageId`; `CausationId` is for
+direct causal tracing and does not replace compensation lineage.
 
 ---
 
-## Replica-Safe Continuation
+## Persistence
 
-A saga step does not depend on the process that sent the preceding message remaining alive.
+### SagaStore
 
-```text
-Replica A
-  -> sends ReserveInventoryCommand
-  -> process stops
-
-Replica B
-  -> receives InventoryReservedResponse
-  -> loads SagaId from the SagaStore
-  -> continues the workflow
-```
-
-This is one of the central differences between Lycia’s asynchronous response model and process-local request-response implementations that keep pending requests in memory.
-
----
-
-## RabbitMQ
-
-Install:
-
-```bash
-dotnet add package Lycia.Extensions.RabbitMq
-```
-
-Register:
+A SagaStore persists saga data and the step log. Exactly one provider is selected:
 
 ```csharp
-services.AddLycia(configuration, lycia =>
-{
-    lycia
-        .AddSagas()
-            .FromCurrentAssembly();
-
-    lycia
-        .UseTransport()
-            .RabbitMq(); // or .RabbitMq(options => { ... }) for code-first overrides
-});
+lycia.UsePersistence().WithPostgreSqlSagaStore(options => options.ConnectionString = postgres);
+// or .WithSqlServerSagaStore(...), .WithRedisSagaStore(...), .WithInMemorySagaStore()
 ```
 
-The RabbitMQ package owns:
+Every provider implements explicit numeric optimistic concurrency (`IVersionedSagaStore`): saving with
+an `expectedVersion` that no longer matches throws `SagaConcurrencyException` instead of overwriting a
+concurrent writer. SQL Server and PostgreSQL use `UPDATE ... WHERE Version = @expected`; Redis uses an
+atomic Lua compare-and-set. SQL Server and PostgreSQL apply their own schema through an embedded
+migration.
 
-- `RabbitMqEventBus`
-- queue and exchange declaration
-- command/event/response routing
-- dead-letter behavior
-- RabbitMQ message-header normalization
-- RabbitMQ scheduling topology
-- fixed TTL and DLX scheduling buckets
+### Inbox
 
-### Consumer readiness
+The optional Inbox suppresses duplicate handler execution. Before a handler runs, the dispatcher claims
+the `(MessageId, HandlerType)` pair; a redelivery of a message that is already being processed, has
+completed, or recently failed is skipped instead of running the handler again.
 
-RabbitMQ consumers expose an explicit readiness signal once their mapped queues, bindings and consumers have been registered.
+```csharp
+lycia.UsePersistence()
+    .WithPostgreSqlSagaStore(options => options.ConnectionString = postgres)
+    .WithPostgreSqlInbox(options =>
+    {
+        options.ConnectionString = postgres;
+        options.ClaimRecoveryTimeout = TimeSpan.FromMinutes(5); // default
+    });
+```
 
-This avoids startup and integration-test races where a message could be published before its binding exists.
+Providers: `.WithInMemoryInbox()`, `.WithRedisInbox(...)`, `.WithSqlServerInbox(...)`,
+`.WithPostgreSqlInbox(...)`. The Inbox is disabled unless selected.
 
-Consumer readiness is a lifecycle signal. Applications should not wait for it before every individual publish.
+- **`Completed` is suppressed permanently**, however old it is. This is the duplicate protection the
+  Inbox exists for.
+- **`Processing` and `Failed` claims are recovered.** A claim left in `Processing` by a process that
+  died mid-handler, or a `Failed` record, becomes claimable again once it is older than
+  `ClaimRecoveryTimeout`. Without this, the first crash would turn every later redelivery into a
+  permanent no-op. Set the window longer than your slowest handler, because a shorter one lets a
+  redelivery take over a claim whose first execution is still running.
+- **Takeover is atomic** in every provider — a predicated `UPDATE` for SQL Server and PostgreSQL, a Lua
+  script for Redis — so concurrent redeliveries cannot all take over the same stale claim.
+- **Under `LocalAtomic`** the claim is part of the handler's transaction, so a crash or exception rolls
+  the claim back with everything else. The recovery window matters where the claim commits on its own:
+  Redis, InMemory, or relational stores resolving to `Independent`.
+
+The Inbox complements, and does not replace, the SagaStore's own per-step duplicate and transition
+checks.
+
+### Outbox
+
+The optional Outbox durably captures outgoing intent. With an Outbox selected, `Context.Send`,
+`Context.Publish`, `Context.Respond` and their tracked variants write an Outbox record instead of
+publishing directly, and a hosted `OutboxWorker` later restores the original operation through the
+transport.
+
+```csharp
+lycia.UsePersistence()
+    .WithPostgreSqlSagaStore(options => options.ConnectionString = postgres)
+    .WithPostgreSqlOutbox(options => options.ConnectionString = postgres)
+    .WithOutboxWorker(options =>
+    {
+        options.BatchSize = 50;
+        options.MaxAttempts = 5;
+        options.RecoveryTimeout = TimeSpan.FromMinutes(1); // longer than the transport publish timeout
+        options.RetryBackoff = TimeSpan.FromMilliseconds(250);
+    });
+```
+
+Providers: `.WithInMemoryOutbox()`, `.WithRedisOutbox(...)`, `.WithSqlServerOutbox(...)`,
+`.WithPostgreSqlOutbox(...)`. Claiming is safe under concurrent workers and replicas: each message is
+claimed by exactly one worker at a time. The record's `MessageId` is stable, so a redispatch never
+creates a new logical message.
+
+**Lifecycle**
+
+| Status | Meaning |
+| --- | --- |
+| `Pending` | Captured durably; not yet claimed |
+| `Claimed` | Claimed by a worker for dispatch |
+| `Publishing` | A publish attempt is in flight |
+| `Published` | The transport positively confirmed the publish (Kafka, NATS JetStream) |
+| `ConfirmationUnknown` | The publish may have succeeded but was not confirmed — the transport cannot confirm (RabbitMQ, Core NATS) or the attempt threw. Never auto-promoted to `Published` |
+| `Failed` | A permanent local error before any publish, such as an unresolvable message type or an invalid envelope. Not retried |
+| `Abandoned` | Terminal: the last permitted attempt never reached the transport. Needs operator attention |
+
+**Bounded retry.** A `ConfirmationUnknown` message becomes eligible for another attempt only after
+`RecoveryTimeout` has elapsed, so attempts are spread over roughly `MaxAttempts × RecoveryTimeout`
+rather than consumed back to back. Claims left in `Claimed` or `Publishing` by a crashed worker are
+recovered after the same window. Recovery can duplicate a publish whose original worker was only slow,
+which is part of the at-least-once contract.
+
+**When attempts run out**, the outcome depends on the last attempt:
+
+- **It never reached the transport** — the publish threw, for example because the broker was down, or
+  shutdown cancelled it. The message becomes `Abandoned`, the reason is recorded in its failure info,
+  and a warning naming the `MessageId` and `SagaId` is logged. `OutboxDispatchResult.Abandoned` carries
+  the count, so you can alert on it. The message is not dispatched again automatically.
+- **The transport accepted it but cannot confirm it** — the normal case for RabbitMQ and Core NATS. The
+  message stays `ConfirmationUnknown` and is not dispatched again. It was handed to the broker on each
+  attempt, so this is ordinary at-least-once delivery, not a failure, and raises no warning.
+
+Because an unconfirming transport receives the same message on every attempt, consumers must be
+idempotent — the Inbox handles exactly this on the receiving side.
+
+**Scheduling and the Outbox.** Scheduling owns not-yet-due intent. When a schedule becomes due, it hands
+the original `Send`/`Publish`/`Respond` to the same outgoing pipeline, so with an Outbox enabled a due
+schedule creates one Outbox record rather than two competing durable records.
+
+### Atomic persistence boundary
+
+The persistence-boundary policy defaults to `Auto`. When the SagaStore, Inbox and Outbox are all SQL
+Server, or all PostgreSQL, and resolve to the same logical database, they share one service-local
+transaction (`LocalAtomic`). Different schemas in that database may participate; different databases
+or mixed providers resolve to `Independent`.
+
+```csharp
+lycia.UsePersistence()
+    .WithPostgreSqlSagaStore(options => options.ConnectionString = postgres)
+    .WithPostgreSqlInbox(options => options.ConnectionString = postgres)
+    .WithPostgreSqlOutbox(options => options.ConnectionString = postgres);
+// Auto -> LocalAtomic
+```
+
+- `.RequireAtomicBoundary()` makes an incompatible topology fail at startup.
+- `.UseIndependentTransactions()` deliberately opts out when a compatible boundary exists.
+
+The transaction covers only the enabled Lycia Inbox, SagaStore and Outbox operations of one service. It
+never spans services, never uses a distributed transaction, and does not include application business
+tables. Outbox publication happens after commit. If a COMMIT is issued but its outcome cannot be
+observed, Lycia reports an unknown outcome rather than rerunning the handler; the durable identities
+(Inbox claim, saga version, Outbox `MessageId`) are the recovery authority. InMemory and Redis stores
+are always `Independent`.
+
+### Split Store
+
+Split Store makes PostgreSQL or SQL Server the canonical store and Redis an asynchronously reconciled,
+rebuildable operational projection:
+
+```csharp
+lycia.UsePersistence()
+    .WithPostgreSqlCanonicalSagaStore(options => options.ConnectionString = postgres)
+    .WithPostgreSqlInbox(options => options.ConnectionString = postgres)
+    .WithPostgreSqlOutbox(options => options.ConnectionString = postgres)
+    .WithRedisOperationalSagaStore(options => options.ConnectionString = redis)
+    .RequireAtomicBoundary()
+    .UseSplitStore();
+```
+
+- **Relational state is canonical.** The Inbox claim, canonical saga state, Outbox record, a
+  reconciliation intent and a journal entry commit in one service-local transaction. Redis is never
+  written before that commit, and handler reads always use canonical state.
+- **Reconciliation** installs the committed state in Redis in the background
+  (`WithReconciliationWorker(...)` tunes batching and bounded retry with backoff and jitter).
+- **Version fencing.** Redis installs use compare-and-set on the saga version: an equal version is a
+  no-op and an older version is superseded, so a delayed or duplicated install can never overwrite a
+  newer projection.
+- **Redis outages do not stop the workflow.** Canonical commits and Outbox dispatch continue while Redis
+  is down, and reconciliation repopulates the projection when it returns.
+
+### Canonical journal, rebuild and verify
+
+Split Store requires an append-only canonical journal (`ISagaJournalStore`), registered automatically by
+`With...CanonicalSagaStore`. Each committed transition appends one immutable entry, ordered by `SagaId`
+and `SequenceNumber` (equal to the saga version), in the same transaction as the canonical write.
+
+`ISagaRebuildService` rebuilds the Redis projection from the journal and verifies it:
+
+- `RebuildSagaAsync` / `RebuildAllAsync` — bounded pages, per-saga failure isolation, progress
+  reporting, cancellation and a resumable cursor.
+- `VerifySagaAsync` / `VerifyAllAsync` — non-mutating classification: `Healthy`, `MissingProjection`,
+  `VersionMismatch`, `StateMismatch`, `JournalGap`, `SchemaUnsupported`, `CorruptEntry`.
+
+Rebuild is deterministic and never invokes handlers, publishes messages or writes the Inbox or Outbox.
+It installs through the same version-fenced writer as reconciliation, so a stale rebuild cannot
+overwrite a newer projection and rebuilding twice is a safe no-op. Gaps and corrupt entries are reported,
+never silently reconstructed, and older journal schema versions are upgraded through registered
+`IJournalEntryUpcaster`s.
+
+### Reliability diagnostics
+
+`AddLycia` registers `ILyciaReliabilityDiagnostics`, a safe snapshot of the active persistence topology:
+
+```csharp
+var snapshot = serviceProvider
+    .GetRequiredService<ILyciaReliabilityDiagnostics>()
+    .GetSnapshot();
+
+// snapshot.Mode, snapshot.CanonicalStore, snapshot.OperationalStore, snapshot.ResolvedStrategy,
+// snapshot.ReconciliationEnabled, snapshot.JournalEnabled, snapshot.JournalRebuildAvailable,
+// snapshot.InboxEnabled, snapshot.OutboxEnabled, snapshot.DeliveryGuarantee ("AtLeastOnce")
+```
+
+It never contains connection strings, credentials or payloads. Use it for a startup log line or a
+diagnostics endpoint.
 
 ---
 
 ## Durable Message Scheduling
 
-Install:
-
 ```bash
 dotnet add package Lycia.Extensions.Scheduling
 ```
 
-Register Redis-backed scheduling as part of the same `AddLycia` DSL:
+Safe defaults apply, so the minimal registration needs no tuning:
+
+```csharp
+lycia
+    .AddScheduling()
+        .WithRedisStore()
+        .WithPredefinedDelays();
+```
+
+`WithPredefinedDelays()` allows only the predefined `ScheduleDelay` buckets; `WithDynamicDelays()` also
+allows arbitrary durations. Tune dispatch and enable vacuum only when the defaults do not fit:
 
 ```csharp
 lycia
     .AddScheduling()
         .WithRedisStore()
         .WithPredefinedDelays()
-        .WithWorker(options =>
+        .WithDispatch(options =>
         {
             options.LeaseDuration = TimeSpan.FromSeconds(30);
             options.LeaseRenewInterval = TimeSpan.FromSeconds(10);
@@ -571,64 +622,39 @@ lycia
         });
 ```
 
-`WithPredefinedDelays()` sets `AllowDynamicDelays = false`; use `WithDynamicDelays()` for
-`AllowDynamicDelays = true`. Both are semantic aliases over the same `SchedulingOptions` property —
-nothing was removed, so code that still sets `options.AllowDynamicDelays` directly keeps working.
+`WithDispatch(...)` configures batching, claim lifetime, lease renewal and bounded retry with backoff
+and jitter for due-schedule dispatch. (`WithWorker(...)` remains as an `[Obsolete]` alias.)
+`WithInMemoryStore()` is available for tests.
 
-Schedule a message:
+Schedule a message from a saga context:
 
 ```csharp
 var scheduleId = await Context.Schedule(
-    new CancelOrderCommand
-    {
-        OrderId = orderId
-    },
+    new CancelOrderCommand { OrderId = orderId },
     ScheduleDelay.ThirtySeconds,
     cancellationToken);
 ```
 
-`ScheduleId` identifies the scheduling operation and is intentionally different from `MessageId`.
+`ScheduleId` identifies the scheduling operation and is deliberately different from `MessageId`; pass a
+stable `ScheduleId` when retrying schedule creation. Pending schedules can be cancelled or rescheduled
+idempotently before dispatch.
 
-Pass a stable `ScheduleId` when retrying schedule creation.
+- **RabbitMQ** predefined delays use one fixed-TTL queue per destination and bucket, dead-lettered to
+  the final destination; no `x-delayed-message` plugin is needed. Dynamic delay queues are opt-in.
+- **Kafka and NATS** use the durable dispatch worker; topic retention is never treated as delayed
+  delivery.
 
-Pending schedules may be cancelled or rescheduled idempotently before dispatch.
+Due schedules are claimed under a lease protected by a fencing token (owner and fence are both
+validated, not lease expiry alone), so a stale or resumed owner cannot take work another live owner
+holds. Dispatch is at least once around crash and confirmation windows; consumers must be idempotent.
 
-### Fixed and dynamic delays
-
-Predefined RabbitMQ delay buckets use one fixed-TTL queue per destination and delay bucket, then dead-letter the message to its final destination.
-
-This does not require the `x-delayed-message` plugin.
-
-Dynamic RabbitMQ delay buckets are opt-in because arbitrary durations may create additional queues.
-
-Kafka uses the durable `SchedulerWorker`; Kafka retention is not treated as delayed delivery.
-
-The current validated NATS baseline also uses `SchedulerWorker` for durable scheduling.
-
-### Scheduling reliability
-
-Scheduling dispatch follows at-least-once semantics around crash and confirmation windows.
-
-Consumers must remain idempotent.
-
-Dynamic resource cleanup requires:
-
-- exact registry provenance
-- no active schedule or manifest
-- empty and unused broker resources
-- lease ownership
-- fencing protection
-- explicit cleanup policy
-
-Predefined delay buckets are retained.
-
-Ordinary application topology defaults to report-only inspection and requires explicit destructive opt-in before deletion.
+Vacuum deletes dynamic scheduling resources only with exact registry provenance, no active schedule or
+manifest, empty and unused broker resources, lease ownership and fencing. Predefined delay buckets are
+kept, and ordinary application topology is report-only unless destructive cleanup is explicitly enabled.
 
 ---
 
 ## Middleware
-
-Lycia includes a replaceable middleware pipeline, configured through the same `AddLycia` DSL:
 
 ```csharp
 lycia
@@ -638,44 +664,24 @@ lycia
         .WithTracing();
 ```
 
-Default middleware slots include:
+The default pipeline has logging, retry and tracing slots. Replace an implementation with the generic
+form (`WithLogging<TMiddleware>()`, `WithRetry<TMiddleware>()`, `WithTracing<TMiddleware>()`), which
+targets `ILoggingSagaMiddleware`, `IRetrySagaMiddleware` and `ITracingSagaMiddleware`. The default
+tracing implementation is `ActivityTracingMiddleware`.
 
-- logging
-- retry
-- tracing
-
-Implementations may be replaced through the generic form of each method
-(`WithLogging<TMiddleware>()`, `WithRetry<TMiddleware>()`, `WithTracing<TMiddleware>()`), which
-drives the same three interfaces the pipeline has always used:
-
-- `ILoggingSagaMiddleware`
-- `IRetrySagaMiddleware`
-- `ITracingSagaMiddleware`
-
-The default tracing implementation uses `ActivityTracingMiddleware`.
-
-Retry behavior is provided through `IRetryPolicy`, with a Polly-based default implementation supporting:
-
-- bounded retries
-- exponential backoff
-- jitter
-- exception-specific policies
-
-Retries do not replace Inbox, Outbox or idempotency guarantees.
+Retry is provided through `IRetryPolicy`, with a Polly-based default supporting bounded retries,
+exponential backoff, jitter and exception-specific policies. Retries do not replace the Inbox, the
+Outbox or idempotent handlers.
 
 ---
 
 ## OpenTelemetry Tracing
-
-Install:
 
 ```bash
 dotnet add package OpenTelemetry
 dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
 dotnet add package Lycia.Extensions.OpenTelemetry
 ```
-
-Configure tracing:
 
 ```csharp
 services
@@ -684,115 +690,56 @@ services
     .WithTracing(tracing =>
     {
         tracing.AddAspNetCoreInstrumentation();
-
         tracing.AddOtlpExporter(options =>
-        {
-            options.Endpoint =
-                new Uri("http://otel-collector:4317");
-        });
+            options.Endpoint = new Uri("http://otel-collector:4317"));
     });
 ```
 
-Lycia emits tracing data for saga and messaging operations without requiring tracing code inside saga handlers.
+`AddLyciaTracing()` registers the Lycia activity source and the W3C `traceparent`/`tracestate`
+propagator. Trace context flows through RabbitMQ, NATS and Kafka headers and through the Outbox, so a
+workflow that crosses services and Outbox hops appears as one connected trace, with each handler span a
+child of the message that caused it.
 
-Typical attributes include:
+Handler spans carry these attributes:
 
 ```text
-lycia.saga.id
-lycia.message.id
-lycia.request.id
-lycia.correlation.id
-lycia.causation.id
-lycia.parent_message.id
-lycia.application.id
-lycia.saga.step.status
+lycia.saga.id             lycia.message.id           lycia.correlation.id
+lycia.causation_id        lycia.parent_message_id    lycia.request_id
+lycia.handler             lycia.application.id       lycia.saga.step.status
 ```
 
-W3C `traceparent` and `tracestate` headers are propagated through supported message transports.
+`lycia.saga.step.status` is `Completed` or `Failed`; a failed step also sets the span status to error
+with `exception.type` and `exception.message`. Outbox dispatch adds an `Outbox.Send`,
+`Outbox.Publish` or `Outbox.Respond` producer span. Export to any OpenTelemetry-compatible backend
+such as Jaeger or Grafana Tempo.
 
-The resulting traces may be exported through OpenTelemetry Collector to systems such as:
-
-- Grafana Tempo
-- Jaeger
-- another OpenTelemetry-compatible backend
-
-OpenTelemetry provides instrumentation, propagation and export. The selected tracing backend provides storage, querying and visualization.
-
-Long-running asynchronous workflows should continue to rely on Lycia’s durable identifiers such as `CorrelationId`, `SagaId`, `CausationId` and `ParentMessageId`, rather than assuming that one indefinitely open trace span represents the complete business workflow.
+Long-running workflows should rely on Lycia's durable identifiers (`CorrelationId`, `SagaId`,
+`CausationId`, `ParentMessageId`) rather than assuming one open trace represents the whole business
+workflow.
 
 ---
 
 ## Idempotency and Concurrency
 
-Lycia treats idempotency and concurrency as separate concerns.
+Idempotency and concurrency are separate concerns.
 
-### Idempotency
+**Idempotency** prevents duplicate handling of the same message: the same `MessageId` delivered twice
+should produce one committed business effect. The Inbox enforces this at the handler boundary; handler
+code and external integrations should still use stable identities and idempotent operations.
 
-Idempotency prevents duplicate handling of the same logical message.
-
-```text
-Same MessageId delivered twice
--> committed business effect executes once
-```
-
-The optional Inbox enforces this at the handler-execution boundary, before saga-state work begins:
-
-```csharp
-services.AddLycia(configuration, lycia =>
-{
-    lycia
-        .UsePersistence()
-            .WithRedisSagaStore(options => options.ConnectionString = redisConnection)
-            .WithInMemoryInbox(); // disabled by default; only an in-memory implementation exists today
-});
-```
-
-`IInboxStore` is resolved optionally — dispatch behaves exactly as it did before Inbox existed when
-nothing is registered.
-
-### Optimistic concurrency
-
-Optimistic concurrency prevents different valid messages from overwriting the same saga state.
-
-```text
-Saga version = 7
-
-Replica A processes InventoryReservedResponse
-Replica B processes PaymentTimeoutEvent
-
-Both load version 7.
-Only one may commit version 8.
-```
-
-At-least-once transport delivery means duplicate delivery remains possible.
-
-Handlers and external integrations must use stable message identities and idempotent business operations.
+**Optimistic concurrency** prevents different valid messages from overwriting the same saga state. If
+two replicas load version 7 while processing different messages, only one of them can commit
+version 8.
 
 ---
 
 ## Extensibility
 
-Lycia’s core abstractions are replaceable.
-
-Applications and extension packages may provide custom implementations of:
-
-- `IEventBus`
-- `ISagaStore`
-- `IInboxStore` / `IOutboxStore` (optional, disabled by default)
-- `IMessageSerializer`
-- middleware slots
-- retry policies
-- tracing integrations
-- scheduling storage and strategies
-
-Transport-specific behavior remains outside the core package.
-
-`lycia.UsePersistence()` exposes the SagaStore providers through the same nested DSL —
-`WithInMemorySagaStore()`, `WithRedisSagaStore(...)`, `WithSqlServerSagaStore(...)`, and
-`WithPostgreSqlSagaStore(...)` — each contributed by its own package. `Lycia.Extensions` itself only
-defines `LyciaPersistenceBuilder` and its duplicate-provider guard; it never depends on a concrete
-provider package. Future split-store and strong-consistency atomic boundaries will
-extend `LyciaPersistenceBuilder` the same way, without changing this dependency direction.
+Applications and extension packages can provide their own implementations of `IEventBus`, `ISagaStore`,
+`IInboxStore`, `IOutboxStore`, `IMessageSerializer`, middleware slots, retry policies, tracing
+integrations, and scheduling stores and strategies. The generic `UsePersistence().WithInbox<T>()` and
+`.WithOutbox<T>()` register custom Inbox and Outbox stores with the same duplicate-provider guard as the
+built-in providers.
 
 ---
 
@@ -806,210 +753,33 @@ The [samples/](samples) directory contains runnable examples.
 | `Sample.Order.Orchestration.Consumer` | Stateful coordinated saga with asynchronous targeted responses |
 | `Sample.Order.Choreography.Consumer` | Stateless event-driven reactive saga |
 | `Sample.Order.Orchestration.Seq.Consumer` | Sequential coordinated saga with compensation |
-
-Samples demonstrate:
-
-- strongly typed command ownership
-- canonical `ApplicationId`
-- replica-safe response consumption
-- RabbitMQ transport registration
-- saga persistence
-- compensation
-- scheduling
-- OpenTelemetry integration
-
----
-
-## Current Reliability Model
-
-Lycia currently provides and prepares for:
-
-- at-least-once message delivery
-- message identity propagation
-- handler idempotency
-- saga-state persistence
-- optimistic concurrency
-- compensation traversal
-- broker acknowledgement handling
-- RabbitMQ DLQ behavior
-- bounded retry policies
-- publisher confirmation integration where supported
-- durable scheduling
-
-Durable Inbox/Outbox provider stores exist for InMemory, Redis, SQL Server, and PostgreSQL. Selecting
-an Outbox replaces the direct outgoing pipeline with durable capture for `Context.Send`,
-`Context.Publish`, `Context.Respond`, and their tracked variants. `OutboxWorker` then restores the
-original event-bus semantic; without an Outbox the historical direct behavior is unchanged.
-
-The model distinguishes:
-
-```text
-Saga state
--> workflow and compensation state
-
-Inbox
--> committed processing identity of incoming messages
-
-Outbox
--> durable publication lifecycle of outgoing messages
-```
-
-The saga state machine does not replace Inbox or Outbox. These concerns may share one database
-transaction in the future (see `ILyciaPersistenceSession`), but they remain separate lifecycles.
-
-**Idempotency** prevents duplicate handling of the same logical message — Inbox implements this at
-the handler-execution level: `IInboxStore.TryBeginAsync(messageId, handlerType)` claims a
-(MessageId, HandlerType) pair before the handler body runs; a redelivered message for the same pair
-returns `AlreadyProcessing`/`AlreadyCompleted`/`AlreadyFailed` instead of re-running the handler.
-This is optional and disabled by default — enable it via `UsePersistence().WithInMemoryInbox()` /
-`.WithRedisInbox()` / `.WithSqlServerInbox()` / `.WithPostgreSqlInbox()`. It is complementary to, not
-a replacement for, the existing per-step transition/duplicate-payload checks in
-`ISagaStore.LogStepAsync`.
-
-**Outbox** durably captures outgoing message intent (`IOutboxStore.AddAsync`, idempotent on
-`MessageId`) with an explicit lifecycle (`Pending` → `Claimed` → `Publishing` →
-`Published`/`ConfirmationUnknown`/`Failed`). Durable stores exist for InMemory, Redis, SQL Server,
-and PostgreSQL — enable one via `.WithInMemoryOutbox()` / `.WithRedisOutbox()` /
-`.WithSqlServerOutbox()` / `.WithPostgreSqlOutbox()`. Provider selection also registers the hosted
-worker; tune it with `.WithOutboxWorker(options => ...)`. An `IOutboxDispatcher` claims pending or
-retryable `ConfirmationUnknown` messages (safe under concurrent callers — one worker wins each
-message) and restores `Send`, `Publish`, or targeted `Respond` through the application's `IEventBus`:
-
-```csharp
-lycia.UsePersistence()
-    .WithRedisSagaStore(options => options.ConnectionString = redisConnection)
-    .WithRedisOutbox(options => options.ConnectionString = redisConnection)
-    .WithOutboxWorker(options =>
-    {
-        options.BatchSize = 50;
-        options.MaxAttempts = 5;
-        options.RecoveryTimeout = TimeSpan.FromMinutes(1); // longer than transport publish timeout
-        options.RetryBackoff = TimeSpan.FromMilliseconds(250);
-    });
-```
-
-```csharp
-var result = await outboxDispatcher.DispatchPendingBatchAsync(maxCount: 50);
-// result.Published / result.ConfirmationUnknown / result.Failed
-```
-
-`Published` requires the transport-neutral `IConfirmedEventBus` capability. Kafka's idempotent
-`acks=all` producer and NATS JetStream expose positive acceptance and implement it. Core NATS and the
-current RabbitMQ publisher do not claim a broker confirmation, so a completed attempt remains
-`ConfirmationUnknown` and is redispatched up to the configured bound with backoff and jitter. This
-is intentionally at least once: `MessageId`/`OutboxId` remain stable and consumers must be idempotent.
-Permanent local envelope/type/serialization failures become `Failed`.
-
-Claims left in `Claimed`/`Publishing` by a crashed process become eligible after `RecoveryTimeout`.
-Set it longer than the transport publish timeout. Recovery can duplicate a publish whose original
-worker was only slow, which is another explicit at-least-once window rather than a fencing claim.
-
-Scheduling remains the sole owner of not-yet-due intent. When a schedule becomes due,
-`SchedulerWorker` hands `Send`/`Publish`/`Respond` to the same outgoing pipeline; with Outbox enabled
-this creates one Outbox record at due time rather than two competing durable records.
-
-Saga state, Inbox, and Outbox writes are not yet one atomic transaction. The prepared
-`ILyciaPersistenceSession` boundary does not enlist these operations; atomic Saga+Inbox+Outbox commit
-is the explicit Phase 4 boundary.
-
-**Lycia provides at-least-once delivery semantics. It does not claim exactly-once processing.**
-Inbox reduces duplicate-processing risk; Outbox reduces the local-store/broker dual-write window when
-used correctly. Neither changes Lycia's fundamental at-least-once delivery guarantee.
+| [`Microservices`](samples/Microservices) | Five services on RabbitMQ, PostgreSQL, per-service Redis and Jaeger, using Split Store, Inbox, Outbox and the journal. See its [README](samples/Microservices/README.md) and [manual testing guide](samples/Microservices/MANUAL_TESTING.md) |
 
 ---
 
 ## Roadmap
 
-Current architectural priorities include:
+Deferred work, not available today:
 
-### Persistence Providers
-
-Implemented today (SagaStore only):
-
-- `Lycia.Persistence.InMemory`
-- `Lycia.Persistence.Redis`
-- `Lycia.Persistence.SqlServer`
-- `Lycia.Persistence.PostgreSql`
-
-All four implement `ISagaStore` against one shared conformance test suite and provide explicit
-numeric optimistic concurrency (`IVersionedSagaStore`) — `SaveSagaDataAsync(id, data, expectedVersion)`
-throws `SagaConcurrencyException` when the stored version has moved on, the same relational
-`UPDATE ... WHERE Version = @expected` pattern for SQL Server/PostgreSQL and an atomic Lua
-compare-and-set for Redis. Exactly one SagaStore provider may be selected per application;
-selecting a second throws immediately at configuration time. SQL Server and PostgreSQL manage their
-own schema via an embedded migration (`ApplyMigrations` by default).
-
-Not yet built — still future work, not implemented and not to be assumed available:
-
-- strong-consistency relational mode (`WithStrongConsistency()` / `RequireAtomicBoundary()`)
-- split-store Redis + relational mode (`WithSplitStore()`)
-- deterministic replay / Redis rebuild from canonical history
-- reconciliation workers, leases and fencing
-- provider capability reporting and persistence health checks beyond `ISagaStoreHealthCheck`
-
-### Inbox and Outbox
-
-Implemented today:
-
-- `IInboxStore` / `IOutboxStore` provider-neutral contracts, in `Lycia.Saga.Abstractions`
-- `InboxMessageStatus`/`InboxBeginResult` and `OutboxMessageStatus`/`OutboxMessage` models
-- Durable Inbox/Outbox stores for **InMemory** (deterministic, tests only), **Redis**
-  (`RedisInboxStore`/`RedisOutboxStore` — atomic claim via `SETNX`/Lua scripts, standalone/non-clustered
-  Redis only; cross-key Lua atomicity is not Cluster-safe without hash tags, which are not used here),
-  **SQL Server** (`LyciaInbox`/`LyciaOutbox` tables, `UPDATE TOP (@n) ... OUTPUT INSERTED.*` for safe
-  concurrent claiming), and **PostgreSQL** (`lycia_inbox`/`lycia_outbox` tables with `jsonb` payload
-  columns, `FOR UPDATE SKIP LOCKED` for safe concurrent claiming)
-- `UsePersistence().WithInbox<T>()` / `.WithOutbox<T>()` generic DSL, plus named sugar per provider —
-  `.WithInMemoryInbox()`/`.WithInMemoryOutbox()`, `.WithRedisInbox()`/`.WithRedisOutbox()`,
-  `.WithSqlServerInbox()`/`.WithSqlServerOutbox()`, `.WithPostgreSqlInbox()`/`.WithPostgreSqlOutbox()` —
-  all optional and disabled by default, each with the same duplicate-provider guard as SagaStore
-- `SagaDispatcher` Inbox integration: claims (MessageId, HandlerType) before invoking a handler and
-  marks it completed/failed afterward, with zero behavior change when no `IInboxStore` is registered
-- `IOutgoingMessagePipeline`, versioned `OutboxEnvelope`, semantic `OutboxDispatcher`, and hosted
-  `OutboxWorker`: automatic Context capture, due-schedule handoff, Send/Publish/Respond restoration,
-  bounded redispatch, and the conservative Pending→Claimed→Publishing→Published/ConfirmationUnknown/Failed
-  lifecycle described above. Registered whenever an Outbox provider is selected.
-- `ILyciaPersistenceSession`/`ILyciaPersistenceSessionFactory` — a real relational transaction boundary (`RelationalPersistenceSession`, backed by `Microsoft.Data.SqlClient`/`Npgsql`) registered by the SQL Server/PostgreSQL SagaStore providers, and a `NonAtomicPersistenceSession` default for InMemory/Redis that honestly reports `SupportsAtomicTransactions = false`
-
-Still planned (not implemented):
-
-- wiring SagaStore + Inbox + Outbox operations to actually share one `ILyciaPersistenceSession`
-- RabbitMQ publisher-confirm mode (Kafka and NATS JetStream confirmations are integrated; Core NATS
-  and RabbitMQ remain conservatively `ConfirmationUnknown`)
-- canonical incoming/outgoing journals
-- reconciliation workers, leases and fencing
-- fail-closed processing guarantees beyond what SagaStore already provides
-- bounded recovery
-- Redis saga-state rebuild from canonical relational history
-
-### Workflow Visualization
-
-A future Lycia workflow explorer may combine:
-
-- OpenTelemetry spans
-- Lycia message identities
-- saga state
-- Inbox and Outbox lifecycle data
-
-to visualize commands, responses, service boundaries, compensation paths and cross-saga relationships as an interactive workflow graph.
-
-A graph database is not required for the initial implementation. The canonical relational journal and OpenTelemetry metadata provide the necessary lineage.
+- **RabbitMQ publish confirmation.** Reporting RabbitMQ publishes as `Published` requires awaiting a
+  per-publish broker confirmation in the transport; until then RabbitMQ stays `ConfirmationUnknown`.
+- **Redis Cluster.** The Redis Inbox/Outbox scripts touch several keys without hash tags, so they
+  target standalone (non-clustered) Redis.
+- **Journal acceleration and tracking.** A durable snapshot table, and persistent, queryable
+  rebuild-operation tracking (a resumable cursor exists today).
+- **Schema registry integration** for Avro/Protobuf serialization.
+- **Workflow explorer.** Visualizing commands, responses, service boundaries and compensation paths from
+  OpenTelemetry spans, message identities, saga state and the journal.
 
 ---
 
 ## Design Principles
 
-Lycia follows these principles:
-
-- commands have one logical owner
-- events may have multiple subscribers
+- commands have one logical owner; events may have many subscribers
 - responses are targeted, not broadcast
-- workflows continue asynchronously
+- workflows continue asynchronously, and process memory is never the durable workflow boundary
 - replicas share logical application identity
-- process memory is never the durable workflow boundary
-- delivery is at least once
-- handlers remain idempotent
-- retries are bounded
+- delivery is at least once, handlers remain idempotent, and retries are bounded
 - transport behavior stays outside the core
 - operational guarantees are documented without exactly-once claims
 
@@ -1017,9 +787,9 @@ Lycia follows these principles:
 
 ## Project History
 
-Lycia began on **May 28, 2023** with the goal of making distributed saga workflows easier to model, operate and understand.
-
-The name is inspired by the Lycian Way and the idea of turning difficult paths into understandable routes.
+Lycia began on **May 28, 2023** with the goal of making distributed saga workflows easier to model,
+operate and understand. The name is inspired by the Lycian Way and the idea of turning difficult paths
+into understandable routes.
 
 ---
 

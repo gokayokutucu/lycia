@@ -7,6 +7,7 @@ using Lycia.Dispatching;
 using Lycia.Extensions;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Inbox;
+using Lycia.Saga.Abstractions.Persistence;
 using Lycia.Saga.Exceptions;
 using Lycia.Saga.Messaging;
 using Lycia.Saga.Messaging.Handlers;
@@ -26,6 +27,7 @@ public class SagaDispatcherTests
     private sealed class FakeInboxStore : IInboxStore
     {
         private readonly Dictionary<(Guid, Type), InboxMessageStatus> _records = new();
+        public int FailedCount { get; private set; }
 
         public Task<InboxBeginResult> TryBeginAsync(Guid messageId, Type handlerType, CancellationToken cancellationToken = default)
         {
@@ -52,12 +54,99 @@ public class SagaDispatcherTests
 
         public Task MarkFailedAsync(Guid messageId, Type handlerType, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default)
         {
+            FailedCount++;
             _records[(messageId, handlerType)] = InboxMessageStatus.Failed;
             return Task.CompletedTask;
         }
 
         public Task<InboxMessageStatus> GetStatusAsync(Guid messageId, Type handlerType, CancellationToken cancellationToken = default) =>
             Task.FromResult(_records.TryGetValue((messageId, handlerType), out var status) ? status : InboxMessageStatus.None);
+    }
+
+    private sealed class RecordingPersistenceSession(bool commitOutcomeUnknown = false) : ILyciaPersistenceSession
+    {
+        public bool SupportsAtomicTransactions => true;
+        public int CommitCount { get; private set; }
+        public int RollbackCount { get; private set; }
+
+        public Task CommitAsync(CancellationToken cancellationToken = default)
+        {
+            CommitCount++;
+            if (commitOutcomeUnknown)
+                throw new PersistenceCommitOutcomeUnknownException(new IOException("Simulated connection loss."));
+            return Task.CompletedTask;
+        }
+
+        public Task RollbackAsync(CancellationToken cancellationToken = default)
+        {
+            RollbackCount++;
+            return Task.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync() => default;
+    }
+
+    private sealed class RecordingPersistenceSessionFactory(RecordingPersistenceSession session)
+        : ILyciaPersistenceSessionFactory
+    {
+        public Task<ILyciaPersistenceSession> BeginAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<ILyciaPersistenceSession>(session);
+    }
+
+    [Fact]
+    public async Task Local_atomic_dispatch_commits_after_inbox_completion()
+    {
+        var (provider, dispatcher, session, inbox, message, sagaId) = CreateAtomicDispatcher(false);
+        using (provider)
+        {
+            await dispatcher.DispatchAsync(message, typeof(InboxCountingSagaHandler), sagaId, CancellationToken.None);
+            Assert.Equal(1, session.CommitCount);
+            Assert.Equal(0, session.RollbackCount);
+            Assert.Equal(InboxMessageStatus.Completed,
+                await inbox.GetStatusAsync(message.MessageId, typeof(InboxCountingSagaHandler)));
+        }
+    }
+
+    [Fact]
+    public async Task Unknown_commit_outcome_is_not_reclassified_as_failed_or_rolled_back()
+    {
+        var (provider, dispatcher, session, inbox, message, sagaId) = CreateAtomicDispatcher(true);
+        using (provider)
+        {
+            await Assert.ThrowsAsync<PersistenceCommitOutcomeUnknownException>(() =>
+                dispatcher.DispatchAsync(message, typeof(InboxCountingSagaHandler), sagaId, CancellationToken.None));
+            Assert.Equal(1, session.CommitCount);
+            Assert.Equal(0, session.RollbackCount);
+            Assert.Equal(0, inbox.FailedCount);
+        }
+    }
+
+    private static (ServiceProvider Provider, ISagaDispatcher Dispatcher, RecordingPersistenceSession Session,
+        FakeInboxStore Inbox, OrderCreatedEvent Message, Guid SagaId) CreateAtomicDispatcher(bool unknownCommit)
+    {
+        var sagaId = Guid.NewGuid();
+        var services = new ServiceCollection();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string> { ["ApplicationId"] = "TestApp" }!)
+            .Build();
+        var lycia = services.AddLyciaInMemory(configuration)
+            .AddSaga(typeof(InboxCountingSagaHandler));
+        var persistence = lycia.UsePersistence();
+        persistence.RegisterProviderMetadata(PersistenceCapabilityKind.SagaStore, "TestRelational", "db/test", true);
+        persistence.RegisterProviderMetadata(PersistenceCapabilityKind.Inbox, "TestRelational", "db/test", true);
+        persistence.RegisterProviderMetadata(PersistenceCapabilityKind.Outbox, "TestRelational", "db/test", true);
+        lycia.Build();
+
+        var session = new RecordingPersistenceSession(unknownCommit);
+        var inbox = new FakeInboxStore();
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(sagaId));
+        services.AddSingleton<InboxCountingSagaHandler.InvocationCounter>();
+        services.AddSingleton<IInboxStore>(inbox);
+        services.AddScoped<ILyciaPersistenceSessionFactory>(_ => new RecordingPersistenceSessionFactory(session));
+
+        var provider = services.BuildServiceProvider();
+        var message = new OrderCreatedEvent { OrderId = Guid.NewGuid(), SagaId = sagaId };
+        return (provider, provider.GetRequiredService<ISagaDispatcher>(), session, inbox, message, sagaId);
     }
 
     [Fact]

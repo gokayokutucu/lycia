@@ -1,0 +1,80 @@
+# Split Store microservices proof
+
+This executable .NET 9 sample runs five independently addressable services: Checkout, Order,
+Inventory, Payment, and Shipping. RabbitMQ carries commands and targeted responses. Every service
+owns a separate PostgreSQL database and a separate Redis instance.
+
+```mermaid
+flowchart LR
+  Client --> Checkout -->|CreateOrder| Order -->|OrderCreated response| Checkout
+  Checkout -->|ReserveInventory| Inventory -->|InventoryReserved response| Checkout
+  Checkout -->|ProcessPayment| Payment -->|PaymentSucceeded response| Checkout
+  Checkout -->|ShipOrder| Shipping -->|OrderShipped response| Checkout
+```
+
+For each service, Inbox, canonical Saga state, Outbox, and reconciliation intent commit in one
+service-local PostgreSQL transaction. A worker then installs the resulting versioned state in Redis.
+Redis is rebuildable and never participates in the request-path transaction. Outbox publication is
+independent of Redis reconciliation because handler reads use canonical PostgreSQL state; a missing or
+stale Redis projection cannot become the authority.
+
+This is at-least-once delivery. Inbox suppresses duplicate handler execution; Outbox preserves outgoing
+intent. No transaction spans Checkout's Outbox and another service's Inbox. Sample business tables, if
+added, are not automatically enlisted in Lycia's local atomic boundary.
+
+Run from this directory:
+
+```bash
+docker compose up --build -d
+curl -X POST http://localhost:8080/checkout -H 'content-type: application/json' -d '{"orderId":"00000000-0000-0000-0000-000000000000"}'
+curl http://localhost:8080/checkouts/<order-id>
+```
+
+Use `"failAt":"inventory"` or `"failAt":"payment"` in the checkout request to inject a
+deterministic downstream handler failure. The Checkout canonical state remains at the last committed step (`ReservingInventory` or
+`ProcessingPayment`). This makes the downstream failure boundary observable without manufacturing a
+successful response or advancing the Checkout workflow.
+
+Use `docker compose stop checkout-redis` to demonstrate canonical commits surviving Redis failure,
+then `docker compose start checkout-redis` to observe reconciliation. Delete one projection through
+`DELETE /debug/projections/{sagaId}` and queue current-state restoration through
+`POST /debug/projections/{sagaId}/restore`. This restores the operational projection from the latest
+canonical row; `POST /debug/sagas/{sagaId}/rebuild-from-journal` instead rebuilds it from the ordered
+canonical journal, and `GET /debug/sagas/{sagaId}/verify` checks it. None of these invokes business
+handlers or creates broker messages.
+
+Inspect canonical state with `docker compose exec postgres psql -U lycia -d checkout_db` and operational
+state with `docker compose exec checkout-redis redis-cli GET saga:data:<saga-id>`.
+
+## Distributed tracing (Jaeger)
+
+The stack includes Jaeger, receiving OTLP spans from all five services (each reporting a distinct
+service name: `CheckoutService`, `OrderService`, `InventoryService`, `PaymentService`,
+`ShippingService`). Open the UI at **http://localhost:16686** after a checkout to see one connected
+trace spanning the whole workflow, including the Outbox dispatch hop between each service. Jaeger
+being unavailable never fails a checkout — the OTLP exporter drops spans in the background.
+
+## RabbitMQ management UI
+
+**http://localhost:15672** (guest / guest).
+
+## Resetting local state
+
+`./reset-state.sh` resets service-local PostgreSQL + Redis state for one or more services, with
+explicit opt-in RabbitMQ reset (RabbitMQ is shared by every service, so it is never reset
+implicitly):
+
+```bash
+./reset-state.sh checkout           # Checkout's PostgreSQL DB + Redis only
+./reset-state.sh checkout payment   # multiple services
+./reset-state.sh all                # every service's PostgreSQL + Redis, RabbitMQ untouched
+./reset-state.sh rabbitmq           # only the shared broker
+./reset-state.sh --help             # full usage and safety notes
+```
+
+## Manual architecture review
+
+See [MANUAL_TESTING.md](MANUAL_TESTING.md) for a full walkthrough: starting the stack, creating a
+checkout, inspecting PostgreSQL/Redis/RabbitMQ/Jaeger, and step-by-step procedures for the happy
+path, Redis outage/recovery, journal-based rebuild, duplicate delivery, Inventory/Payment failure,
+and process restart.

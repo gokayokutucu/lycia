@@ -10,12 +10,13 @@ namespace Lycia.Persistence.PostgreSql.Tests;
 [Collection("PostgreSqlContainer")]
 public class PostgreSqlInboxStoreConformanceTests(PostgreSqlContainerFixture fixture) : InboxStoreConformanceTests
 {
-    protected override IInboxStore CreateStore()
+    protected override IInboxStore CreateStore(TimeSpan claimRecoveryTimeout)
     {
         var options = new PostgreSqlInboxOptions
         {
             ConnectionString = fixture.ConnectionString,
-            SchemaManagement = SchemaManagementMode.ApplyMigrations
+            SchemaManagement = SchemaManagementMode.ApplyMigrations,
+            ClaimRecoveryTimeout = claimRecoveryTimeout
         };
 
         PostgreSqlInboxOutboxSchemaMigrator.RunAsync(options.ConnectionString, options.SchemaName, options.SchemaManagement)

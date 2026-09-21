@@ -19,6 +19,9 @@ using Lycia.Saga.Abstractions.Handlers;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Abstractions.Middlewares;
 using Lycia.Saga.Abstractions.Outbox;
+using Lycia.Extensions.Reliability;
+using Lycia.Saga.Abstractions.Persistence;
+using Lycia.Saga.Abstractions.Persistence.Journal;
 using Lycia.Saga.Abstractions.Serializers;
 using Lycia.Saga.Contexts;
 using Lycia.Saga.Messaging.Handlers;
@@ -118,6 +121,8 @@ namespace Lycia.Extensions
             services.TryAddScoped<ISagaDispatcher, SagaDispatcher>();
             services.TryAddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
             services.TryAddScoped<ISagaContextAccessor, SagaContextAccessor>();
+            services.TryAddScoped<ISagaJournalContextAccessor, SagaJournalContextAccessor>();
+            services.TryAddScoped<ILyciaReliabilityDiagnostics, LyciaReliabilityDiagnostics>();
 
             // Observability primitives (vendor-agnostic)
             services.TryAddSingleton<LyciaActivitySourceHolder>();
@@ -282,6 +287,8 @@ namespace Lycia.Extensions
             // Core services
             services.TryAddScoped<ISagaIdGenerator, DefaultSagaIdGenerator>();
             services.TryAddScoped<ISagaContextAccessor, SagaContextAccessor>();
+            services.TryAddScoped<ISagaJournalContextAccessor, SagaJournalContextAccessor>();
+            services.TryAddScoped<ILyciaReliabilityDiagnostics, LyciaReliabilityDiagnostics>();
             services.TryAddScoped<ISagaDispatcher, SagaDispatcher>();
             services.TryAddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
             

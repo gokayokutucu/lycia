@@ -6,8 +6,22 @@ namespace Lycia.Saga.Abstractions.Outbox;
 /// <summary>Outcome counts from one <see cref="IOutboxDispatcher.DispatchPendingBatchAsync"/> call.</summary>
 public class OutboxDispatchResult
 {
+    /// <summary>Gets or sets how many messages this pass claimed for dispatch.</summary>
     public int Claimed { get; set; }
+
+    /// <summary>Gets or sets how many messages the broker positively confirmed.</summary>
     public int Published { get; set; }
+
+    /// <summary>Gets or sets how many messages completed an attempt without a confirmation and remain retryable.</summary>
     public int ConfirmationUnknown { get; set; }
+
+    /// <summary>Gets or sets how many messages failed permanently before reaching the transport.</summary>
     public int Failed { get; set; }
+
+    /// <summary>
+    /// Gets or sets how many messages used their last permitted attempt without reaching the transport and
+    /// were moved to the terminal <see cref="OutboxMessageStatus.Abandoned"/> state. A non-zero value means
+    /// outgoing business intent may never have been delivered and needs operator attention.
+    /// </summary>
+    public int Abandoned { get; set; }
 }
