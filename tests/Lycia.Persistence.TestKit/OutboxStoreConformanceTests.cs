@@ -106,26 +106,38 @@ public abstract class OutboxStoreConformanceTests
         Assert.Equal("broker unreachable", loaded.FailureInfo?.Reason);
     }
 
+    // The relational providers keep every conformance test's rows in one shared table, so these tests
+    // claim a large batch and look for their own message instead of asserting on "the" claimed row or on
+    // an empty result. Each test also passes the same recovery window to every claim, exactly as the
+    // worker does: Redis fixes a claimed message's next eligibility at claim time, so reclaiming with a
+    // different window than the claim used would not model real operation.
+    private const int WholeTable = 10_000;
+
+    private static bool ContainsMessage(IReadOnlyList<OutboxMessage> claimed, Guid messageId) =>
+        claimed.Any(candidate => candidate.MessageId == messageId);
+
     [Fact]
     public async Task ConfirmationUnknown_Is_Reclaimable_Until_MaxAttempts()
     {
         var store = CreateStore();
         var message = NewMessage();
-        var recoveryTimeout = TimeSpan.FromMilliseconds(10);
+        var recoveryTimeout = TimeSpan.FromMilliseconds(200);
         await store.AddAsync(message);
 
         for (var attempt = 1; attempt <= 3; attempt++)
         {
-            Assert.Equal(message.MessageId,
-                Assert.Single(await store.ClaimPendingBatchAsync(1, maxAttempts: 3, recoveryTimeout: recoveryTimeout))
-                    .MessageId);
+            Assert.True(ContainsMessage(
+                await store.ClaimPendingBatchAsync(WholeTable, maxAttempts: 3, recoveryTimeout: recoveryTimeout),
+                message.MessageId), $"attempt {attempt} did not claim the message");
             await store.MarkPublishingAsync(message.MessageId);
             await store.MarkConfirmationUnknownAsync(message.MessageId);
             Assert.Equal(attempt, (await store.GetByMessageIdAsync(message.MessageId))!.RetryCount);
-            await Task.Delay(30);
+            await Task.Delay(600);
         }
 
-        Assert.Empty(await store.ClaimPendingBatchAsync(1, maxAttempts: 3, recoveryTimeout: recoveryTimeout));
+        Assert.False(ContainsMessage(
+            await store.ClaimPendingBatchAsync(WholeTable, maxAttempts: 3, recoveryTimeout: recoveryTimeout),
+            message.MessageId));
         Assert.Equal(OutboxMessageStatus.ConfirmationUnknown,
             (await store.GetByMessageIdAsync(message.MessageId))!.Status);
     }
@@ -140,19 +152,21 @@ public abstract class OutboxStoreConformanceTests
     {
         var store = CreateStore();
         var message = NewMessage();
-        var recoveryTimeout = TimeSpan.FromMinutes(5);
+        var recoveryTimeout = TimeSpan.FromSeconds(2);
         await store.AddAsync(message);
 
-        Assert.Equal(message.MessageId,
-            Assert.Single(await store.ClaimPendingBatchAsync(1, recoveryTimeout: recoveryTimeout)).MessageId);
+        Assert.True(ContainsMessage(
+            await store.ClaimPendingBatchAsync(WholeTable, recoveryTimeout: recoveryTimeout), message.MessageId));
         await store.MarkPublishingAsync(message.MessageId);
         await store.MarkConfirmationUnknownAsync(message.MessageId);
 
-        Assert.Empty(await store.ClaimPendingBatchAsync(1, recoveryTimeout: recoveryTimeout));
+        Assert.False(ContainsMessage(
+            await store.ClaimPendingBatchAsync(WholeTable, recoveryTimeout: recoveryTimeout), message.MessageId));
 
         // ...and it is handed back once that window has passed.
-        Assert.Equal(message.MessageId,
-            Assert.Single(await store.ClaimPendingBatchAsync(1, recoveryTimeout: TimeSpan.Zero)).MessageId);
+        await Task.Delay(recoveryTimeout + TimeSpan.FromSeconds(1));
+        Assert.True(ContainsMessage(
+            await store.ClaimPendingBatchAsync(WholeTable, recoveryTimeout: recoveryTimeout), message.MessageId));
     }
 
     /// <summary>
@@ -165,7 +179,7 @@ public abstract class OutboxStoreConformanceTests
         var store = CreateStore();
         var message = NewMessage();
         await store.AddAsync(message);
-        await store.ClaimPendingBatchAsync(10);
+        Assert.True(ContainsMessage(await store.ClaimPendingBatchAsync(WholeTable), message.MessageId));
 
         var failureInfo = new Lycia.Common.SagaSteps.SagaStepFailureInfo(
             "attempts exhausted without confirmation", nameof(TimeoutException), null);
@@ -176,7 +190,8 @@ public abstract class OutboxStoreConformanceTests
         Assert.Equal("attempts exhausted without confirmation", loaded.FailureInfo?.Reason);
 
         // Terminal: not claimable again, even with the recovery window fully elapsed.
-        Assert.Empty(await store.ClaimPendingBatchAsync(10, recoveryTimeout: TimeSpan.Zero));
+        Assert.False(ContainsMessage(
+            await store.ClaimPendingBatchAsync(WholeTable, recoveryTimeout: TimeSpan.Zero), message.MessageId));
     }
 
     [Fact]
