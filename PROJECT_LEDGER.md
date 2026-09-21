@@ -164,6 +164,16 @@ final validation are complete; see `FINALIZATION`.)
   (`31b4a19`, merged `3ef7cb9`); Outbox abandon refinement (`aa1e543`, merged `065e963`); handler
   failure visibility (`07692b5`, merged `9fb791e`); documentation release audit and CI on `dev`
   (`cbe600e`, `955bc6d`, `c0155e2`, merged `925c6d2`).
+- **Post-1.18.0 patch — Outbox final-attempt crash recovery:** a worker that died on the last permitted
+  attempt left a `Publishing` row at the attempt cap that no claim query returned, so the message was
+  neither retried nor terminal (Medium; found after the 1.18.0 release). The attempt cap now gates only the
+  statuses a new attempt starts from; a stale `Claimed`/`Publishing` row is handed back whatever its
+  `RetryCount`, atomically, in all four providers. The dispatcher republishes an in-doubt final attempt once
+  with the same `MessageId` (at-least-once), abandons a lost recovery attempt instead of looping, and leaves
+  a shutdown-cancelled final attempt for recovery. No new counter and no schema change. Verified on real
+  Redis, SQL Server and PostgreSQL and end to end on the Microservices stack. Feature commit `a3797c8`;
+  merged into `dev` as `475f19a`. Not released: a `1.18.1` tag, `main` merge and publication are pending an
+  explicit release decision.
 
 # FINALIZATION
 
