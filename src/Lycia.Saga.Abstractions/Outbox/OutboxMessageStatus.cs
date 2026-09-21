@@ -37,7 +37,7 @@ public enum OutboxMessageStatus
     /// action; it exists so exhausted work is discoverable instead of sitting indefinitely in a
     /// non-terminal state that no worker will ever claim again. A final attempt that the transport
     /// accepted but cannot confirm stays <see cref="ConfirmationUnknown"/>: that is the normal outcome
-    /// for an unconfirming transport such as RabbitMQ, not a failure.
+    /// for an unconfirming transport such as Core NATS (or RabbitMQ with publisher confirms disabled), not a failure.
     /// </summary>
     Abandoned
 }

@@ -9,6 +9,11 @@ on:
     # well, and a newly created tag has no meaningful diff base, so a release tag can end up not
     # building - and therefore not publishing - depending on what its commit happened to touch.
     # Every main/dev push and v* tag therefore runs the full CI.
+  # The minimum-version compatibility run is too slow to repeat on every push, so it also runs weekly and
+  # on demand; a release tag always runs it (see the compatibility-minimum job).
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
 
 # Least privilege by default. Only the publish job additionally gets id-token: write, which is what
 # lets it mint the GitHub OIDC token that NuGet Trusted Publishing exchanges for a short-lived key.
@@ -55,36 +60,6 @@ jobs:
     name: Integration tests (.NET Core)
     runs-on: ubuntu-latest
 
-    services:
-      redis:
-        image: redis:7-alpine
-        ports: ['6379:6379']
-      rabbitmq:
-        image: rabbitmq:3.13-management
-        ports: ['5672:5672', '15672:15672']
-      nats:
-        image: nats:2.11-alpine
-        ports: ['4222:4222', '8222:8222']
-        options: >-
-          --health-cmd "wget -q -O - http://localhost:8222/healthz | grep -q ok"
-          --health-interval 10s --health-timeout 5s --health-retries 10
-      kafka:
-        image: confluentinc/cp-kafka:7.7.1
-        ports: ['9092:9092']
-        env:
-          KAFKA_NODE_ID: 1
-          KAFKA_PROCESS_ROLES: broker,controller
-          KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
-          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-          KAFKA_LISTENERS: PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092
-          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
-          KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-          KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-          KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-          KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-          CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
-
     steps:
       - name: Checkout (full history + tags for NBGV)
         uses: actions/checkout@v4
@@ -107,10 +82,10 @@ jobs:
       - name: Build (Release)
         run: dotnet build Lycia.sln -c Release --no-restore
 
-      - name: Run integration tests
-        env:
-          LYCIA__EVENTBUS__CONNECTIONSTRING: amqp://guest:guest@127.0.0.1:5672/
-          LYCIA__EVENTSTORE__CONNECTIONSTRING: 127.0.0.1:6379
+      # The suite starts its own RabbitMQ, Redis, NATS and Kafka containers (Testcontainers) from the images
+      # pinned in infrastructure-versions.json - the "current" track. No service containers are declared here:
+      # they were never used by the tests and would only hide which versions actually run.
+      - name: Run integration tests (current infrastructure versions)
         run: dotnet test tests/Lycia.IntegrationTests/Lycia.IntegrationTests.csproj -c Release --no-build --logger "trx;LogFileName=integration.trx"
 
       - name: Publish test results
@@ -119,6 +94,89 @@ jobs:
         with:
           name: integration-test-results
           path: '**/integration.trx'
+
+  provider-tests:
+    name: Persistence provider tests (current infrastructure versions)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history + tags for NBGV)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            10.0.x
+            9.0.x
+            8.0.x
+            6.0.x
+
+      - name: Restore
+        run: dotnet restore Lycia.sln
+
+      - name: Build (Release)
+        run: dotnet build Lycia.sln -c Release --no-restore
+
+      # Redis, PostgreSQL and SQL Server containers come from infrastructure-versions.json ("current" track).
+      - name: Run provider tests
+        run: |
+          for PROJECT in Lycia.Persistence.InMemory.Tests Lycia.Persistence.Redis.Tests Lycia.Persistence.PostgreSql.Tests Lycia.Persistence.SqlServer.Tests; do
+            dotnet test "tests/$PROJECT/$PROJECT.csproj" -c Release --no-build --logger "trx;LogFileName=$PROJECT.trx"
+          done
+
+      - name: Publish test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-test-results
+          path: '**/Lycia.Persistence.*.Tests.trx'
+
+  compatibility-minimum:
+    name: Minimum supported infrastructure versions
+    runs-on: ubuntu-latest
+    # Runs the same suites against the *minimum* versions in infrastructure-versions.json, which is what makes
+    # "supported minimum" a tested claim. It repeats the container-backed suites with older images, so it is not
+    # repeated on every push: it runs weekly, on demand, and always for a release tag (publish needs it).
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    env:
+      LYCIA_TEST_INFRA_TRACK: minimum
+    steps:
+      - name: Checkout (full history + tags for NBGV)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            10.0.x
+            9.0.x
+            8.0.x
+            6.0.x
+
+      - name: Restore
+        run: dotnet restore Lycia.sln
+
+      - name: Build (Release)
+        run: dotnet build Lycia.sln -c Release --no-restore
+
+      - name: Run suites against the minimum versions
+        run: |
+          for PROJECT in Lycia.Tests Lycia.Persistence.Redis.Tests Lycia.Persistence.PostgreSql.Tests Lycia.Persistence.SqlServer.Tests Lycia.IntegrationTests; do
+            dotnet test "tests/$PROJECT/$PROJECT.csproj" -c Release --no-build --logger "trx;LogFileName=minimum-$PROJECT.trx"
+          done
+
+      - name: Publish test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compatibility-minimum-test-results
+          path: '**/minimum-*.trx'
 
   unit-tests-netframework:
     name: Unit tests (NetFramework)
@@ -193,6 +251,10 @@ jobs:
           Write-Host 'Memurai started, verifying port 6379...'
           Test-NetConnection -ComputerName localhost -Port 6379
 
+      # The Windows jobs run the net48 (RabbitMQ.Client 6.x) suites against native services, not the pinned
+      # images: Memurai stands in for Redis and Chocolatey installs whatever RabbitMQ it currently ships. They
+      # are therefore NOT part of the version contract; the net48 client path is validated against the pinned
+      # brokers by running the same suite with Testcontainers (see DEVELOPERS.md).
       - name: Setup RabbitMQ (Windows)
         run: |
           choco install rabbitmq -y
@@ -224,10 +286,10 @@ jobs:
   publish:
     name: Pack & Publish
     runs-on: ubuntu-latest
-    needs: [unit-tests, integration-tests, unit-tests-netframework, integration-tests-netframework]
+    needs: [unit-tests, integration-tests, provider-tests, compatibility-minimum, unit-tests-netframework, integration-tests-netframework]
     # Release-only: an ordinary push/merge to main must never publish NuGet packages.
-    # This job only runs when the triggering ref is a release tag matching v*.
-    if: startsWith(github.ref, 'refs/tags/v')
+    # This job only runs for a push of a release tag matching v*; a schedule or manual run never publishes.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     # NuGet Trusted Publishing (https://learn.microsoft.com/nuget/nuget-org/trusted-publishing).
     # id-token: write lets this job request a GitHub OIDC token; NuGet/login exchanges it for a
     # short-lived nuget.org API key after checking it against the "lycia-release" trusted publishing

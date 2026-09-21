@@ -284,17 +284,101 @@ trace.
 
 ### Confirmation contract
 
-Only `IConfirmedEventBus` success becomes `Published`. Kafka (`EnableIdempotence`, `Acks.All`) and NATS
-JetStream implement it. RabbitMQ and Core NATS do not, so an accepted publish becomes
-`ConfirmationUnknown`. A transport exception is also `ConfirmationUnknown`, because the broker may have
-received the message before the failure. Only a permanent local error before any publish — envelope,
-type resolution or serialization — becomes `Failed`.
+Only a confirmed transport's success becomes `Published`. A transport confirms when it implements
+`IConfirmedEventBus` and, if it also implements `IConditionalConfirmedEventBus`, reports
+`ConfirmationsAvailable`. The dispatcher chooses the confirmed methods on that basis, not on the interface
+alone:
+
+| Transport | Confirms | Why |
+| --- | --- | --- |
+| Kafka | Always | Idempotent producer with `Acks.All`; the delivery report is the confirmation |
+| NATS JetStream | Yes | The JetStream publish acknowledgement (`ack.EnsureSuccess()`) |
+| Core NATS | No | Core NATS has no publish acknowledgement; `ConfirmationsAvailable` is false |
+| RabbitMQ | While `PublisherConfirms` is enabled (default) | RabbitMQ's publisher confirm; see [RabbitMQ publisher confirms](#rabbitmq-publisher-confirms) |
+
+An unconfirming transport is called through plain `Send`/`Publish`/`Respond`, and a completed attempt is
+recorded as `ConfirmationUnknown`. A transport exception is also `ConfirmationUnknown`, because the broker
+may have received the message before the failure. Only a permanent local error before any publish —
+envelope, type resolution or serialization — becomes `Failed`.
 
 This is deliberately conservative: a message is never recorded as delivered without a positive
 confirmation, and the cost is redelivery, which the at-least-once contract and the Inbox already absorb.
-RabbitMQ's `ConfirmationUnknown` is the current validated behavior of the transport integration, not a
-fixed architectural limit; implementing confirmation requires awaiting per-publish broker confirmation
-inside `RabbitMqEventBus` and is tracked in the ledger backlog.
+`IConditionalConfirmedEventBus` exists because a type check cannot express "confirms, but only in this
+configuration". Before it, `NatsEventBus` implemented `IConfirmedEventBus` unconditionally although its
+confirmed methods throw in Core mode, so an Outbox on Core NATS would have failed every attempt.
+
+### RabbitMQ publisher confirms
+
+**What is confirmed.** RabbitMQ sends `basic.ack` once it has taken responsibility for a published message:
+for a routable message, when every queue it routes to has accepted it — for a persistent message on a
+durable queue that means persisted to disk (classic queues may batch the write for up to a few hundred
+milliseconds), and for a quorum queue that a quorum of replicas accepted it. An unroutable message is acked
+once the exchange determines that no queue receives it, after a `basic.return` if it was published as
+mandatory. `basic.nack` only happens when a queue's Erlang process fails, for example a queue with
+`x-overflow=reject-publish` that is full. A confirm covers publisher-to-broker communication only and is
+unrelated to consumer acknowledgements. Lycia declares durable queues and publishes persistent messages
+(`Persistent = true`); it does not set a queue type, so the broker's default (classic) applies.
+
+**Channels.** `RabbitMqEventBus` keeps two channels. `_channel` declares topology and hosts consumers.
+`_publishChannel` is created with confirms enabled and serves every publish: `Send`, `Publish`, `Respond`,
+dead-lettering (`PublishToDeadLetterQueueAsync`) and native scheduling (`ScheduleNativeAsync`). Publishing
+is serialized (`_publishLock`): the client documents that a channel must not be shared by concurrent
+publishers, and the confirmation bookkeeping assumes one publish in flight. The channel is created in one
+place (`CreatePublishChannelAsync` / `CreatePublishChannel`) so a recreated channel cannot come back without
+confirms, and the client's automatic recovery restores them on a recovered one (verified against a broker
+restart on both client generations). Exchange declarations are cached per publish channel instance; a
+channel discarded after a failure starts with an empty cache, which heals a deleted exchange.
+
+**Client APIs.** The 7.1.2 build (net8.0+) uses `IConnection.CreateChannelAsync(new
+CreateChannelOptions(publisherConfirmationsEnabled: true, publisherConfirmationTrackingEnabled: true))`;
+with tracking enabled `IChannel.BasicPublishAsync` completes only when the broker confirms, and a nack or a
+returned mandatory message surfaces as `PublishException` (`IsReturn` distinguishes the two). The 6.8.1
+build (netstandard2.0) uses `IModel.ConfirmSelect()` and the `BasicAcks`, `BasicNacks` and `BasicReturn`
+events. Neither client generation needed a dependency change.
+
+**The 6.8.1 `WaitForConfirms` defect.** `IModel.WaitForConfirms` answers from a shared `_onlyAcksReceived`
+flag that the ack/nack handler updates on another thread, and the signal that unblocks the waiter is not
+atomic with that update. Under rapid publish-then-publish it can report a broker nack as an ack, which would
+record a rejected message as delivered. This was measured, not assumed: 40 rapid publishes to a queue that
+holds five and rejects the rest produced six "confirmed" instead of five in every run. The netstandard2.0
+path therefore does not call `WaitForConfirms`. `PublishConfirmTracker` arms the publish sequence number
+(`NextPublishSeqNo`) before sending and resolves it from the ack/nack frames itself, and
+`Every_rejected_publish_is_reported_as_rejected_under_rapid_publishing` pins the exact counts on both client
+generations.
+
+**Routing policy.** With confirms on, commands and responses are published `mandatory`: each has exactly
+one owner queue, so no route is a failure, and through the Outbox a command whose owner has not declared its
+queue yet is retried instead of silently lost. Events are only mandatory when
+`EventBusOptions.RequireRoutableEvents` is set, because an event may legitimately have no subscriber (the
+Microservices sample publishes one nobody consumes). With confirms off the historical non-mandatory
+fire-and-forget behavior is kept.
+
+**Outcomes and Outbox mapping.**
+
+| Broker/client outcome | Exception | Outbox result |
+| --- | --- | --- |
+| `basic.ack` | none | `Published` |
+| `basic.nack` | `RabbitMqPublishNackedException` | failed attempt (retried; final attempt `Abandoned`) |
+| `basic.return` (mandatory, unroutable) | `RabbitMqUnroutableMessageException` | failed attempt (retried until a route exists; final attempt `Abandoned`) |
+| No confirm within `PublisherConfirmTimeout`; channel or connection lost while waiting | `RabbitMqPublishOutcomeUnknownException` | failed attempt; the same `MessageId` is republished |
+| Connection cannot be established, or the exchange declaration fails or times out | the underlying exception (`TimeoutException` for a declaration that did not answer) | failed attempt; nothing was published |
+| Caller cancellation | `OperationCanceledException` | never `Published`; the dispatcher's shutdown handling applies |
+
+An unknown outcome is deliberately not converted into a definite failure: the broker may already hold the
+message. After an unknown outcome, a timeout or cancellation the publish channel is discarded, so an
+outstanding confirmation from the abandoned publish cannot be mistaken for the next one.
+
+**Crash windows.** Publisher confirms narrow the ambiguity window; they do not close it, and Lycia remains
+at-least-once.
+
+| Window | Result |
+| --- | --- |
+| Crash before `BasicPublishAsync` | Row is `Publishing`; recovered by the [crash-recovery](#crash-recovery-of-an-in-doubt-attempt) rules |
+| Crash during `BasicPublishAsync` | Same. The broker may or may not have the message |
+| Broker holds the message, connection dies before the client observes the confirm | `RabbitMqPublishOutcomeUnknownException`; republished with the same `MessageId`. Two copies exist; the Inbox absorbs the duplicate (tested with a fault-injecting proxy) |
+| Client observes the confirm, process dies before the Outbox records `Published` | Row is `Publishing`; recovered and republished (a duplicate) |
+| Broker restart | The client recovers connection and channels; confirms remain enforced; the Outbox retries in the meantime |
+| Two recovering workers | Exactly one takes a stale row through the store's atomic claim |
 
 ### Retry and exhaustion
 
@@ -608,8 +692,16 @@ idempotency, concurrency, Inbox takeover and Outbox claim semantics identical ac
 Outbox claim SQL and Lua only run against real engines in the provider suites, so changes to them must be
 validated there.
 
-The CI workflow runs `Lycia.Tests`, `Lycia.IntegrationTests` and the two NetFramework projects. The
-provider suites and the Microservices end-to-end run are part of release validation.
+The CI workflow runs `Lycia.Tests`, `Lycia.IntegrationTests`, the four provider suites
+(`Lycia.Persistence.{InMemory,Redis,PostgreSql,SqlServer}.Tests`) and the two NetFramework projects on
+every `main`/`dev` push and `v*` tag. The Microservices end-to-end run is part of release validation. The
+container-backed suites pull every image from [`infrastructure-versions.json`](infrastructure-versions.json)
+(see [Supported infrastructure versions](#supported-infrastructure-versions)); no test hard-codes an image.
+
+The two NetFramework projects run on Windows runners against native services (Memurai for Redis, the
+Chocolatey RabbitMQ package), which cannot be pinned to the contract. They cover the net48 / `RabbitMQ.Client`
+6.x code path, and the same projects run against the pinned brokers locally through Testcontainers (they
+choose a container unless `CI=true`), which is how that path is validated against the contract's versions.
 
 **Microservices end-to-end.** `samples/Microservices` runs five services on RabbitMQ, PostgreSQL,
 per-service Redis and Jaeger. [MANUAL_TESTING.md](samples/Microservices/MANUAL_TESTING.md) covers the
@@ -617,6 +709,74 @@ happy path with canonical, journal, Redis, Inbox, Outbox and reconciliation chec
 recovery; projection deletion and journal rebuild; duplicate delivery; Inventory and Payment failure;
 process restart; RabbitMQ reset; and Jaeger trace inspection. `reset-state.sh` resets per-service
 PostgreSQL and Redis state, and RabbitMQ only when explicitly requested.
+
+---
+
+## Supported infrastructure versions
+
+Lycia's server compatibility is a contract, kept in one machine-readable file,
+[`infrastructure-versions.json`](infrastructure-versions.json), and mirrored in the README table. Each
+integration (RabbitMQ, Redis, PostgreSQL, SQL Server, Kafka, NATS) has a `minimum` and a `current` entry,
+each a version series plus the exact image tag that is run for it. Tags are always explicit; `latest` is
+rejected.
+
+### Four different words
+
+- **Technical floor** — the oldest version the implementation could work on, derived from the features it
+  uses (for example `SKIP LOCKED` needs PostgreSQL 9.5). Analysis only; can be measured, is not a promise.
+- **Supported minimum** — the oldest version Lycia commits to.
+- **Tested minimum** — the oldest version the automated suites run against.
+- **Tested current** — the recent version every CI run exercises.
+
+A version is *supported* only if it is *tested*: the supported minimum must equal the tested minimum. A
+version between the technical floor and the supported minimum is "technically compatible" at best, and the
+documentation must never blur that into "supported".
+
+### How a minimum is chosen
+
+The supported minimum is the **higher** of
+
+1. the technical floor (proved by implementation analysis, and where feasible by running the suite or the
+   offending statement against the older version), and
+2. the oldest series the vendor still supports at the time of the decision (from the vendor's own lifecycle
+   documentation, never from memory).
+
+It is accepted only after the complete container-backed suites pass on it. Where a vendor publishes no
+support policy (NATS), the minimum is the technical floor, and the README says that no vendor policy backs
+it. A minimum that cannot be proven by analysis plus documentation plus a test run is recorded as
+*unresolved* in the ledger rather than guessed.
+
+### Test tracks and CI cost
+
+- The default `current` track runs on every push in the existing jobs (`unit-tests`, `integration-tests`,
+  `provider-tests`).
+- Setting `LYCIA_TEST_INFRA_TRACK=minimum` runs the same suites against the `minimum` images. The
+  `compatibility-minimum` job does this for `Lycia.Tests`, the Redis/PostgreSQL/SQL Server provider suites
+  and `Lycia.IntegrationTests`. It is not repeated on every push: it runs weekly (Monday, from the default
+  branch), on `workflow_dispatch`, and for every `v*` tag, and the `publish` job needs it, so a release
+  cannot ship with the minimum untested.
+- `LYCIA_TEST_{RABBITMQ,REDIS,POSTGRESQL,SQLSERVER,KAFKA,NATS}_IMAGE` overrides one image. This is how a
+  candidate version, or a registry mirror, is tried without editing the contract.
+- The CI service images, `docker-compose.yml` and `samples/Microservices/docker-compose.yml` run the
+  `current` images. `InfrastructureContractTests` fails if any of them, a test project or the README table
+  disagrees with the file, so a container tag cannot be bumped without deciding what it means for
+  compatibility.
+
+### Raising or changing a version
+
+- **Raising the current version** (a new vendor release): edit `current` in the file, run the full suites
+  on it, and update the README table. This never changes what is supported.
+- **Raising the minimum** is a compatibility change: it needs a ledger entry, a release note, and at least a
+  minor version bump; do it when the vendor ends support for the series, not before. It is never a side
+  effect of a tag bump, an image refresh or a dependency update.
+- **Lowering the minimum** requires the complete suites to pass on the older version first.
+- A new release **tag never changes compatibility**. Compatibility only changes through this file.
+
+Known upcoming change: PostgreSQL 14 reaches its final release on 12 November 2026, after which the
+PostgreSQL minimum should be reviewed against this rule.
+
+Not supported, and not implemented: RabbitMQ Streams and Super Streams, Kafka Share Groups (KIP-932) and
+Redis Cluster. They appear in no supported column and are tracked in the ledger.
 
 ---
 
@@ -632,7 +792,8 @@ matching tag a public release with exactly that version. Builds of branches carr
 
 - Pushes to `main` and `dev` run CI (build and tests) only and never publish.
 - Publishing is driven only by a release tag matching `v*`. The `publish` job runs only when
-  `github.ref` starts with `refs/tags/v`, and only after all test jobs pass.
+  `github.ref` starts with `refs/tags/v` for a `push` event (a schedule or manual run never publishes),
+  and only after all test jobs pass, including the minimum-version compatibility job.
 - Before publishing, the job requires the packed `Lycia` version to equal the tag without its `v`, and
   validates that exactly the eleven public packages were produced at that version, that no package
   depends on an internal project, and that the relational providers embed

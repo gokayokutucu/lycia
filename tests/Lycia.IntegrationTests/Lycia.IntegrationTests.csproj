@@ -42,4 +42,8 @@
       <ProjectReference Include="..\Lycia.Tests\Lycia.Tests.csproj" />
     </ItemGroup>
 
+    <!-- The compatibility contract JSON; the InfrastructureVersions helper comes from the Lycia.Tests reference. -->
+    <ItemGroup>
+        <None Include="..\..\infrastructure-versions.json" Link="infrastructure-versions.json" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
 </Project>

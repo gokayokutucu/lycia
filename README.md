@@ -322,18 +322,55 @@ header normalization and the fixed TTL + DLX scheduling buckets. Consumers expos
 signal once their queues, bindings and consumers are registered, which avoids startup races where a
 message could be published before its binding exists.
 
-RabbitMQ publishes are currently reported to the Outbox as `ConfirmationUnknown` rather than
-`Published`, because the transport abstraction does not yet await a per-publish broker confirmation for
-RabbitMQ. See [Outbox](#outbox) for what that means operationally. This is the current validated
-behavior and may be revisited.
+#### Publisher confirms
+
+RabbitMQ publishing uses **publisher confirms** by default. Every `Send`, `Publish` and `Respond` waits
+for RabbitMQ's server-side confirmation, and an Outbox message the broker confirmed is recorded as
+`Published`.
+
+```csharp
+lycia
+    .UseTransport()
+        .RabbitMq(options =>
+        {
+            options.PublisherConfirms = true;                          // default
+            options.PublisherConfirmTimeout = TimeSpan.FromSeconds(30); // default; keep the Outbox RecoveryTimeout longer
+            options.RequireRoutableEvents = false;                     // default
+        });
+```
+
+| Outcome of a publish | What Lycia does |
+| --- | --- |
+| Confirmed (`basic.ack`) | The publish returns; the Outbox records `Published` |
+| Rejected (`basic.nack`) | Throws `RabbitMqPublishNackedException`. RabbitMQ only nacks when a queue process fails, for example a queue that rejects publishes because it is full. The message was not taken |
+| Unroutable (`basic.return`) | Throws `RabbitMqUnroutableMessageException`. No queue received the message, so it is never reported as delivered |
+| Unknown — no confirm within the timeout, or the connection was lost while waiting | Throws `RabbitMqPublishOutcomeUnknownException`. The broker may already hold the message, so this is not reported as a failure of delivery; the Outbox keeps the message and publishes it again with the same `MessageId` |
+| Broker unreachable before anything was sent | The connection error; nothing was published |
+
+Commands and responses are always published as *mandatory*: each has exactly one owner queue, so no route
+is a failure (and, through the Outbox, a command whose owner has not declared its queue yet is retried
+instead of being lost). An event may legitimately have no subscriber, so by default the broker confirms it
+and the exchange drops it; set `RequireRoutableEvents = true` to have such an event returned as unroutable.
+
+A confirm is RabbitMQ accepting responsibility for the message. It is **not** consumer delivery or
+processing: consumer acknowledgements are separate. What accepting responsibility means depends on the
+queue. Lycia publishes persistent messages to durable queues; for those, RabbitMQ confirms after it has
+persisted the message (classic queues may batch that write for up to a few hundred milliseconds), and for
+quorum queues after a quorum of replicas accepted it. Lycia is still at-least-once: if the connection is
+lost after the broker accepted a message but before the confirm is observed, the publish is retried and the
+consumer receives a duplicate, which the Inbox and idempotent handlers absorb.
+
+Setting `PublisherConfirms = false` restores fire-and-forget publishing: Outbox messages then settle as
+`ConfirmationUnknown`, and an unroutable command is dropped by the broker without an error.
 
 ### NATS and Kafka
 
 NATS uses JetStream by default, with explicit acknowledgements, bounded redelivery and durable
 consumers; Core NATS is available for intentionally ephemeral workloads. Kafka commits an offset only
 after the handler acknowledges, and ordering is partition-scoped (partition key `CorrelationId`, then
-`SagaId`, then `MessageId`). Kafka's idempotent `acks=all` producer and NATS JetStream report positive
-broker acceptance, so Outbox messages sent through them become `Published`.
+`SagaId`, then `MessageId`). Kafka's idempotent `acks=all` producer, NATS JetStream and RabbitMQ publisher
+confirms report positive broker acceptance, so Outbox messages sent through them become `Published`. Core
+NATS has no acknowledgement, so Outbox messages sent through it stay `ConfirmationUnknown`.
 
 ---
 
@@ -471,8 +508,8 @@ creates a new logical message.
 | `Pending` | Captured durably; not yet claimed |
 | `Claimed` | Claimed by a worker for dispatch |
 | `Publishing` | A publish attempt is in flight |
-| `Published` | The transport positively confirmed the publish (Kafka, NATS JetStream) |
-| `ConfirmationUnknown` | The publish may have succeeded but was not confirmed — the transport cannot confirm (RabbitMQ, Core NATS) or the attempt threw. Never auto-promoted to `Published` |
+| `Published` | The transport positively confirmed the publish (RabbitMQ publisher confirms, Kafka, NATS JetStream) |
+| `ConfirmationUnknown` | The publish may have succeeded but was not confirmed — the transport cannot confirm (Core NATS, or RabbitMQ with publisher confirms disabled), the outcome could not be established, or the attempt threw. Never auto-promoted to `Published` |
 | `Failed` | A permanent local error before any publish, such as an unresolvable message type or an invalid envelope. Not retried |
 | `Abandoned` | Terminal: the last permitted attempt never reached the transport, or workers stopped on both the final attempt and its recovery attempt. Needs operator attention |
 
@@ -496,8 +533,8 @@ recovery attempt is lost as well, the message becomes `Abandoned` instead of loo
   message becomes `Abandoned`, the reason is recorded in its failure info,
   and a warning naming the `MessageId` and `SagaId` is logged. `OutboxDispatchResult.Abandoned` carries
   the count, so you can alert on it. The message is not dispatched again automatically.
-- **The transport accepted it but cannot confirm it** — the normal case for RabbitMQ and Core NATS. The
-  message stays `ConfirmationUnknown` and is not dispatched again. It was handed to the broker on each
+- **The transport accepted it but cannot confirm it** — the normal case for Core NATS, and for RabbitMQ
+  when publisher confirms are disabled. The message stays `ConfirmationUnknown` and is not dispatched again. It was handed to the broker on each
   attempt, so this is ordinary at-least-once delivery, not a failure, and raises no warning.
 
 Because an unconfirming transport receives the same message on every attempt, consumers must be
@@ -751,6 +788,52 @@ built-in providers.
 
 ---
 
+## Supported Infrastructure Versions
+
+Lycia talks to real servers, so which server versions it works with is part of its contract. The contract
+is the single file [`infrastructure-versions.json`](infrastructure-versions.json); the test images, the CI
+service images, the compose files and this table are all checked against it, so none of them can drift
+silently.
+
+| Integration | Supported minimum | Tested minimum | Tested current | Not supported |
+| --- | --- | --- | --- | --- |
+| RabbitMQ | 3.13 | 3.13 | 4.3 | RabbitMQ Streams and Super Streams (not implemented) |
+| Redis | 6.2 | 6.2 | 8.10 | Redis Cluster |
+| PostgreSQL | 14 | 14 | 18 | — |
+| SQL Server | 2017 | 2017 (CU31) | 2025 (CU9) | — |
+| Kafka | 3.8 | 3.8 | 4.3 | Kafka Share Groups (KIP-932) |
+| NATS | 2.9 | 2.9 | 2.15 | — |
+
+The four terms are kept apart on purpose:
+
+- **Supported minimum** — the oldest version Lycia commits to. A defect on it is a Lycia defect.
+- **Tested minimum** — the oldest version the automated suites actually run against. It always equals the
+  supported minimum; Lycia does not claim support for a version it does not test.
+- **Tested current** — the recent version every CI run exercises. Newer versions are expected to work but
+  are not promised until they are added to the file; there is no maximum, and nothing is known to break on
+  a newer release.
+- **Technical floor** — the oldest version the implementation could work on, from the features it uses.
+  This is analysis, not a promise, and it can be lower than the supported minimum.
+
+| Integration | Technical floor and the feature that sets it | Why the supported minimum is higher |
+| --- | --- | --- |
+| RabbitMQ | AMQP 0-9-1 publisher confirms, `mandatory`, per-message expiration and dead-lettering. Nothing above the 3.x baseline is used; 3.12 also passes the suite, older releases were not run | 3.13 is the oldest series that still has a vendor support window |
+| Redis | 4.0: the Redis schedule store's Lua scripts call `HSET` with several field/value pairs, which Redis 3.2 rejects (measured); every other command the providers use predates 4.0. Not run below 6.2 | 6.2 is the oldest series the Redis project still maintains |
+| PostgreSQL | 9.5: `FOR UPDATE SKIP LOCKED` (Outbox and Inbox claims) and `ON CONFLICT` (idempotent inserts); 9.4 rejects both (measured). `JSONB` needs 9.4. Not run below 14 | 14 is the oldest series the PostgreSQL project still maintains (its final release is 12 November 2026) |
+| SQL Server | 2012: `THROW` and `SEQUENCE` (Outbox/Inbox/journal T-SQL), with `DATETIME2`, `OUTPUT INSERTED`, `UPDLOCK` and `READPAST` (2008 or earlier). Not run below 2017 | 2017 is the oldest release still in Microsoft extended support (until 13 October 2027) |
+| Kafka | 0.11: idempotent producer and record headers | 3.8 is the oldest series with a current vendor support window; 3.7 also passes, older releases were not run |
+| NATS | 2.9.0: the JetStream consumer create API (2.7 and 2.8 fail the suite, measured). Core NATS (no JetStream) has no persistence and no Outbox confirmations | NATS publishes no support window for server releases, so 2.9 is supported because it is the lowest version that is tested |
+
+Two things follow from the differences between those columns. A version between the technical floor and the
+supported minimum may well work, but it is neither tested nor supported. And raising a *tested current*
+version never changes what is supported: the supported minimum only moves when the maintainers deliberately
+edit the contract (see [DEVELOPERS.md](DEVELOPERS.md#supported-infrastructure-versions)).
+
+RabbitMQ Streams and Kafka Share Groups are not part of any supported column: Lycia does not implement the
+former, and the latter is not yet a stable Kafka feature. They are tracked as possible future work only.
+
+---
+
 ## Samples
 
 The [samples/](samples) directory contains runnable examples.
@@ -769,8 +852,6 @@ The [samples/](samples) directory contains runnable examples.
 
 Deferred work, not available today:
 
-- **RabbitMQ publish confirmation.** Reporting RabbitMQ publishes as `Published` requires awaiting a
-  per-publish broker confirmation in the transport; until then RabbitMQ stays `ConfirmationUnknown`.
 - **Redis Cluster.** The Redis Inbox/Outbox scripts touch several keys without hash tags, so they
   target standalone (non-clustered) Redis.
 - **Journal acceleration and tracking.** A durable snapshot table, and persistent, queryable

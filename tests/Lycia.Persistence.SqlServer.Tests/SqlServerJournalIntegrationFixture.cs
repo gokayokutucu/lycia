@@ -14,11 +14,11 @@ namespace Lycia.Persistence.SqlServer.Tests;
 public sealed class SqlServerJournalIntegrationFixture : IAsyncLifetime
 {
     private readonly MsSqlContainer _sql = new MsSqlBuilder()
-        .WithImage("mcr.microsoft.com/mssql/server:2022-latest")
+        .WithImage(Lycia.Tests.Infrastructure.InfrastructureVersions.Image("sqlserver"))
         .Build();
 
     private readonly RedisContainer _redis = new RedisBuilder()
-        .WithImage("redis:7-alpine")
+        .WithImage(Lycia.Tests.Infrastructure.InfrastructureVersions.Image("redis"))
         .WithCleanUp(true)
         .Build();
 

@@ -15,7 +15,7 @@ public sealed class RedisSagaStoreCollection : ICollectionFixture<RedisSagaStore
 public sealed class RedisSagaStoreFixture : IAsyncLifetime
 {
     private readonly RedisContainer _container = new RedisBuilder()
-        .WithImage("redis:7-alpine")
+        .WithImage(Lycia.Tests.Infrastructure.InfrastructureVersions.Image("redis"))
         .WithCleanUp(true)
         .Build();
 

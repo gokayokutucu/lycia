@@ -7,20 +7,16 @@ namespace Lycia.IntegrationTests;
 
 /// <summary>
 /// One real RabbitMQ broker shared by a test class. The image comes from
-/// <c>LYCIA_TEST_RABBITMQ_IMAGE</c> so the same tests can be pointed at a different broker version.
+/// infrastructure-versions.json (or <c>LYCIA_TEST_RABBITMQ_IMAGE</c>), so the same tests run against the minimum or the current broker.
 /// The AMQP port is bound to a fixed host port so a broker restart keeps the same address, which is what
 /// lets automatic connection recovery be exercised.
 /// </summary>
 public sealed class RabbitMqBrokerFixture : IAsyncLifetime
 {
-    public const string DefaultImage = "rabbitmq:3.13-management";
-
     private RabbitMqContainer? _container;
     private int _hostPort;
 
-    public string Image { get; } = Environment.GetEnvironmentVariable("LYCIA_TEST_RABBITMQ_IMAGE") is { Length: > 0 } image
-        ? image
-        : DefaultImage;
+    public string Image { get; } = Lycia.Tests.Infrastructure.InfrastructureVersions.Image("rabbitmq");
 
     public string Host => _container!.Hostname;
     public int Port => _hostPort;

@@ -107,7 +107,7 @@ public class OutboxDispatcher(IOutboxStore outboxStore, IEventBus eventBus, IMes
                 message.MessageId, message.SagaId, attemptsStarted, maxAttempts);
 
         // When this is the last attempt it decides the row's fate: a publish that throws is Abandoned, an
-        // accepted-but-unconfirmed one stays ConfirmationUnknown. An unconfirming transport such as RabbitMQ
+        // accepted-but-unconfirmed one stays ConfirmationUnknown. An unconfirming transport such as Core NATS
         // reports every successful publish that way, so abandoning it would raise an "operator action
         // required" warning for essentially every delivered message. Left at ConfirmationUnknown with the
         // count at the cap it is simply not dispatched again.

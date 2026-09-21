@@ -50,4 +50,9 @@
         <Compile Include="..\Lycia.IntegrationTests\RabbitMqTestContracts.cs" Link="Shared\RabbitMqTestContracts.cs" />
     </ItemGroup>
 
+    <!-- The compatibility contract's test images: one shared helper and the JSON it reads. -->
+    <ItemGroup>
+        <Compile Include="..\Common\InfrastructureVersions.cs" Link="Shared\InfrastructureVersions.cs" />
+        <None Include="..\..\infrastructure-versions.json" Link="infrastructure-versions.json" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
 </Project>

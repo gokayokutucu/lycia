@@ -43,11 +43,20 @@ final validation are complete; see `FINALIZATION`.)
   Lua scripts touch multiple keys — `outbox:msg:{id}`, `outbox:pending` — without hash-tag key naming,
   so cross-key atomicity is not Cluster-safe as written). No real Redis Cluster was available to
   validate a fix, so this stays explicitly on hold rather than being claimed as supported.
-- RabbitMQ publish confirmation: deferred. The RabbitMQ transport does not await a per-publish broker
-  confirmation, so RabbitMQ Outbox records stay `ConfirmationUnknown` (never a faked `Published`) and
-  each message is handed to the broker up to `MaxAttempts` times, spaced by `RecoveryTimeout`; the
-  receiving Inbox absorbs the duplicates. This is the current validated behavior, not a fixed
-  architectural limit, and may be revisited.
+- **Deferred, not implemented and not supported (must not appear in any supported-version column):**
+  RabbitMQ Streams and Super Streams (the RabbitMQ transport is AMQP 0-9-1 only); Kafka Share Groups
+  (KIP-932; not yet a stable Kafka feature).
+- **Pending spikes (not started, no code):** a `Lycia.Extensions.Kafka.Preview` package concept spike (a
+  separate opt-in package would be the only way to expose preview broker features); and a Messaging
+  Semantics Architecture Spike (Queue / Stream / PubSub abstractions and what each transport can honestly
+  promise). Neither is scheduled; `/diagnostics/lycia` also remains unimplemented.
+- Infrastructure contract follow-ups: PostgreSQL 14 reaches its final release on 12 November 2026, after
+  which the PostgreSQL minimum must be reviewed under the DEVELOPERS.md policy; the NATS minimum (2.9) rests
+  on the technical floor because NATS publishes no server support policy; the Windows CI jobs (Memurai and
+  the Chocolatey RabbitMQ package) cannot be pinned to the contract; Kafka's minimum is run through
+  `apache/kafka:3.8.0` (the Confluent image for the equivalent series could not be pulled during validation)
+  and technical floors below the tested minimums (RabbitMQ < 3.12, Kafka < 3.7, SQL Server < 2017,
+  PostgreSQL < 14, Redis < 6.2) are analysis only.
 - Redis rows already stranded by 1.18.0: before the 1.18.1 fix the Redis claim script removed a stale
   `Publishing` entry at the attempt cap from the pending set for good, so such a row has a message record
   but no pending entry and the fixed script cannot rediscover it. SQL Server and PostgreSQL rows in that
@@ -174,12 +183,43 @@ final validation are complete; see `FINALIZATION`.)
   Redis, SQL Server and PostgreSQL and end to end on the Microservices stack. Feature commit `a3797c8`;
   merged into `dev` as `475f19a`. Not released: a `1.18.1` tag, `main` merge and publication are pending an
   explicit release decision.
+- **Post-1.18.0 patch — RabbitMQ publisher confirms and the supported-infrastructure contract (1.18.1):**
+  *Publisher confirms.* The RabbitMQ transport now publishes on confirm-enabled channels (RabbitMQ.Client
+  7.1.2 `CreateChannelOptions` + tracked `BasicPublishAsync` on net8+; 6.8.1 `ConfirmSelect` with a
+  sequence-number tracker on netstandard2.0 — the built-in `WaitForConfirms` reports a nack as an ack, which
+  was measured). Messages are published `mandatory`; a `basic.return` is an unroutable failure and is never a
+  confirmation. `IConditionalConfirmedEventBus` lets a transport declare whether confirmations are available
+  at runtime (NATS: only with JetStream), so the Outbox stays honest for Core NATS. Outcomes: ack ->
+  `Published`; nack, return or a definite failure -> the existing failure/retry path;
+  connection loss or confirm timeout -> `ConfirmationUnknown`. Delivery remains at-least-once. Verified against
+  real RabbitMQ (nack, unroutable, unavailable, dropped connection, lost confirm, broker restart, Send/Publish/
+  Respond, cancellation) on both client generations, and with the crash-recovery patch above unchanged.
+  *Infrastructure contract.* `infrastructure-versions.json` is the single source of the supported minimum and
+  tested current version of RabbitMQ, Redis, PostgreSQL, SQL Server, Kafka and NATS; test images, CI, compose
+  files and the README table are guarded against it (`InfrastructureContractTests`), and a minimum-track CI
+  job (weekly, on demand and before every release tag) runs the suites on the minimum versions. Policy is in
+  DEVELOPERS.md. Minimum = the higher of the technical floor and the oldest vendor-supported series, and only
+  what is tested is supported. A release tag never changes compatibility. Validated on both tracks (current:
+  RabbitMQ 4.3, Redis 8.10, PostgreSQL 18, SQL Server 2025-CU9, Kafka 4.3, NATS 2.15; minimum: RabbitMQ 3.13,
+  Redis 6.2, PostgreSQL 14, SQL Server 2017-CU31, Kafka 3.8, NATS 2.9): `Lycia.Tests` 184/184,
+  `Lycia.Tests.NetFramework` 46/46, InMemory 83/83, Redis 49/49, SQL Server 69/69, PostgreSQL 69/69,
+  `Lycia.IntegrationTests` 46/46 (net9.0, net10.0) and `.NetFramework` 26/26 (net48), plus a live
+  Microservices run in which every Outbox row settles as `Published` with one attempt (previously
+  `ConfirmationUnknown` at the attempt cap); broker outage, SIGKILL, requeued duplicate (absorbed by the
+  Inbox) and a stale `Publishing` row at the attempt cap (recovered once) left no stranded row and a healthy
+  journal. Not released: no `v1.18.1` tag,
+  `main` merge or publication yet.
 
 # FINALIZATION
 
 Milestone: **Persistence / Reliability Architecture**
 
-Status: READY FOR FINAL INTEGRATION
+Status: RELEASED (1.18.0) — milestone closed, no integration pending
+
+`dev` was integrated into `main` and `v1.18.0` was released from it; the checklist below is the historical
+record of that integration and is not a standing approval. Work after 1.18.0 (the 1.18.1 patches above) does
+not reopen this gate: a later `dev` -> `main` integration requires this section to be deliberately set back
+to `Status: READY FOR FINAL INTEGRATION`, with fresh validation evidence for the new release target.
 
 Release target: **1.18.0**, Lycia's first stable release (decided by the repository owner). Tag `v1.18.0`
 on the validated `main` merge commit. The pre-existing, unreachable `v1.17.0` tag is left untouched.

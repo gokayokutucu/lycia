@@ -17,12 +17,12 @@ x-service: &service
 
 services:
   rabbitmq:
-    image: rabbitmq:3.13-management-alpine
+    image: rabbitmq:4.3-management
     environment: { RABBITMQ_ERLANG_COOKIE: lyciasplitstoredevelopmentcookie2026 }
     ports: ["15672:15672"]
     healthcheck: { test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"], interval: 5s, timeout: 5s, retries: 20 }
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     environment: { POSTGRES_USER: lycia, POSTGRES_PASSWORD: lycia-dev, POSTGRES_DB: postgres }
     volumes: ["./init-databases.sql:/docker-entrypoint-initdb.d/10-databases.sql:ro"]
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U lycia -d postgres"], interval: 5s, timeout: 5s, retries: 20 }
@@ -31,11 +31,11 @@ services:
     ports: ["16686:16686"]
     healthcheck: { test: ["CMD", "wget", "-q", "--spider", "http://localhost:16686/"], interval: 5s, timeout: 5s, retries: 20 }
 
-  checkout-redis: { image: redis:7.4-alpine, healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 3s, timeout: 3s, retries: 20 } }
-  order-redis: { image: redis:7.4-alpine, healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 3s, timeout: 3s, retries: 20 } }
-  inventory-redis: { image: redis:7.4-alpine, healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 3s, timeout: 3s, retries: 20 } }
-  payment-redis: { image: redis:7.4-alpine, healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 3s, timeout: 3s, retries: 20 } }
-  shipping-redis: { image: redis:7.4-alpine, healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 3s, timeout: 3s, retries: 20 } }
+  checkout-redis: { image: redis:8.10-alpine, healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 3s, timeout: 3s, retries: 20 } }
+  order-redis: { image: redis:8.10-alpine, healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 3s, timeout: 3s, retries: 20 } }
+  inventory-redis: { image: redis:8.10-alpine, healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 3s, timeout: 3s, retries: 20 } }
+  payment-redis: { image: redis:8.10-alpine, healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 3s, timeout: 3s, retries: 20 } }
+  shipping-redis: { image: redis:8.10-alpine, healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 3s, timeout: 3s, retries: 20 } }
 
   checkout:
     <<: *service

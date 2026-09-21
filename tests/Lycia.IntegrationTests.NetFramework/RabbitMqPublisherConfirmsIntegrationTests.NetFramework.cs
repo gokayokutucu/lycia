@@ -97,9 +97,7 @@ public class RabbitMqPublisherConfirmsNetFrameworkTests : IAsyncLifetime
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();
         _container = new RabbitMqBuilder()
-            .WithImage(Environment.GetEnvironmentVariable("LYCIA_TEST_RABBITMQ_IMAGE") is { Length: > 0 } image
-                ? image
-                : "rabbitmq:3.13-management")
+            .WithImage(Lycia.Tests.Infrastructure.InfrastructureVersions.Image("rabbitmq"))
             .WithUsername("guest")
             .WithPassword("guest")
             .WithPortBinding(port, 5672)

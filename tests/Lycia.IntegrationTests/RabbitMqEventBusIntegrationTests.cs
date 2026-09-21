@@ -30,7 +30,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         _externalConnectionString = Environment.GetEnvironmentVariable("LYCIA_RABBITMQ_CONNECTION_STRING");
         if (string.IsNullOrWhiteSpace(_externalConnectionString))
             _rabbitMqContainer = new RabbitMqBuilder()
-                .WithImage("rabbitmq:3-management")
+                .WithImage(Lycia.Tests.Infrastructure.InfrastructureVersions.Image("rabbitmq"))
                 .WithCleanUp(true)
                 .Build();
     }
@@ -664,7 +664,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         await using var connection = await factory.CreateConnectionAsync(CancellationToken.None);
         await using var channel = await connection.CreateChannelAsync(cancellationToken: CancellationToken.None);
         await channel.ExchangeDeclareAsync(finalExchange, ExchangeType.Fanout, durable: true, autoDelete: false);
-        await channel.QueueDeclareAsync(finalQueue, durable: false, exclusive: false, autoDelete: true);
+        await channel.QueueDeclareAsync(finalQueue, durable: false, exclusive: true, autoDelete: true);
         await channel.QueueBindAsync(finalQueue, finalExchange, string.Empty);
         var record = new ScheduleRecord
         {
@@ -719,7 +719,7 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
         await using var connection = await factory.CreateConnectionAsync(CancellationToken.None);
         await using var channel = await connection.CreateChannelAsync(cancellationToken: CancellationToken.None);
         await channel.ExchangeDeclareAsync(finalExchange, ExchangeType.Fanout, durable: true, autoDelete: false);
-        await channel.QueueDeclareAsync(finalQueue, durable: false, exclusive: false, autoDelete: true);
+        await channel.QueueDeclareAsync(finalQueue, durable: false, exclusive: true, autoDelete: true);
         await channel.QueueBindAsync(finalQueue, finalExchange, string.Empty);
         var messageId = Guid.NewGuid();
         var correlationId = Guid.NewGuid();
