@@ -2,7 +2,7 @@ services:
 
   # SQL Server for all microservices databases
   sqlserver:
-    image: mcr.microsoft.com/mssql/server:2022-latest
+    image: mcr.microsoft.com/mssql/server:2025-CU9-ubuntu-24.04
     container_name: sqlserver
     environment:
       - ACCEPT_EULA=Y
@@ -23,7 +23,7 @@ services:
 
   # RabbitMQ for event bus
   rabbitmq:
-    image: rabbitmq:3-management
+    image: rabbitmq:4.3-management
     container_name: rabbitmq
     environment:
       - RABBITMQ_DEFAULT_USER=guest
@@ -43,7 +43,7 @@ services:
 
   # NATS with JetStream enabled for durable saga delivery
   nats:
-    image: nats:2.11-alpine
+    image: nats:2.15-alpine
     container_name: nats
     command: ["-js", "-m", "8222", "--store_dir", "/data"]
     ports:
@@ -61,7 +61,7 @@ services:
 
   # Single-node Kafka (KRaft) for local development
   kafka:
-    image: confluentinc/cp-kafka:7.7.1
+    image: apache/kafka:4.3.0
     container_name: kafka
     ports:
       - "9092:9092"
@@ -77,13 +77,15 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
     volumes:
       - kafka_data:/var/lib/kafka/data
     networks:
       - microservices-network
     healthcheck:
-      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
       interval: 10s
       timeout: 5s
       retries: 15
@@ -91,7 +93,7 @@ services:
 
   # Redis for event store
   redis:
-    image: redis:7-alpine
+    image: redis:8.10-alpine
     container_name: redis
     ports:
       - "6379:6379"

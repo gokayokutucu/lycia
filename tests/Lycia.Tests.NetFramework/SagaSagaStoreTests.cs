@@ -38,7 +38,7 @@ public class SagaSagaStoreTests : IAsyncLifetime
         {
             // Local: Use Testcontainers
             _redisContainer = new RedisBuilder()
-                .WithImage("redis:7-alpine")
+                .WithImage(Lycia.Tests.Infrastructure.InfrastructureVersions.Image("redis"))
                 .WithCleanUp(true)
                 .Build();
 

@@ -22,7 +22,7 @@ namespace Lycia.IntegrationTests;
 public class RedisSagaStoreIntegrationTests : IAsyncLifetime
 {
     private readonly RedisContainer _redisContainer = new RedisBuilder()
-        .WithImage("redis:7-alpine")
+        .WithImage(Lycia.Tests.Infrastructure.InfrastructureVersions.Image("redis"))
         .WithCleanUp(true)
         .Build();
 

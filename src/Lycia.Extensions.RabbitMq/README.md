@@ -61,12 +61,26 @@ the canonical topology, then remove obsolete resources; Lycia never deletes or d
 independently bound RabbitMQ queue can still receive the same key, so ownership is a Lycia invariant,
 not broker-global exclusivity. Delivery is at least once.
 
-## Outbox confirmation status
+## Publisher confirms
 
-`RabbitMqEventBus` does not implement `IConfirmedEventBus`: the transport integration does not currently
-await a per-publish broker confirmation. An Outbox dispatch that RabbitMQ accepts is therefore recorded
-as `ConfirmationUnknown` rather than `Published`, and is redispatched after each `RecoveryTimeout` until
-it reaches `MaxAttempts`. A message that exhausts its attempts after being accepted stays
-`ConfirmationUnknown`; only a message whose last attempt never reached the broker becomes `Abandoned`.
-`MessageId` stays stable across redispatch, so consumers only need to be idempotent, which the Inbox
-provides. This is the current validated behavior and may be revisited.
+Publishing uses RabbitMQ **publisher confirms** by default (`EventBusOptions.PublisherConfirms`). Every
+`Send`, `Publish` and `Respond` runs on a dedicated publish channel created with confirms enabled and waits
+for the broker's confirmation, so `RabbitMqEventBus` implements `IConfirmedEventBus` and an Outbox message
+the broker confirmed is recorded as `Published` instead of `ConfirmationUnknown`.
+
+- A `basic.nack` throws `RabbitMqPublishNackedException`; an unroutable message (`basic.return`) throws
+  `RabbitMqUnroutableMessageException`. Commands and responses are published as mandatory because each has
+  one owner queue; events are only mandatory when `RequireRoutableEvents` is set, since an event may have no
+  subscriber.
+- If no confirm arrives within `PublisherConfirmTimeout` (default 30 s), or the connection is lost while
+  waiting, `RabbitMqPublishOutcomeUnknownException` is thrown: the broker may already hold the message, so
+  it is not reported as failed. The Outbox republishes it with the same `MessageId` (at-least-once).
+- A confirm means RabbitMQ accepted responsibility for the message. It does not mean a consumer received or
+  processed it. For persistent messages on durable queues (what Lycia publishes) the broker confirms after
+  persisting; quorum queues confirm after a quorum of replicas accepted.
+- Set `PublisherConfirms = false` for the previous fire-and-forget behavior, under which Outbox messages
+  settle as `ConfirmationUnknown`.
+
+The netstandard2.0 build uses RabbitMQ.Client 6.8.1 and resolves confirmations from the broker's ack/nack
+frames rather than `WaitForConfirms`, which can misreport a nack as an ack under rapid publishing. The
+net8.0+ builds use RabbitMQ.Client 7.1.2's tracked publisher confirmations.

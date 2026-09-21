@@ -52,12 +52,11 @@ sufficient, and every inspection command below uses `docker compose exec` instea
 A full five-hop happy-path checkout normally completes within a few seconds. Poll for the state you
 want instead of relying on a fixed `sleep`, because timing depends on the host.
 
-This sample's RabbitMQ publisher does not confirm delivery (see root `README.md` — RabbitMQ Outbox
-records stay `ConfirmationUnknown`; Kafka and NATS JetStream confirm). The first publish is delivered
-immediately; the Outbox worker then redispatches each `ConfirmationUnknown` message after
-`RecoveryTimeout` (1 minute by default) until it reaches `MaxAttempts` (5), even though the original
-publish already succeeded. Those redispatches are expected duplicates, and the receiving Inbox skips
-them (see §11).
+This sample's RabbitMQ publisher uses publisher confirms (see root `README.md`, "Publisher confirms"): the
+Outbox worker marks a message `Published` only once the broker has confirmed it, so each Outbox row is
+published once (`retry_count = 1`) and settles as `Published` within moments. A message is redispatched only
+when its outcome was genuinely uncertain (for example the broker connection dropped before the confirm
+arrived, §15), and the receiving Inbox absorbs any resulting duplicate (see §11).
 
 ```bash
 # wait_for_saga_version <orderId> <minVersion> [timeoutSeconds]
@@ -343,11 +342,10 @@ Verify the architecture invariants:
   `previous_version`/`target_version` chained with no gaps).
 - Redis: `saga:data:<saga-id>` JSON `"Version": 5`, matching canonical.
 - Inbox: one row per `(message_id, handler_type)` pair actually processed — no duplicates.
-- Outbox: one row per outgoing message. Its `status` is commonly `ConfirmationUnknown` even though
-  delivery genuinely succeeded — RabbitMQ does not implement `IConfirmedEventBus` in this build, so
-  Lycia never marks a RabbitMQ-published message `Published` (only Kafka/JetStream currently do).
-  This is intentional, documented behavior (see root `README.md`), not a failure — the workflow
-  completing to `sagaVersion: 5` is the proof delivery actually worked.
+- Outbox: one row per outgoing message. Once the workflow completes every row is `Published`
+  (`status = 3`) with `retry_count = 1`: RabbitMQ confirmed each publish. A row that is still
+  `Pending`, `Claimed`, `Publishing` or `ConfirmationUnknown` a minute after the checkout finished
+  indicates a problem (`ConfirmationUnknown` is expected only briefly after a broker outage).
 - Jaeger: one connected trace spanning all five services (§6).
 
 ---
@@ -437,17 +435,22 @@ dependency capable of doing either; see `DEVELOPERS.md`).
 
 ## 11. Test 4 — Duplicate delivery
 
-The Inbox duplicate-suppression path is exercised naturally by this sample: every RabbitMQ Outbox
-record is redispatched after each `RecoveryTimeout` until it reaches `MaxAttempts` (see §1.3), and each
-redispatch reaches the receiving service with the same `MessageId`. The receiving Inbox finds the
-`(MessageId, HandlerType)` pair already completed and skips it, which shows up in ordinary logs a minute
-or more after a checkout:
+With publisher confirms a healthy run produces no redispatch, so the Inbox duplicate-suppression path is
+not exercised by an ordinary checkout; it appears after a broker outage or a crash (a message whose confirm
+was lost is published again with the same `MessageId`), and you can trigger it deterministically by putting
+a published Outbox row back to `Pending`:
 
 ```bash
-docker compose logs checkout --since 5m | grep "already"
+MSG=$(docker compose exec -T postgres psql -U lycia -d inventory_db -At -c \
+  "SELECT message_id FROM lycia_outbox ORDER BY created_at_utc DESC LIMIT 1;")
+docker compose exec -T postgres psql -U lycia -d inventory_db -c \
+  "UPDATE lycia_outbox SET status = 0, retry_count = 0, updated_at_utc = now() WHERE message_id = '$MSG';"
+sleep 12
+docker compose logs --since 30s | grep "already"
 ```
 
-Look for lines like:
+The row is republished with the same `MessageId` (its status returns to `Published`), and the receiving
+service logs:
 
 ```
 Inbox: message <id> for handler CheckoutSagaHandler is already AlreadyCompleted; skipping duplicate execution.

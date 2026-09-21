@@ -36,12 +36,12 @@ namespace Lycia.IntegrationTests;
 public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
 {
     private readonly RabbitMqContainer _rabbitMqContainer = new RabbitMqBuilder()
-        .WithImage("rabbitmq:3-management")
+        .WithImage(Lycia.Tests.Infrastructure.InfrastructureVersions.Image("rabbitmq"))
         .WithCleanUp(true)
         .Build();
 
     private readonly RedisContainer _redisContainer = new RedisBuilder()
-        .WithImage("redis:7-alpine")
+        .WithImage(Lycia.Tests.Infrastructure.InfrastructureVersions.Image("redis"))
         .WithCleanUp(true)
         .Build();
 

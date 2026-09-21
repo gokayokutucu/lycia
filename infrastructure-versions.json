@@ -1,0 +1,65 @@
+{
+  "$comment": "The infrastructure versions Lycia supports and tests. This file is the single source of truth: every test image, CI service container and documented minimum is checked against it. Changing an image tag changes the compatibility contract and must be done deliberately (see DEVELOPERS.md, 'Supported infrastructure versions').",
+  "integrations": {
+    "rabbitmq": {
+      "minimum": {
+        "version": "3.13",
+        "image": "rabbitmq:3.13-management"
+      },
+      "current": {
+        "version": "4.3",
+        "image": "rabbitmq:4.3-management"
+      }
+    },
+    "redis": {
+      "minimum": {
+        "version": "6.2",
+        "image": "redis:6.2-alpine"
+      },
+      "current": {
+        "version": "8.10",
+        "image": "redis:8.10-alpine"
+      }
+    },
+    "postgresql": {
+      "minimum": {
+        "version": "14",
+        "image": "postgres:14-alpine"
+      },
+      "current": {
+        "version": "18",
+        "image": "postgres:18-alpine"
+      }
+    },
+    "sqlserver": {
+      "minimum": {
+        "version": "2017",
+        "image": "mcr.microsoft.com/mssql/server:2017-CU31-ubuntu-18.04"
+      },
+      "current": {
+        "version": "2025",
+        "image": "mcr.microsoft.com/mssql/server:2025-CU9-ubuntu-24.04"
+      }
+    },
+    "kafka": {
+      "minimum": {
+        "version": "3.8",
+        "image": "apache/kafka:3.8.0"
+      },
+      "current": {
+        "version": "4.3",
+        "image": "apache/kafka:4.3.0"
+      }
+    },
+    "nats": {
+      "minimum": {
+        "version": "2.9",
+        "image": "nats:2.9-alpine"
+      },
+      "current": {
+        "version": "2.15",
+        "image": "nats:2.15-alpine"
+      }
+    }
+  }
+}

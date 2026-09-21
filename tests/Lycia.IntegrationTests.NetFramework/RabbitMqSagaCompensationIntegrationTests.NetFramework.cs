@@ -57,12 +57,12 @@ public class RabbitMqSagaCompensationIntegrationTestsNetFramework : IAsyncLifeti
         {
             // Local: Use Testcontainers
             _rabbitMqContainer = new RabbitMqBuilder()
-                .WithImage("rabbitmq:3-management")
+                .WithImage(Lycia.Tests.Infrastructure.InfrastructureVersions.Image("rabbitmq"))
                 .WithCleanUp(true)
                 .Build();
 
             _redisContainer = new RedisBuilder()
-                .WithImage("redis:7-alpine")
+                .WithImage(Lycia.Tests.Infrastructure.InfrastructureVersions.Image("redis"))
                 .WithCleanUp(true)
                 .Build();
 

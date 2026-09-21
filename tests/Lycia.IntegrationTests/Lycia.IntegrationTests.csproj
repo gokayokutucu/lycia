@@ -37,8 +37,13 @@
       <ProjectReference Include="..\..\src\Lycia.Extensions.Scheduling\Lycia.Extensions.Scheduling.csproj" />
       <ProjectReference Include="..\..\src\Lycia.Extensions.Nats\Lycia.Extensions.Nats.csproj" />
       <ProjectReference Include="..\..\src\Lycia.Persistence.Redis\Lycia.Persistence.Redis.csproj" />
+      <ProjectReference Include="..\..\src\Lycia.Persistence.InMemory\Lycia.Persistence.InMemory.csproj" />
       <ProjectReference Include="..\Lycia.Tests.Helpers\Lycia.Tests.Helpers.csproj" />
       <ProjectReference Include="..\Lycia.Tests\Lycia.Tests.csproj" />
     </ItemGroup>
 
+    <!-- The compatibility contract JSON; the InfrastructureVersions helper comes from the Lycia.Tests reference. -->
+    <ItemGroup>
+        <None Include="..\..\infrastructure-versions.json" Link="infrastructure-versions.json" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
 </Project>

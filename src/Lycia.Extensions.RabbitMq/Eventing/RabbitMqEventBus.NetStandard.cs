@@ -7,6 +7,7 @@
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
+using RabbitMQ.Client.Exceptions;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using Lycia.Common.Messaging;
@@ -33,6 +34,17 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
     private readonly ILogger<RabbitMqEventBus> _logger;
     private IConnection? _connection;
     private IModel? _channel;
+    // Publishing has its own channel: the only one with publisher confirms enabled, used by exactly one
+    // publish at a time (WaitForConfirms waits for every outstanding publish on its channel, and a channel
+    // must not be shared by concurrent publishers).
+    private IModel? _publishChannel;
+    private PublishConfirmTracker? _publishTracker;
+    private readonly SemaphoreSlim _publishLock = new(1, 1);
+    // Exchanges already declared on the current publish channel, so a steady stream of publishes does not pay
+    // an extra round trip each. It is tied to one channel instance and starts empty for every new channel;
+    // a channel that is discarded after a failure therefore re-declares, which heals a deleted exchange.
+    private IModel? _declaredOnChannel;
+    private readonly HashSet<string> _declaredExchanges = new HashSet<string>();
     private readonly IDictionary<string, (Type MessageType, Type HandlerType)> _queueTypeMap;
     private readonly List<EventingBasicConsumer> _consumers = [];
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
@@ -63,6 +75,7 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
         _queueTypeMap = queueTypeMap;
         _options = options;
         _serializer = serializer ?? throw new InvalidOperationException("IMessageSerializer is null");
+        ValidateConfirmOptions(options);
 
         if (options.ConnectionString == null)
             throw new InvalidOperationException("RabbitMqEventBus connection is null");
@@ -93,6 +106,203 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
     {
         _connection = await Task.Run(() => _factory.CreateConnection(), cancellationToken).ConfigureAwait(false);
         _channel = await Task.Run(() => _connection.CreateModel(), cancellationToken).ConfigureAwait(false);
+        _publishChannel = await Task.Run(() => CreatePublishChannel(_connection), cancellationToken).ConfigureAwait(false);
+    }
+
+    // Publisher confirms are switched on where the channel is created; the client re-selects them when its
+    // automatic recovery re-opens the channel.
+    private IModel CreatePublishChannel(IConnection connection)
+    {
+        var channel = connection.CreateModel();
+        if (_options.PublisherConfirms)
+        {
+            channel.ConfirmSelect();
+            _publishTracker = new PublishConfirmTracker(channel);
+        }
+
+        return channel;
+    }
+
+    private async Task<IModel> EnsurePublishChannelAsync(CancellationToken cancellationToken)
+    {
+        if (_publishChannel is { IsOpen: true } open)
+            return open;
+
+        await _connectionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_publishChannel is { IsOpen: true } recovered)
+                return recovered;
+
+            if (_connection is null || !_connection.IsOpen)
+            {
+                _logger.LogWarning("RabbitMQ connection lost. Reconnecting...");
+                await ConnectAsync(cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                var connection = _connection;
+                _publishChannel = await Task.Run(() => CreatePublishChannel(connection), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            return _publishChannel!;
+        }
+        finally
+        {
+            _connectionLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Drops a publish channel whose confirmation state can no longer be trusted, so a confirmation that is
+    /// still outstanding for an abandoned publish cannot be mistaken for a later one.
+    /// </summary>
+    private void DiscardPublishChannel(IModel channel)
+    {
+        if (ReferenceEquals(_publishChannel, channel)) _publishChannel = null;
+        try { channel.Abort(); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Aborting a discarded RabbitMQ publish channel failed"); }
+        try { channel.Dispose(); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Disposing a discarded RabbitMQ publish channel failed"); }
+    }
+
+    /// <summary>
+    /// Resolves each publish's confirmation from the broker's own <c>basic.ack</c>, <c>basic.nack</c> and
+    /// <c>basic.return</c> frames, keyed by the publish sequence number.
+    /// </summary>
+    /// <remarks>
+    /// The client's <c>WaitForConfirms</c> is deliberately not used. It answers with a shared flag that the
+    /// ack/nack handler updates from another thread, and under a rapid publish-then-publish sequence it can
+    /// report a broker nack as an ack, which here would mean a rejected message recorded as delivered. Only one
+    /// publish is ever in flight on the channel, so a single pending slot is enough.
+    /// </remarks>
+    private sealed class PublishConfirmTracker
+    {
+        private readonly object _gate = new object();
+        private ulong _sequence;
+        private TaskCompletionSource<bool>? _pending;
+        private bool _returned;
+
+        public PublishConfirmTracker(IModel channel)
+        {
+            channel.BasicAcks += (_, e) => Resolve(e.DeliveryTag, e.Multiple, acked: true);
+            channel.BasicNacks += (_, e) => Resolve(e.DeliveryTag, e.Multiple, acked: false);
+            channel.BasicReturn += (_, _) => { lock (_gate) _returned = true; };
+            channel.ModelShutdown += (_, e) =>
+            {
+                lock (_gate) _pending?.TrySetException(new AlreadyClosedException(e));
+            };
+        }
+
+        /// <summary>Starts tracking the publish that will carry <paramref name="sequence"/>. Call before publishing.</summary>
+        public Task<bool> Begin(ulong sequence)
+        {
+            lock (_gate)
+            {
+                _sequence = sequence;
+                _returned = false;
+                _pending = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                return _pending.Task;
+            }
+        }
+
+        public bool WasReturned
+        {
+            get { lock (_gate) return _returned; }
+        }
+
+        private void Resolve(ulong deliveryTag, bool multiple, bool acked)
+        {
+            lock (_gate)
+            {
+                if (_pending == null) return;
+                if (multiple ? deliveryTag >= _sequence : deliveryTag == _sequence)
+                    _pending.TrySetResult(acked);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Publishes one message on the publish channel and, with publisher confirms enabled, returns only after
+    /// RabbitMQ has confirmed it. Declares the exchange first unless <paramref name="exchangeType"/> is null
+    /// (the default exchange). Only one publish runs at a time. The confirm wait is bounded by
+    /// <see cref="Configurations.EventBusOptions.PublisherConfirmTimeout"/>; on this client generation a
+    /// caller's cancellation cannot interrupt an in-flight wait, only prevent one from starting.
+    /// </summary>
+    private async Task PublishToExchangeAsync(string exchangeName, string? exchangeType, string routingKey,
+        Func<IModel, IBasicProperties> buildProperties, byte[] body, bool mandatory, CancellationToken cancellationToken)
+    {
+        await _publishLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // A connection that cannot be established fails here, before anything is published: a definite
+            // failure, distinct from the unknown outcome of a publish that was already sent.
+            var channel = await EnsurePublishChannelAsync(cancellationToken).ConfigureAwait(false);
+
+            if (!ReferenceEquals(_declaredOnChannel, channel))
+            {
+                _declaredOnChannel = channel;
+                _declaredExchanges.Clear();
+            }
+
+            if (exchangeType != null && !_declaredExchanges.Contains(exchangeName))
+            {
+                await Task.Run(() => channel.ExchangeDeclare(exchange: exchangeName, type: exchangeType, durable: true,
+                    autoDelete: false, arguments: null), cancellationToken).ConfigureAwait(false);
+                _declaredExchanges.Add(exchangeName);
+            }
+
+            var properties = buildProperties(channel);
+            if (!_options.PublisherConfirms)
+            {
+                await Task.Run(() => channel.BasicPublish(exchange: exchangeName, routingKey: routingKey,
+                    mandatory: mandatory, basicProperties: properties, body: body), cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            try
+            {
+                var tracker = _publishTracker ?? throw new InvalidOperationException(
+                    "The publish channel has no confirmation tracker.");
+                await Task.Run(() => PublishAndWaitForConfirm(channel, tracker, exchangeName, routingKey, mandatory,
+                    properties, body), cancellationToken).ConfigureAwait(false);
+            }
+            catch (RabbitMqPublishOutcomeUnknownException)
+            {
+                DiscardPublishChannel(channel);
+                throw;
+            }
+            catch (Exception ex) when (ex is not RabbitMqPublishException && ex is not OperationCanceledException)
+            {
+                DiscardPublishChannel(channel);
+                throw new RabbitMqPublishOutcomeUnknownException(exchangeName, routingKey,
+                    $"the publish failed after it was sent ({ex.GetType().Name}: {ex.Message}).", ex);
+            }
+        }
+        finally
+        {
+            _publishLock.Release();
+        }
+    }
+
+    private void PublishAndWaitForConfirm(IModel channel, PublishConfirmTracker tracker, string exchangeName,
+        string routingKey, bool mandatory, IBasicProperties properties, byte[] body)
+    {
+        // The sequence number the broker will confirm is known before the frame is sent, so the tracker is armed
+        // first and an ack can never arrive unobserved.
+        var confirmation = tracker.Begin(channel.NextPublishSeqNo);
+        channel.BasicPublish(exchange: exchangeName, routingKey: routingKey, mandatory: mandatory,
+            basicProperties: properties, body: body);
+
+        if (!confirmation.Wait(_options.PublisherConfirmTimeout))
+            throw new RabbitMqPublishOutcomeUnknownException(exchangeName, routingKey,
+                $"no confirmation arrived within {_options.PublisherConfirmTimeout}.");
+
+        // A mandatory message that no queue receives is returned (basic.return) BEFORE the broker acks it, so
+        // the ack alone cannot be read as delivery.
+        if (tracker.WasReturned) throw new RabbitMqUnroutableMessageException(exchangeName, routingKey);
+        if (!confirmation.Result) throw new RabbitMqPublishNackedException(exchangeName, routingKey);
     }
 
     private async Task EnsureChannelAsync(CancellationToken cancellationToken = default)
@@ -133,7 +343,7 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
         if (@event is IResponse)
             throw new InvalidOperationException(
                 $"Response '{@event.GetType().FullName}' cannot be published. Use Respond(request, response)." );
-        await PublishMessageAsync(@event, typeof(TEvent), sagaId, cancellationToken).ConfigureAwait(false);
+        await PublishMessageAsync(@event, typeof(TEvent), sagaId, PublishKind.Event, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -144,36 +354,22 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
     {
         var endpoint = RequestRouting.RequireResponseEndpoint(request, response);
         response.PrepareResponse(request, sagaId ?? request.SagaId ?? Guid.Empty, endpoint);
-        return PublishMessageAsync(response, response.GetType(), sagaId, cancellationToken);
+        return PublishMessageAsync(response, response.GetType(), sagaId, PublishKind.Response, cancellationToken);
     }
 
     private async Task PublishMessageAsync(
         IMessage message,
         Type messageType,
         Guid? sagaId,
+        PublishKind kind,
         CancellationToken cancellationToken)
     {
-        await EnsureChannelAsync(cancellationToken).ConfigureAwait(false);
         // routingKey equivalent to the exchange name in RabbitMQ terminology
         var exchangeName =
             MessagingNamingHelper
                 .GetExchangeName(messageType);
         var exchangeType = RabbitMqTopology.GetExchangeType(messageType);
         var routingKey = RabbitMqTopology.GetPublishKey(message, messageType);
-
-        if (_channel == null)
-        {
-            throw new InvalidOperationException(
-                "Channel is not initialized. Ensure RabbitMqEventBus is properly created.");
-        }
-
-        await Task.Run(() => _channel.ExchangeDeclare(
-            exchange: exchangeName,
-            type: exchangeType,
-            durable: true,
-            autoDelete: false,
-            arguments: null)
-        , cancellationToken);
 
         // Build base headers (Lycia metadata)
         var headers =
@@ -190,25 +386,25 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
         foreach (var kv in serializerHeaders)
             headers[kv.Key] = kv.Value;
 
-        var properties = _channel.CreateBasicProperties();
-        properties.Persistent = true;
-        properties.Headers = headers;
-        ApplyRequestProperties(properties, message);
-
-        // Set AMQP ContentType from headers (if provided by the serializer)
-        if (serializerHeaders.TryGetValue(_serializer.ContentTypeHeaderKey, out var ctObj)
-            && ctObj is string ct && !string.IsNullOrWhiteSpace(ct))
+        IBasicProperties BuildProperties(IModel channel)
         {
-            properties.ContentType = ct;
+            var properties = channel.CreateBasicProperties();
+            properties.Persistent = true;
+            properties.Headers = headers;
+            ApplyRequestProperties(properties, message);
+
+            // Set AMQP ContentType from headers (if provided by the serializer)
+            if (serializerHeaders.TryGetValue(_serializer.ContentTypeHeaderKey, out var ctObj)
+                && ctObj is string ct && !string.IsNullOrWhiteSpace(ct))
+            {
+                properties.ContentType = ct;
+            }
+
+            return properties;
         }
 
-        await Task.Run(() => _channel.BasicPublish(
-            exchange: exchangeName,
-            routingKey: routingKey,
-            mandatory: false,
-            basicProperties: properties,
-            body: body)
-        , cancellationToken); ;
+        await PublishToExchangeAsync(exchangeName, exchangeType, routingKey, BuildProperties, body,
+            RequiresRoute(kind), cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -218,25 +414,10 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
         Guid? sagaId = null,
         CancellationToken cancellationToken = default) where TCommand : ICommand
     {
-        await EnsureChannelAsync(cancellationToken).ConfigureAwait(false);
         RequestRouting.Prepare(command);
 
         var exchangeName = MessagingNamingHelper.GetExchangeName(typeof(TCommand)); // command.CreateOrderCommand
         var routingKey = MessagingNamingHelper.GetCommandRoutingKey(typeof(TCommand));
-
-        if (_channel == null)
-        {
-            throw new InvalidOperationException(
-                "Channel is not initialized. Ensure RabbitMqEventBus is properly created.");
-        }
-
-        await Task.Run(() => _channel.ExchangeDeclare(
-            exchange: exchangeName,
-            type: ExchangeType.Direct,
-            durable: true,
-            autoDelete: false,
-            arguments: null)
-        , cancellationToken);
 
         // Build base headers (Lycia metadata)
         var headers =
@@ -253,25 +434,25 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
         foreach (var kv in serializerHeaders)
             headers[kv.Key] = kv.Value;
 
-        var properties = _channel.CreateBasicProperties();
-        properties.Persistent = true;
-        properties.Headers = headers;
-        ApplyRequestProperties(properties, command);
-
-        // Set AMQP ContentType from headers if present
-        if (serializerHeaders.TryGetValue(_serializer.ContentTypeHeaderKey, out var ctObj)
-            && ctObj is string ct && !string.IsNullOrWhiteSpace(ct))
+        IBasicProperties BuildProperties(IModel channel)
         {
-            properties.ContentType = ct;
+            var properties = channel.CreateBasicProperties();
+            properties.Persistent = true;
+            properties.Headers = headers;
+            ApplyRequestProperties(properties, command);
+
+            // Set AMQP ContentType from headers if present
+            if (serializerHeaders.TryGetValue(_serializer.ContentTypeHeaderKey, out var ctObj)
+                && ctObj is string ct && !string.IsNullOrWhiteSpace(ct))
+            {
+                properties.ContentType = ct;
+            }
+
+            return properties;
         }
 
-        await Task.Run(() => _channel.BasicPublish(
-            exchange: exchangeName,
-            routingKey: routingKey,
-            mandatory: false,
-            basicProperties: properties,
-            body: body)
-        , cancellationToken);
+        await PublishToExchangeAsync(exchangeName, ExchangeType.Direct, routingKey, BuildProperties, body,
+            RequiresRoute(PublishKind.Command), cancellationToken).ConfigureAwait(false);
     }
 
     private async Task PublishToDeadLetterQueueAsync(string dlqName, byte[] body, IBasicProperties props,
@@ -319,13 +500,8 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
                 basicProps.ReplyToAddress = props.ReplyToAddress;
             }
 
-            await Task.Run(() => _channel.BasicPublish(
-                exchange: string.Empty,
-                routingKey: dlqName,
-                mandatory: false,
-                basicProps,
-                body)
-            , cancellationToken);
+            await PublishToExchangeAsync(string.Empty, null, dlqName, _ => basicProps, body, mandatory: false,
+                cancellationToken).ConfigureAwait(false);
 
             _logger.LogWarning("Dead-lettered message published to DLQ: {DlqName}", dlqName);
         }
@@ -669,6 +845,16 @@ public sealed partial class RabbitMqEventBus : IEventBus, INativeSchedulingTrans
                 }
 
                 _consumers.Clear();
+            }
+
+            if (_publishChannel != null)
+            {
+                var publishChannel = _publishChannel;
+                try { await Task.Run(() => publishChannel.Close()).ConfigureAwait(false); }
+                catch (Exception ex) { _logger.LogWarning(ex, "RabbitMQ publish channel Close failed"); }
+                try { await Task.Run(() => publishChannel.Dispose()).ConfigureAwait(false); }
+                catch (Exception ex) { _logger.LogWarning(ex, "RabbitMQ publish channel Dispose failed"); }
+                _publishChannel = null;
             }
 
             if (_channel != null)

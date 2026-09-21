@@ -13,7 +13,7 @@ namespace Lycia.Persistence.PostgreSql.Tests;
 public class PostgreSqlContainerFixture : IAsyncLifetime
 {
     private readonly PostgreSqlContainer _container = new PostgreSqlBuilder()
-        .WithImage("postgres:16-alpine")
+        .WithImage(Lycia.Tests.Infrastructure.InfrastructureVersions.Image("postgresql"))
         .Build();
 
     public string ConnectionString => _container.GetConnectionString();
