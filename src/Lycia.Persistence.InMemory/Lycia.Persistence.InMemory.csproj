@@ -8,6 +8,7 @@
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <RepositoryUrl>https://github.com/gokayokutucu/lycia</RepositoryUrl>
         <RepositoryType>git</RepositoryType>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
 
         <!-- Prevent writing project references as dependencies in nuspec -->
         <SuppressProjectReferenceDependenciesWhenPacking>true</SuppressProjectReferenceDependenciesWhenPacking>
@@ -54,6 +55,10 @@
     <!-- Common packages for all target frameworks -->
     <ItemGroup>
         <PackageReference Include="Nerdbank.GitVersioning" Version="3.*" PrivateAssets="all" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="..\..\README.md" Pack="true" PackagePath="" />
     </ItemGroup>
 
     <!-- netstandard2.0 specific packages -->

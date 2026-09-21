@@ -365,10 +365,25 @@ README.md for what's still planned beyond this.
   dispatch as a safe no-op. `MarkCompletedAsync`/`MarkFailedAsync` are called after the handler
   pipeline finishes. `IInboxStore` is resolved optionally (`serviceProvider.GetService<IInboxStore>()`)
   — when nothing is registered, dispatch behaves exactly as it did before Inbox existed.
+  A claim is not permanent: a record left in `Processing` (a process that died after committing its
+  claim but before finishing the handler) or sitting in `Failed` becomes claimable again once it is
+  older than `ClaimRecoveryTimeout` (5 minutes by default, on `InboxOptions` and on the relational
+  provider inbox options), and every provider performs that takeover atomically — one predicated
+  `UPDATE` for SQL Server/PostgreSQL, a Lua script for Redis, the existing lock for InMemory — so
+  concurrent redeliveries cannot all decide to process the same message. Without that window the
+  first crash or handler failure would make every later redelivery of that message a permanent
+  no-op: the dispatcher returns normally, the transport acks, and the work is silently dropped.
+  Configure the window longer than the slowest handler, since a shorter one lets a redelivery take
+  over a claim whose first execution is still running. `Completed` is never reclaimable, which is the
+  duplicate suppression the Inbox exists for. Note that under `LocalAtomic` the claim shares the
+  handler's transaction, so a crash or exception rolls the claim back anyway and the recovery window
+  only matters for topologies where the claim commits on its own (Redis/InMemory, or mixed relational
+  resolving to `Independent`).
 - **`IOutboxStore`** (`Lycia.Saga.Abstractions.Outbox`) — durably captures outgoing message intent
   (`AddAsync`, idempotent on `MessageId`) with an explicit lifecycle
-  (`Pending → Claimed → Publishing → Published/ConfirmationUnknown/Failed`), plus `ClaimPendingBatchAsync`
-  for a publisher to atomically take ownership of a batch without another worker claiming the same rows.
+  (`Pending → Claimed → Publishing → Published/ConfirmationUnknown/Failed/Abandoned`), plus
+  `ClaimPendingBatchAsync` for a publisher to atomically take ownership of a batch without another
+  worker claiming the same rows.
 
 ### Durable providers
 
@@ -427,6 +442,20 @@ JetStream provide this capability. Core NATS and the current RabbitMQ publisher 
 `ConfirmationUnknown`; they are safely redispatchable and therefore at least once. A transport
 exception is also `ConfirmationUnknown`; only a permanent local envelope/type/serialization error is
 `Failed`.
+
+`ConfirmationUnknown` is gated by the same `RecoveryTimeout` window as a claim stranded by a crashed
+worker, so attempts are spread across `MaxAttempts × RecoveryTimeout`. Two things follow. First, an
+unconfirming transport no longer republishes the same message `MaxAttempts` times in a burst, which
+is what happened while `ConfirmationUnknown` was re-claimable on the very next pass. Second, once the
+attempts really are exhausted the dispatcher moves the row to the terminal `Abandoned` status via
+`MarkAbandonedAsync`, records the reason in its failure info, and logs a warning with the `MessageId`
+and `SagaId`; `OutboxDispatchResult.Abandoned` carries the aggregate count so `OutboxWorker` can log
+it too. `Abandoned` is intentionally neither `Published` nor `Failed` — the delivery outcome is
+unknown — and it exists because the alternative was worse: a row that reached the attempt cap while
+still marked `ConfirmationUnknown` is returned by no claim query ever again, so a broker outage that
+outlasted roughly four seconds of backoff dropped the outgoing message permanently, with nothing
+recording that it had stopped. This mirrors how Split Store reconciliation already terminalizes its
+own exhausted intents as `AttemptsExhausted`.
 
 ### Atomic persistence session
 
