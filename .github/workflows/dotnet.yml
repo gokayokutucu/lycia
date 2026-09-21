@@ -2,12 +2,13 @@ name: Publish NuGet
 
 on:
   push:
-    branches: [ main ]
+    # main and dev pushes run CI only; the publish job below runs exclusively for v* release tags.
+    branches: [ main, dev ]
     tags: [ 'v*' ]
     # Deliberately no paths filter. GitHub applies a push trigger's paths filter to tag pushes as
     # well, and a newly created tag has no meaningful diff base, so a release tag can end up not
     # building - and therefore not publishing - depending on what its commit happened to touch.
-    # This workflow only fires on main pushes and v* tags, both rare enough to always warrant CI.
+    # Every main/dev push and v* tag therefore runs the full CI.
 
 # Least privilege by default. Only the publish job additionally gets id-token: write, which is what
 # lets it mint the GitHub OIDC token that NuGet Trusted Publishing exchanges for a short-lived key.

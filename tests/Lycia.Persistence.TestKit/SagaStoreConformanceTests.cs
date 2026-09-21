@@ -153,9 +153,9 @@ public abstract class SagaStoreConformanceTests
     }
 
     // --- Optimistic concurrency (IVersionedSagaStore) ---
-    // Only exercised when the provider under test implements IVersionedSagaStore. Providers that don't
-    // (none in Phase 1 skip this - all four Phase 1 providers implement it) would simply have these
-    // tests report inconclusive via the guard below.
+    // Only exercised when the provider under test implements IVersionedSagaStore (all four built-in
+    // providers do). A provider that doesn't would have these tests report inconclusive via the guard
+    // below.
 
     private IVersionedSagaStore? AsVersioned(ISagaStore store) => store as IVersionedSagaStore;
 

@@ -9,25 +9,9 @@ and validated configuration.
 ## Registration
 
 ```csharp
-// Redis-backed durable scheduling (requires an IConnectionMultiplexer registration)
-services.AddLyciaScheduling(options =>
-{
-    options.AllowDynamicDelays = false;
-    options.Worker.LeaseDuration = TimeSpan.FromSeconds(30);
-    options.Worker.LeaseRenewInterval = TimeSpan.FromSeconds(10);
-    options.Vacuum.ApplicationTopology.Mode = VacuumMode.ReportOnly;
-});
-
-// Deterministic in-memory scheduling for tests and single-process development
-services.AddLyciaInMemoryScheduling();
-```
-
-The nested `AddLycia(...)` DSL form is equivalent and preferred for new code:
-
-```csharp
 lycia
     .AddScheduling()
-        .WithRedisStore()
+        .WithRedisStore()          // or .WithInMemoryStore() for tests and single-process development
         .WithPredefinedDelays()
         .WithDispatch(options =>
         {
@@ -37,9 +21,11 @@ lycia
         .WithVacuum(options => options.ApplicationTopology.Mode = VacuumMode.ReportOnly);
 ```
 
-`WithDispatch(...)` configures the same `SchedulingOptions.Worker` settings as `options.Worker` above
-— batching, claim lifetime, lease renewal, and bounded backoff-with-jitter retry for due-schedule
-dispatch. It replaces `WithWorker(...)`, kept as an `[Obsolete]` wrapper for existing callers.
+The older `services.AddLyciaScheduling(options => ...)` and `services.AddLyciaInMemoryScheduling()` calls
+still compile as `[Obsolete]` wrappers over the same `SchedulingOptions`.
+
+`WithDispatch(...)` configures `SchedulingOptions.Worker` — batching, claim lifetime, lease renewal, and
+bounded backoff-with-jitter retry for due-schedule dispatch. It replaces `WithWorker(...)`, kept as an `[Obsolete]` wrapper for existing callers.
 
 Schedule from any saga context:
 

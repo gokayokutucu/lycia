@@ -38,8 +38,10 @@ successful response or advancing the Checkout workflow.
 Use `docker compose stop checkout-redis` to demonstrate canonical commits surviving Redis failure,
 then `docker compose start checkout-redis` to observe reconciliation. Delete one projection through
 `DELETE /debug/projections/{sagaId}` and queue current-state restoration through
-`POST /debug/projections/{sagaId}/restore`. This is Phase 5 operational projection restoration, not
-Phase 6 historical replay; it never invokes business handlers or creates broker messages.
+`POST /debug/projections/{sagaId}/restore`. This restores the operational projection from the latest
+canonical row; `POST /debug/sagas/{sagaId}/rebuild-from-journal` instead rebuilds it from the ordered
+canonical journal, and `GET /debug/sagas/{sagaId}/verify` checks it. None of these invokes business
+handlers or creates broker messages.
 
 Inspect canonical state with `docker compose exec postgres psql -U lycia -d checkout_db` and operational
 state with `docker compose exec checkout-redis redis-cli GET saga:data:<saga-id>`.

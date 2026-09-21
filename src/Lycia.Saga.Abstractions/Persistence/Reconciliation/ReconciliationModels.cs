@@ -33,8 +33,8 @@ public enum ProjectionApplyOutcome
 }
 
 /// <summary>
-/// A durable Phase 5 intent containing the resulting canonical saga state. It restores the current
-/// operational projection and is not the Phase 6 immutable historical journal.
+/// A durable reconciliation intent containing the resulting canonical saga state. It restores the current
+/// operational projection and is not the immutable canonical journal.
 /// </summary>
 public sealed class SagaProjectionIntent
 {
