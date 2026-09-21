@@ -132,14 +132,22 @@ public abstract class InboxStoreConformanceTests
     }
 
     /// <summary>Exactly one of several concurrent deliveries may take over a stale claim.</summary>
+    /// <remarks>
+    /// The recovery window has to be longer than the spread of the racers' arrival times. Each racer
+    /// opens its own connection, so they do not arrive simultaneously; with a very short window a racer
+    /// arriving after the winner's takeover would legitimately find even the refreshed claim stale and
+    /// take it over again. That is correct behavior for such a window, but it would hide whether two
+    /// genuinely concurrent takeovers can both succeed, which is what this test exists to check.
+    /// </remarks>
     [Fact]
     public async Task Concurrent_TryBeginAsync_On_A_Stale_Claim_Has_Exactly_One_Winner()
     {
-        var store = CreateStore(TimeSpan.FromMilliseconds(10));
+        var window = TimeSpan.FromSeconds(2);
+        var store = CreateStore(window);
         var messageId = Guid.NewGuid();
         await store.TryBeginAsync(messageId, HandlerType);
 
-        await Task.Delay(60);
+        await Task.Delay(window + TimeSpan.FromMilliseconds(500));
 
         var attempts = await Task.WhenAll(Enumerable.Range(0, 8)
             .Select(_ => Task.Run(() => store.TryBeginAsync(messageId, HandlerType))));
