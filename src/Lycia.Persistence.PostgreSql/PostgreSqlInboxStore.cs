@@ -58,6 +58,26 @@ public class PostgreSqlInboxStore(PostgreSqlInboxOptions options,
         var inserted = await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         if (inserted > 0) return InboxBeginResult.Started;
 
+        // A record already exists. Take it over when it is a claim stranded by a dead process, or a failed
+        // attempt whose suppression window has passed — otherwise a crash between claim and completion
+        // would make every later redelivery skip the work permanently. One predicated UPDATE keeps the
+        // takeover atomic, so concurrent redeliveries cannot all decide to process the same message.
+        // Completed is deliberately excluded: that is the duplicate suppression the Inbox exists for.
+        using var takeOver = CreateCommand(lease.Connection, $"""
+                UPDATE {InboxTable}
+                SET status = @processing, failure_info_json = NULL, updated_at_utc = now()
+                WHERE message_id = @messageId AND handler_type = @handlerType
+                  AND (status = @processing OR status = @failed)
+                  AND updated_at_utc <= @staleBefore;
+                """, lease.Transaction);
+        takeOver.Parameters.AddWithValue("messageId", messageId);
+        takeOver.Parameters.AddWithValue("handlerType", handlerTypeName);
+        takeOver.Parameters.AddWithValue("processing", (int)InboxMessageStatus.Processing);
+        takeOver.Parameters.AddWithValue("failed", (int)InboxMessageStatus.Failed);
+        takeOver.Parameters.AddWithValue("staleBefore", DateTime.UtcNow.Subtract(options.ClaimRecoveryTimeout));
+        if (await takeOver.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) > 0)
+            return InboxBeginResult.Started;
+
         var status = await SelectStatusAsync(lease.Connection, lease.Transaction, messageId, handlerTypeName,
             cancellationToken).ConfigureAwait(false);
         return status switch
