@@ -631,7 +631,10 @@ public class RabbitMqEventBusIntegrationTests : IAsyncLifetime
 
         await EventBusReadiness.WaitForConsumersAsync(consumerBus, timeout.Token);
         var request = new TestCommand { SagaId = Guid.NewGuid(), Message = "request" };
-        await producerBus.Send(request, cancellationToken: timeout.Token);
+        // The request only needs its routing metadata (RequestId, ResponseEndpoint) for this test. It is not
+        // published: no queue is bound for the command, and publishing it would (correctly) be reported as
+        // unroutable now that commands are published as mandatory.
+        Lycia.Messaging.RequestRouting.Prepare(request);
         var response = new TestResponse { Message = "response" };
         await producerBus.Respond(request, response, cancellationToken: timeout.Token);
 

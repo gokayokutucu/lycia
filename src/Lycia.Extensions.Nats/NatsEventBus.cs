@@ -19,7 +19,7 @@ namespace Lycia.Extensions.Nats;
 /// Lycia NATS transport. JetStream is the default for durable saga delivery; Core NATS is an
 /// explicitly selected ephemeral mode for workloads that tolerate subscriber absence.
 /// </summary>
-public sealed class NatsEventBus : IEventBus, IConfirmedEventBus, INativeSchedulingTransport, IAsyncDisposable
+public sealed class NatsEventBus : IEventBus, IConditionalConfirmedEventBus, INativeSchedulingTransport, IAsyncDisposable
 {
     private readonly IDictionary<string, (Type MessageType, Type HandlerType)> _queueTypeMap;
     private readonly NatsEventBusOptions _options;
@@ -34,6 +34,12 @@ public sealed class NatsEventBus : IEventBus, IConfirmedEventBus, INativeSchedul
 
     /// <inheritdoc />
     public string TransportName => "nats";
+
+    /// <summary>
+    /// Gets whether publishes are positively confirmed. JetStream returns a publish acknowledgement; Core NATS
+    /// has none, so there the Outbox treats the transport as unconfirming.
+    /// </summary>
+    public bool ConfirmationsAvailable => _options.UseJetStream;
 
     /// <summary>Creates a NATS transport for the discovered logical subscriptions.</summary>
     public NatsEventBus(

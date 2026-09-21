@@ -116,7 +116,7 @@ public class OutboxDispatcher(IOutboxStore outboxStore, IEventBus eventBus, IMes
 
         try
         {
-            var confirmed = eventBus is IConfirmedEventBus;
+            var confirmed = SupportsConfirmation();
             await DispatchSemanticAsync(envelope, messageType, deserialized, cancellationToken);
             if (confirmed)
             {
@@ -168,6 +168,15 @@ public class OutboxDispatcher(IOutboxStore outboxStore, IEventBus eventBus, IMes
         }
     }
 
+    /// <summary>
+    /// Whether the transport can positively confirm broker acceptance right now. An
+    /// <see cref="IConfirmedEventBus"/> that reports otherwise through <see cref="IConditionalConfirmedEventBus"/>
+    /// (Core NATS, RabbitMQ with publisher confirms disabled) is treated as unconfirming.
+    /// </summary>
+    private bool SupportsConfirmation() =>
+        eventBus is IConfirmedEventBus &&
+        (eventBus is not IConditionalConfirmedEventBus conditional || conditional.ConfirmationsAvailable);
+
     private async Task<OutboxMessageStatus> AbandonAsync(OutboxMessage message, int attempts, int maxAttempts,
         string reason, Exception? exception, CancellationToken cancellationToken)
     {
@@ -195,18 +204,19 @@ public class OutboxDispatcher(IOutboxStore outboxStore, IEventBus eventBus, IMes
             ? activitySourceHolder.Source.StartActivity($"Outbox.{envelope.Operation}", ActivityKind.Producer, parentContext)
             : null;
 
-        var target = eventBus is IConfirmedEventBus ? typeof(IConfirmedEventBus) : typeof(IEventBus);
+        var confirmed = SupportsConfirmation();
+        var target = confirmed ? typeof(IConfirmedEventBus) : typeof(IEventBus);
         var instance = eventBus;
         var handlerType = string.IsNullOrWhiteSpace(envelope.HandlerType)
             ? null : ResolveType(envelope.HandlerType!, "handler");
         switch (envelope.Operation)
         {
             case OutboxOperationKind.Send:
-                await InvokeGeneric(target, instance, eventBus is IConfirmedEventBus ? nameof(IConfirmedEventBus.SendConfirmed) : nameof(IEventBus.Send),
+                await InvokeGeneric(target, instance, confirmed ? nameof(IConfirmedEventBus.SendConfirmed) : nameof(IEventBus.Send),
                     [messageType], [message, handlerType, envelope.SagaId, cancellationToken]);
                 return;
             case OutboxOperationKind.Publish:
-                await InvokeGeneric(target, instance, eventBus is IConfirmedEventBus ? nameof(IConfirmedEventBus.PublishConfirmed) : nameof(IEventBus.Publish),
+                await InvokeGeneric(target, instance, confirmed ? nameof(IConfirmedEventBus.PublishConfirmed) : nameof(IEventBus.Publish),
                     [messageType], [message, handlerType, envelope.SagaId, cancellationToken]);
                 return;
             case OutboxOperationKind.Respond:
@@ -215,7 +225,7 @@ public class OutboxDispatcher(IOutboxStore outboxStore, IEventBus eventBus, IMes
                     throw new InvalidOperationException($"Response envelope '{envelope.OutboxId}' has no durable request.");
                 var requestType = ResolveType(envelope.RequestType!, "response request");
                 var request = Deserialize(envelope.RequestBody, envelope.RequestHeaders, requestType);
-                await InvokeGeneric(target, instance, eventBus is IConfirmedEventBus ? nameof(IConfirmedEventBus.RespondConfirmed) : nameof(IEventBus.Respond),
+                await InvokeGeneric(target, instance, confirmed ? nameof(IConfirmedEventBus.RespondConfirmed) : nameof(IEventBus.Respond),
                     [requestType, messageType], [request, message, handlerType, envelope.SagaId, cancellationToken]);
                 return;
             default:
