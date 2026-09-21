@@ -40,15 +40,37 @@ public interface IOutboxStore
     /// <see cref="OutboxMessageStatus.ConfirmationUnknown"/> as well is deliberate: without it an
     /// unconfirmed message is re-claimed on the very next dispatch pass, which burns every attempt
     /// permitted by <paramref name="maxAttempts"/> within seconds and republishes the same message that
-    /// many times. Rows that already reached <paramref name="maxAttempts"/> are never returned. When the
-    /// last permitted attempt did not reach the transport the dispatcher moves the row to the terminal
-    /// <see cref="OutboxMessageStatus.Abandoned"/> state so undelivered work stays discoverable; when the
-    /// transport accepted it but could not confirm, the row stays
+    /// many times.
+    /// <para>
+    /// <paramref name="maxAttempts"/> limits how many attempts may be <em>started</em>, so it gates only the
+    /// statuses a new attempt begins from: <see cref="OutboxMessageStatus.Pending"/> and
+    /// <see cref="OutboxMessageStatus.ConfirmationUnknown"/> rows whose
+    /// <see cref="OutboxMessage.RetryCount"/> has reached it are never returned. A stale
+    /// <see cref="OutboxMessageStatus.Claimed"/> or <see cref="OutboxMessageStatus.Publishing"/> row is
+    /// different: it is an attempt whose outcome was never recorded because its worker stopped, and it
+    /// <b>must</b> be returned whatever its <see cref="OutboxMessage.RetryCount"/>. Excluding it at the cap
+    /// would leave a message whose worker died on the final attempt stranded forever, neither retried nor
+    /// terminal. The dispatcher compares the returned count with <paramref name="maxAttempts"/> to decide
+    /// between an ordinary retry, one recovery attempt, and <see cref="OutboxMessageStatus.Abandoned"/>.
+    /// Implementations must claim such a row atomically, so that two workers never both take ownership of
+    /// the same stale row.
+    /// </para>
+    /// <para>
+    /// When the last permitted attempt did not reach the transport the dispatcher moves the row to the
+    /// terminal <see cref="OutboxMessageStatus.Abandoned"/> state so undelivered work stays discoverable;
+    /// when the transport accepted it but could not confirm, the row stays
     /// <see cref="OutboxMessageStatus.ConfirmationUnknown"/> at the cap.
+    /// </para>
     /// </remarks>
     Task<IReadOnlyList<OutboxMessage>> ClaimPendingBatchAsync(int maxCount, CancellationToken cancellationToken = default,
         int maxAttempts = 5, TimeSpan? recoveryTimeout = null);
 
+    /// <summary>
+    /// Marks an attempt as started, incrementing <see cref="OutboxMessage.RetryCount"/> before the transport
+    /// is called. A worker that stops after this call leaves a <see cref="OutboxMessageStatus.Publishing"/>
+    /// row that the recovery window later hands back through
+    /// <see cref="ClaimPendingBatchAsync"/>.
+    /// </summary>
     Task MarkPublishingAsync(Guid messageId, CancellationToken cancellationToken = default);
 
     /// <summary>Marks a message as published. Callers must only do this after a positive broker confirmation.</summary>
@@ -60,8 +82,9 @@ public interface IOutboxStore
     Task MarkFailedAsync(Guid messageId, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Marks a message whose last permitted dispatch attempt did not reach the transport, moving it to the
-    /// terminal <see cref="OutboxMessageStatus.Abandoned"/> state.
+    /// Marks a message whose delivery outcome is unknown and whose attempts are spent — the last permitted
+    /// attempt did not reach the transport, or workers stopped on it twice — moving it to the terminal
+    /// <see cref="OutboxMessageStatus.Abandoned"/> state.
     /// </summary>
     /// <remarks>
     /// This exists so a message that was never handed to the transport cannot silently become invisible:

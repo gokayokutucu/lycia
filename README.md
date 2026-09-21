@@ -474,7 +474,7 @@ creates a new logical message.
 | `Published` | The transport positively confirmed the publish (Kafka, NATS JetStream) |
 | `ConfirmationUnknown` | The publish may have succeeded but was not confirmed — the transport cannot confirm (RabbitMQ, Core NATS) or the attempt threw. Never auto-promoted to `Published` |
 | `Failed` | A permanent local error before any publish, such as an unresolvable message type or an invalid envelope. Not retried |
-| `Abandoned` | Terminal: the last permitted attempt never reached the transport. Needs operator attention |
+| `Abandoned` | Terminal: the last permitted attempt never reached the transport, or workers stopped on both the final attempt and its recovery attempt. Needs operator attention |
 
 **Bounded retry.** A `ConfirmationUnknown` message becomes eligible for another attempt only after
 `RecoveryTimeout` has elapsed, so attempts are spread over roughly `MaxAttempts × RecoveryTimeout`
@@ -482,10 +482,18 @@ rather than consumed back to back. Claims left in `Claimed` or `Publishing` by a
 recovered after the same window. Recovery can duplicate a publish whose original worker was only slow,
 which is part of the at-least-once contract.
 
+**If a worker stops mid-dispatch.** A worker that crashes, or is stopped, after starting an attempt but
+before recording its outcome leaves the message in `Publishing`. That includes the last permitted
+attempt. After `RecoveryTimeout` another worker picks it up. Lycia cannot know whether the broker
+accepted the message, so it publishes it once more with the same `MessageId`: the worst case is a
+duplicate, never a silent loss. That recovery publish is the only attempt allowed beyond `MaxAttempts`,
+so a message is started at most `MaxAttempts + 1` times and only when a worker died on it. If the
+recovery attempt is lost as well, the message becomes `Abandoned` instead of looping.
+
 **When attempts run out**, the outcome depends on the last attempt:
 
-- **It never reached the transport** — the publish threw, for example because the broker was down, or
-  shutdown cancelled it. The message becomes `Abandoned`, the reason is recorded in its failure info,
+- **It never reached the transport** — the publish threw, for example because the broker was down. The
+  message becomes `Abandoned`, the reason is recorded in its failure info,
   and a warning naming the `MessageId` and `SagaId` is logged. `OutboxDispatchResult.Abandoned` carries
   the count, so you can alert on it. The message is not dispatched again automatically.
 - **The transport accepted it but cannot confirm it** — the normal case for RabbitMQ and Core NATS. The

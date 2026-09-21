@@ -48,11 +48,17 @@ final validation are complete; see `FINALIZATION`.)
   each message is handed to the broker up to `MaxAttempts` times, spaced by `RecoveryTimeout`; the
   receiving Inbox absorbs the duplicates. This is the current validated behavior, not a fixed
   architectural limit, and may be revisited.
-- Outbox crash during the final attempt (Medium): `MarkPublishingAsync` increments `RetryCount`, so a
-  process crash after the final attempt is marked `Publishing` but before its outcome is recorded leaves
-  the row `Publishing` at the attempt cap, which no claim query returns. Requires a crash in exactly that
-  window after all earlier attempts were used. A fix would terminalize stale `Publishing` rows at the cap
-  (for example by making the claim query mark them `Abandoned`).
+- Redis rows already stranded by 1.18.0: before the 1.18.1 fix the Redis claim script removed a stale
+  `Publishing` entry at the attempt cap from the pending set for good, so such a row has a message record
+  but no pending entry and the fixed script cannot rediscover it. SQL Server and PostgreSQL rows in that
+  state recover on their own once the fix is deployed. For Redis, re-add the entry to the pending set
+  (`ZADD <namespace>:pending 0 <messageId>`); the next claim then recovers it (covered by a test).
+- Outbox (Low): a store failure while recording the outcome of a *delivered* final attempt can be handled
+  as a failed publish and end in a false `Abandoned` (operator alert, no loss). The dispatcher does not
+  separate transport failures from persistence failures. Crash loops that occur after a claim but before
+  `MarkPublishingAsync` are not bounded by `MaxAttempts` because no attempt is started; a store or payload
+  that crashes there every time would be reclaimed forever. Lowering `MaxAttempts` while rows rest at
+  `ConfirmationUnknown` below the old cap makes those rows rest as well.
 - `Lycia.Extensions` imposes Autofac, Serilog and Apache.Avro on every consumer transitively (dependency
   weight, not correctness).
 - Packages ship without symbol packages (`.snupkg`).
