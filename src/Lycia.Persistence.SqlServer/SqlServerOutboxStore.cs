@@ -80,6 +80,11 @@ public class SqlServerOutboxStore(SqlServerOutboxOptions options,
         await using var lease = await RelationalConnectionLease<SqlConnection, SqlTransaction>.OpenAsync(
             sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
 
+        // The attempt cap gates only the statuses a NEW attempt starts from (Pending, ConfirmationUnknown).
+        // A Claimed/Publishing row that has gone stale is an attempt whose outcome was never recorded, and is
+        // handed back whatever its RetryCount: a worker dying on the final attempt would otherwise leave a
+        // row that no claim ever returns again.
+        //
         // The derived-table TOP/ORDER BY claims the oldest pending rows and takes row locks on exactly
         // those rows before flipping Status; READPAST makes a concurrent claimer skip rows already
         // locked by another caller instead of blocking or double-claiming them.
@@ -92,10 +97,9 @@ public class SqlServerOutboxStore(SqlServerOutboxOptions options,
             FROM (
                 SELECT TOP (@maxCount) *
                 FROM {OutboxTable} WITH (ROWLOCK, READPAST)
-                WHERE (Status = @pendingStatus OR
-                      ((Status = @unknownStatus OR Status = @claimedStatus OR Status = @publishingStatus)
-                       AND UpdatedAtUtc <= @staleBefore))
-                  AND RetryCount < @maxAttempts
+                WHERE (Status = @pendingStatus AND RetryCount < @maxAttempts)
+                   OR (Status = @unknownStatus AND RetryCount < @maxAttempts AND UpdatedAtUtc <= @staleBefore)
+                   OR ((Status = @claimedStatus OR Status = @publishingStatus) AND UpdatedAtUtc <= @staleBefore)
                 ORDER BY CreatedAtUtc
             ) AS claimed;
             """, lease.Transaction);

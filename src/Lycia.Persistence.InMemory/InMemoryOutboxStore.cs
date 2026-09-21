@@ -39,11 +39,7 @@ public class InMemoryOutboxStore : IOutboxStore
         {
             var staleBefore = DateTime.UtcNow.Subtract(recoveryTimeout ?? TimeSpan.FromMinutes(1));
             var claimed = _messages.Values
-                .Where(m => (m.Status == OutboxMessageStatus.Pending ||
-                             ((m.Status == OutboxMessageStatus.ConfirmationUnknown ||
-                               m.Status == OutboxMessageStatus.Claimed ||
-                               m.Status == OutboxMessageStatus.Publishing) &&
-                              m.UpdatedAtUtc <= staleBefore)) && m.RetryCount < maxAttempts)
+                .Where(m => IsClaimable(m, maxAttempts, staleBefore))
                 .OrderBy(m => m.CreatedAtUtc)
                 .Take(maxCount)
                 .ToList();
@@ -57,6 +53,20 @@ public class InMemoryOutboxStore : IOutboxStore
             return Task.FromResult<IReadOnlyList<OutboxMessage>>(claimed);
         }
     }
+
+    // The cap limits how many attempts may be STARTED, so it gates only the statuses from which a new
+    // attempt begins (Pending, ConfirmationUnknown). A Claimed/Publishing row that has gone stale is an
+    // attempt whose outcome was never recorded; it is always handed back for recovery, whatever its
+    // RetryCount, because otherwise a worker dying on the final attempt would strand the message.
+    private static bool IsClaimable(OutboxMessage message, int maxAttempts, DateTime staleBefore) =>
+        message.Status switch
+        {
+            OutboxMessageStatus.Pending => message.RetryCount < maxAttempts,
+            OutboxMessageStatus.ConfirmationUnknown =>
+                message.RetryCount < maxAttempts && message.UpdatedAtUtc <= staleBefore,
+            OutboxMessageStatus.Claimed or OutboxMessageStatus.Publishing => message.UpdatedAtUtc <= staleBefore,
+            _ => false
+        };
 
     /// <inheritdoc />
     public Task MarkPublishingAsync(Guid messageId, CancellationToken cancellationToken = default)

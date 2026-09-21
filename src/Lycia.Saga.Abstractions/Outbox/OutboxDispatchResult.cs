@@ -19,9 +19,10 @@ public class OutboxDispatchResult
     public int Failed { get; set; }
 
     /// <summary>
-    /// Gets or sets how many messages used their last permitted attempt without reaching the transport and
-    /// were moved to the terminal <see cref="OutboxMessageStatus.Abandoned"/> state. A non-zero value means
-    /// outgoing business intent may never have been delivered and needs operator attention.
+    /// Gets or sets how many messages were moved to the terminal <see cref="OutboxMessageStatus.Abandoned"/>
+    /// state because their last permitted attempt never reached the transport, or because workers stopped on
+    /// both the final attempt and its recovery attempt. A non-zero value means outgoing business intent may
+    /// never have been delivered and needs operator attention.
     /// </summary>
     public int Abandoned { get; set; }
 }

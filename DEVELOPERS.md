@@ -264,9 +264,11 @@ is due, then hands the original operation to this pipeline.
 shutdown cancellation. After a pass that ends with unconfirmed, failed or abandoned messages, or throws,
 the worker backs off exponentially with jitter; otherwise it polls every `PollInterval`.
 
-`ClaimPendingBatchAsync` returns `Pending` rows plus `ConfirmationUnknown`, `Claimed` and `Publishing`
-rows whose last update is older than `RecoveryTimeout`, and never rows at `MaxAttempts`. Claiming is
-atomic per provider:
+`ClaimPendingBatchAsync` returns `Pending` rows, plus `ConfirmationUnknown`, `Claimed` and `Publishing`
+rows whose last update is older than `RecoveryTimeout`. The attempt cap gates only the statuses a *new*
+attempt starts from: a `Pending` or `ConfirmationUnknown` row at `MaxAttempts` is never returned, but a
+stale `Claimed`/`Publishing` row is returned whatever its `RetryCount` (see
+[Crash recovery](#crash-recovery-of-an-in-doubt-attempt)). Claiming is atomic per provider:
 
 - SQL Server — `UPDATE TOP (@n) ... OUTPUT INSERTED.*` with `READPAST`.
 - PostgreSQL — `FOR UPDATE SKIP LOCKED`.
@@ -301,12 +303,13 @@ attempts are spread across roughly `MaxAttempts × RecoveryTimeout`. Without tha
 transport republishes the same message `MaxAttempts` times in a burst and a short broker outage burns
 the whole attempt budget.
 
-When the last permitted attempt (`RetryCount + 1 == MaxAttempts`):
+When the last permitted attempt (`RetryCount + 1 >= MaxAttempts` as it starts) ends:
 
-- **never reached the transport** (the publish threw, or shutdown cancelled it), the dispatcher calls
+- **never reached the transport** (the publish threw), the dispatcher calls
   `MarkAbandonedAsync`, records the reason as failure info, logs a warning naming `MessageId` and
   `SagaId`, and counts it in `OutboxDispatchResult.Abandoned`, which `OutboxWorker` also logs. Without
-  this terminal state, a row at the attempt cap is returned by no claim query and is silently lost.
+  this terminal state, a row that exhausted its attempts against an unreachable broker would sit at the
+  attempt cap with no terminal status and no recorded reason.
 - **was accepted but not confirmed**, the row stays `ConfirmationUnknown` at the cap and the dispatcher
   logs at Information. An unconfirming transport reports every successful publish this way, so
   abandoning it would flag essentially every delivered message.
@@ -314,9 +317,63 @@ When the last permitted attempt (`RetryCount + 1 == MaxAttempts`):
 `Abandoned` is neither `Published` nor `Failed`. Implementations of `MarkAbandonedAsync` must record the
 failure info and remove the message from any claimable queue (Redis removes it from the pending set).
 
-A crash between claiming the final attempt and recording its outcome leaves the row in `Publishing` at
-the attempt cap, where no claim query returns it. This narrow window is a known Medium item in the
-ledger.
+### Crash recovery of an in-doubt attempt
+
+**What `RetryCount` means.** It is the number of attempts *started*: `MarkPublishingAsync` increments it
+before the transport is called, and nothing else does. It therefore includes an attempt whose outcome was
+never recorded because its worker stopped, and it is never reset. It can reach `MaxAttempts + 1`.
+
+**Why the cap alone cannot decide recovery.** The cap answers "may another attempt start?". A stale
+`Claimed`/`Publishing` row poses a different question: an attempt already started whose outcome nobody
+recorded. Only a live worker can resolve it, and a worker can only find it through the claim query. If the
+claim query also applied the cap to such rows, a worker dying on the *final* attempt — after
+`MarkPublishingAsync` had raised the count to the cap — would leave a row that no claim ever returns:
+neither retried nor terminal, silently lost. (Redis was worse: its script popped the due entry off the
+pending set before checking the cap and never re-added it.) So the claim contract is:
+
+| Row | Handed back when |
+| --- | --- |
+| `Pending` | `RetryCount < maxAttempts` |
+| `ConfirmationUnknown` | `RetryCount < maxAttempts` and older than `RecoveryTimeout` |
+| `Claimed`, `Publishing` | older than `RecoveryTimeout`, **whatever** `RetryCount` |
+| `Published`, `Failed`, `Abandoned` | never |
+
+**What the dispatcher does with a handed-back row**, from `RetryCount` (`n`) at claim time:
+
+| `n` | Meaning | Action |
+| --- | --- | --- |
+| `< maxAttempts` | An ordinary attempt, or a stale one below the cap | Attempt `n + 1`, as usual |
+| `== maxAttempts` | The last permitted attempt is in doubt | One recovery attempt (`n` becomes `maxAttempts + 1`) with the same `MessageId`, logged as a warning |
+| `> maxAttempts` | The recovery attempt was lost too | `Abandoned` with a recorded reason; nothing is published |
+
+The recovery attempt is treated as the final attempt: if its publish throws, the row becomes `Abandoned`;
+if the transport accepts it without confirming, the row stays `ConfirmationUnknown`; a confirming
+transport gives `Published`.
+
+**Why an indeterminate attempt is republished.** Recovery cannot tell whether the crashed attempt died
+before the broker accepted the message or after, and the two need opposite answers: silently dropping the
+row loses a message that never left, while assuming delivery or abandoning it on the strength of the count
+alone discards intent that may still be undelivered. Lycia is at-least-once and consumers already absorb
+duplicates through the Inbox, so the conservative answer is to publish once more. A duplicate is an
+accepted cost; a lost message is not. `MessageId` is unchanged, so the duplicate is recognizable.
+
+**Why it is bounded.** Crash recovery adds exactly one attempt beyond `MaxAttempts`, and a message that
+keeps killing its worker is abandoned after that rather than looped. It is also kept separate from normal
+retry policy: below the cap a stale row is an ordinary retry with no special handling, and the cap on
+`ConfirmationUnknown` rows is unchanged.
+
+**Shutdown.** Cancelling the last permitted attempt on shutdown writes no outcome and leaves the row
+`Publishing`, the state a crash leaves, so the next worker recovers it. A graceful stop is therefore never
+worse than a crash by demanding operator action. Earlier attempts still record `ConfirmationUnknown`.
+
+**Contract for custom stores.** `ClaimPendingBatchAsync` must hand back stale `Claimed`/`Publishing` rows
+without applying the cap, must claim them atomically so two workers never own the same stale row, and must
+return `RetryCount` unmodified. A store that keeps applying the cap to them reintroduces the stranded-row
+window.
+
+**Other states that rest.** A `ConfirmationUnknown` row at the cap stays put by design: the transport
+accepted the last attempt but cannot confirm it. The row remains queryable by status; it is not flagged
+`Abandoned` because nothing indicates the message was undelivered.
 
 ---
 

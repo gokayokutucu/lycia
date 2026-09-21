@@ -12,7 +12,11 @@ public enum OutboxMessageStatus
     /// <summary>Claimed by a publisher worker for dispatch. Not yet visible to other workers.</summary>
     Claimed,
 
-    /// <summary>A publish attempt to the broker is in flight.</summary>
+    /// <summary>
+    /// A publish attempt to the broker is in flight. A row that stays here past the recovery timeout belongs
+    /// to a worker that stopped before recording the attempt's outcome; it is recovered, not dropped,
+    /// whatever its attempt count.
+    /// </summary>
     Publishing,
 
     /// <summary>The broker returned a positive publish confirmation.</summary>
@@ -25,8 +29,9 @@ public enum OutboxMessageStatus
     Failed,
 
     /// <summary>
-    /// Terminal: the last permitted dispatch attempt did not reach the transport at all — the publish
-    /// threw, or shutdown cancelled it — so the message may never have been delivered. Deliberately
+    /// Terminal: the last permitted dispatch attempt did not reach the transport — the publish threw — or
+    /// workers stopped mid-dispatch on the final attempt and again on its recovery attempt, so the message
+    /// may never have been delivered. Deliberately
     /// distinct from <see cref="Failed"/>, which means a permanent local error before any publish was
     /// attempted. An abandoned message is never dispatched again automatically and requires operator
     /// action; it exists so exhausted work is discoverable instead of sitting indefinitely in a

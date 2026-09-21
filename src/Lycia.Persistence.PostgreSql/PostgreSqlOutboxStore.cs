@@ -92,6 +92,10 @@ public class PostgreSqlOutboxStore(PostgreSqlOutboxOptions options,
     public async Task<IReadOnlyList<OutboxMessage>> ClaimPendingBatchAsync(int maxCount,
         CancellationToken cancellationToken = default, int maxAttempts = 5, TimeSpan? recoveryTimeout = null)
     {
+        // The attempt cap gates only the statuses a NEW attempt starts from (Pending, ConfirmationUnknown).
+        // A Claimed/Publishing row that has gone stale is an attempt whose outcome was never recorded, and is
+        // handed back whatever its retry_count: a worker dying on the final attempt would otherwise leave a
+        // row that no claim ever returns again.
         await using var lease = await RelationalConnectionLease<NpgsqlConnection, NpgsqlTransaction>.OpenAsync(
             sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
         using var command = CreateCommand(lease.Connection, $"""
@@ -99,10 +103,9 @@ public class PostgreSqlOutboxStore(PostgreSqlOutboxOptions options,
             SET status = @claimedStatus, updated_at_utc = now()
             WHERE message_id IN (
                 SELECT message_id FROM {OutboxTable}
-                WHERE (status = @pendingStatus OR
-                      ((status = @unknownStatus OR status = @claimedStatus OR status = @publishingStatus)
-                       AND updated_at_utc <= @staleBefore))
-                  AND retry_count < @maxAttempts
+                WHERE (status = @pendingStatus AND retry_count < @maxAttempts)
+                   OR (status = @unknownStatus AND retry_count < @maxAttempts AND updated_at_utc <= @staleBefore)
+                   OR ((status = @claimedStatus OR status = @publishingStatus) AND updated_at_utc <= @staleBefore)
                 ORDER BY created_at_utc
                 LIMIT @maxCount
                 FOR UPDATE SKIP LOCKED

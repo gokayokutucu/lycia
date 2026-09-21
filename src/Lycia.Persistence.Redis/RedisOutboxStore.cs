@@ -76,9 +76,14 @@ return 1";
     // Atomically pops up to maxCount oldest members off the pending set and flips each surviving
     // message's stored Status to Claimed, all inside one EVAL so two concurrent callers can never both
     // claim the same member (Redis executes a single Lua script single-threaded/atomically). A pending
-    // entry whose message record no longer reports Pending (e.g. it was advanced directly, bypassing the
+    // entry whose message record is not awaiting dispatch (e.g. it was advanced directly, bypassing the
     // claim flow) is dropped from the queue without being claimed or returned, so the queue can never
     // hand out a message that is not actually awaiting dispatch.
+    //
+    // The attempt cap gates only the statuses a NEW attempt starts from (Pending, ConfirmationUnknown). A
+    // Claimed/Publishing entry that has come due is an attempt whose outcome was never recorded, and is
+    // claimed whatever its RetryCount: dropping it here, as this script once did for any row at the cap,
+    // removed the message from the queue for good when a worker died on its final attempt.
     private static readonly string ClaimPendingBatchScript = @"
 local pendingKey = KEYS[1]
 local maxCount = tonumber(ARGV[1])
@@ -104,8 +109,14 @@ for i = 1, #ids do
     if json then
       local decoded = cjson.decode(json)
       local retryCount = tonumber(decoded['RetryCount'] or 0)
-      if (decoded['Status'] == pendingStatus or decoded['Status'] == unknownStatus or
-          decoded['Status'] == claimedStatus or decoded['Status'] == publishingStatus) and retryCount < maxAttempts then
+      local status = decoded['Status']
+      local eligible = false
+      if status == pendingStatus or status == unknownStatus then
+        eligible = retryCount < maxAttempts
+      elseif status == claimedStatus or status == publishingStatus then
+        eligible = true
+      end
+      if eligible then
         decoded['Status'] = claimedStatus
         decoded['UpdatedAtUtc'] = nowIso
         local newJson = cjson.encode(decoded)

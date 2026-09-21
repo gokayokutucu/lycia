@@ -12,12 +12,22 @@ public sealed class OutboxWorkerOptions
     /// <summary>Gets or sets the maximum number of rows claimed per pass.</summary>
     public int BatchSize { get; set; } = 50;
 
-    /// <summary>Gets or sets the maximum dispatch attempts for one stable message identity.</summary>
+    /// <summary>
+    /// Gets or sets the maximum ordinary dispatch attempts for one stable message identity.
+    /// </summary>
+    /// <remarks>
+    /// One further attempt is permitted only to resolve an attempt whose outcome was lost because a worker
+    /// stopped before recording it. If the last permitted attempt is in that state it is published once
+    /// more — the same <c>MessageId</c>, at-least-once — so a message is started at most
+    /// <c>MaxAttempts + 1</c> times, and only when a worker died on it. If that recovery attempt is lost as
+    /// well, the message becomes <see cref="OutboxMessageStatus.Abandoned"/>.
+    /// </remarks>
     public int MaxAttempts { get; set; } = 5;
 
     /// <summary>
     /// Gets or sets how long an in-flight claim may remain unchanged before another replica can
-    /// recover it. Configure this longer than the transport's maximum publish timeout.
+    /// recover it, and how long an unconfirmed message waits before its next attempt. Configure this longer
+    /// than the transport's maximum publish timeout.
     /// </summary>
     public TimeSpan RecoveryTimeout { get; set; } = TimeSpan.FromMinutes(1);
 
