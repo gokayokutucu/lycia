@@ -46,9 +46,9 @@ awaits independent architecture review and the reliability red team before final
   below) and deliberately deferred — RabbitMQ.Client 7.1.2 has no supported per-publish confirmation
   await, and a live spike against a real broker hung rather than confirmed. RabbitMQ remains
   `ConfirmationUnknown` rather than a faked confirmation signal.
-- Outbox rows stuck at `ConfirmationUnknown` after exhausting `MaxAttempts` currently have no terminal
-  state or alerting distinct from an in-flight retry — observed live during the Phase 7 Microservices
-  E2E run (harmless to that run's outcome, flagged as a follow-up, not yet implemented).
+- ~~Outbox rows stuck at `ConfirmationUnknown` after exhausting `MaxAttempts`~~ — RESOLVED in the
+  post-Phase-7 review pass. The red team found this was not harmless: it silently dropped outgoing
+  messages after a broker outage of a few seconds. See `REMEDIATION` under `FINALIZATION`.
 - Workflow explorer and operational visualization.
 
 # COMPLETED
@@ -155,12 +155,90 @@ Required before `dev` -> `main`:
 - Phase 5 Split Store + Reconciliation — COMPLETE
 - Phase 6 Canonical Journal + Replay / Rebuild — COMPLETE
 - Phase 7 Reliability Hardening — COMPLETE (implementation only; does not itself satisfy the gates below)
-- Architecture Review — PENDING
-- Reliability Red Team — PENDING
-- Critical Findings — PENDING (none raised yet; gate exists to track remediation once red-team runs)
-- High Findings — PENDING (none raised yet; gate exists to track remediation once red-team runs)
-- Final Regression/Package Validation — PENDING (independent sign-off distinct from this phase's own
-  dev-time validation, which is recorded in the Phase 7 COMPLETED entry above)
+- Architecture Review — PASS. Whole-system review end to end (transport -> SagaDispatcher -> Inbox ->
+  SagaStore -> handler -> Outbox -> session -> broker -> downstream Inbox; Split Store canonical ->
+  intent -> journal -> Redis projection; journal -> reducer -> rebuild -> CAS install; scheduling
+  claim/lease/fence -> dispatch -> outgoing pipeline; HTTP -> handler -> Outbox -> RabbitMQ ->
+  downstream -> continuation). Message-identity, delivery, transaction-boundary, Split Store, journal,
+  unknown-commit and public-API invariants hold as documented. Package boundaries verified: the four
+  internal support projects stay unpackable, no public package declares a dependency on them, the
+  relational providers embed `Lycia.Persistence.Relational.Internal.dll`, and provider dependency
+  closure is clean (PostgreSQL pulls only Npgsql, etc.).
+- Reliability Red Team — PASS. One Critical and one High product finding, both reproduced before being
+  fixed, plus three release-infrastructure findings. All are closed; see `REMEDIATION` below.
+- Critical Findings — 0 open (1 found, fixed in `4b8bb58`).
+- High Findings — 0 open (1 product finding fixed in `a6fc2e3`; release-workflow findings fixed in
+  `cd207d6`).
+- Final Regression/Package Validation — **INCOMPLETE — BLOCKED**. What passed: `dotnet restore`, Debug
+  and Release builds of the whole solution (netstandard2.0/net8.0/net9.0/net10.0/net48, 0 errors);
+  `Lycia.Tests` 175/175 of the non-container tests on both net9.0 and net10.0;
+  `Lycia.Persistence.InMemory.Tests` 54/54 on net8.0, net9.0 and net10.0; all eleven public packages
+  packed in CI pack mode and inspected (id/version/authors/licence/readme/repository/TFMs/dependencies);
+  and the mandatory isolated-consumer test passed for five package-only combinations, including one on
+  net10.0 and one mixed-provider topology. What could NOT be executed: every container-dependent suite,
+  because the local Docker engine stopped responding partway through this pass and did not recover
+  (`DockerUnavailableException`). That leaves unrun: the Redis, SQL Server and PostgreSQL provider
+  suites (which are the only coverage of the new Inbox takeover SQL/Lua and the Outbox claim predicates
+  on real engines), `Lycia.IntegrationTests`, 2 Testcontainers tests in `Lycia.Tests`, 14 in
+  `Lycia.Tests.NetFramework`, and the whole Microservices docker-compose E2E including the Jaeger
+  trace re-verification.
+
+Remaining blockers before `dev` -> `main` and before any release tag:
+
+1. The container-dependent regression above must actually run and pass on a host with a working Docker
+   engine. The Inbox and Outbox remediations change provider SQL and a Redis Lua script, so the
+   per-provider conformance runs are not optional confirmation.
+2. The release version is genuinely ambiguous and needs a human decision, so no tag was created. Every
+   one of the 24 versions published to nuget.org is a prerelease of the form `1.17.0-beta-<height>-g<sha>`;
+   there has never been a stable release. `version.json` pins the base to `1.17-beta.{height}`, so a tag
+   does not determine the package version: tagging anything matching `v*.*.*` today would publish
+   `1.17.0-beta-0188`-style prereleases regardless of the tag's name, which would make the tag name and
+   the shipped version disagree. The one existing tag, `v1.17.0`, is also unreachable from both `main`
+   and `dev` (it predates the history rewrite recorded by the `backup/pre-ai-attribution-cleanup-*`
+   branches) and must not be moved or deleted. Deciding between "publish the next beta under the current
+   scheme" and "make this milestone the first stable release, which requires editing `version.json`" is
+   a release-policy call, not something to infer.
 
 Only change the status to `READY FOR FINAL INTEGRATION` after every required gate is complete and
 recorded. Until then, agents must not merge `dev` into `main`.
+
+# REMEDIATION (post-Phase-7 review pass)
+
+- **Critical — Outbox dispatch exhaustion silently dropped messages.** A row that exhausted its
+  bounded attempts without a broker confirmation stayed at `ConfirmationUnknown` with `RetryCount` at
+  the cap, which every provider's claim query filters out, so it was never dispatched again; nothing
+  recorded why, and no status or log distinguished it from an in-flight retry. `ConfirmationUnknown`
+  was also re-claimable with no staleness gate, so the whole attempt budget burned in roughly four
+  seconds of backoff — meaning a broker outage of a few seconds permanently lost outgoing business
+  messages, and every message sent through an unconfirming transport such as RabbitMQ was republished
+  `MaxAttempts` times in a burst. Reproduced with a deterministic test before fixing. Fixed by gating
+  `ConfirmationUnknown` on the recovery window and adding the terminal, explained
+  `OutboxMessageStatus.Abandoned` (+ `IOutboxStore.MarkAbandonedAsync`,
+  `OutboxDispatchResult.Abandoned`, warning logs naming MessageId/SagaId). Feature commit `4b8bb58`;
+  merged as `8a37a10`.
+- **High — Inbox claims were never recovered.** A process that died after committing its claim left the
+  record in `Processing` for good, and `SagaDispatcher` skips any non-`Started` result and returns
+  normally, so the transport acked the message: the work was silently dropped with no dead-letter entry.
+  A `Failed` record behaved identically, so a message replayed from a dead-letter queue could never be
+  reprocessed, contradicting `InboxBeginResult.AlreadyFailed`'s own documented contract. Exposure is
+  limited to topologies where the claim commits independently of the handler transaction (Redis,
+  InMemory, mixed relational resolving to `Independent`); under `LocalAtomic` the claim rolls back with
+  the handler. Fixed with an atomic, timeout-gated claim takeover in all four providers
+  (`InboxOptions.ClaimRecoveryTimeout`, default 5 minutes), keeping `Completed` permanently suppressed.
+  Feature commit `a6fc2e3`; merged as `eec1495`.
+- **High — the release workflow could not build, and never published the persistence providers.** No job
+  installed the .NET 10 SDK although every src project has targeted net10.0 since Phase 7, so
+  `dotnet restore Lycia.sln` fails with NETSDK1045 and the publish job's `needs:` could never be
+  satisfied; the publish job also never packed or pushed the four `Lycia.Persistence.*` packages, which
+  is why none of them has ever appeared on nuget.org even though `AddLycia` refuses to resolve
+  `ISagaStore` without one; and the push trigger's `paths` filter also applies to tag pushes, which can
+  stop a release tag from starting the workflow at all. Feature commit `cd207d6`; merged as `a4ba23d`.
+- **Low — documentation and packaging accuracy.** Outbox lifecycle docs predated `Abandoned`, the Inbox
+  claim-recovery window was undocumented, and `Lycia.Persistence.InMemory` was the only public package
+  packing without a readme. Feature commit `8afc7ef`; merged as `1527c86`.
+- **Accepted tradeoffs / deferred (not release blockers).** RabbitMQ still reports
+  `ConfirmationUnknown` because RabbitMQ.Client exposes no supported per-publish confirmation await;
+  this is now operationally visible through `Abandoned` rather than silent. `Lycia.Extensions` imposes
+  Autofac, Serilog and Apache.Avro on every consumer transitively, which is dependency bloat worth
+  revisiting but not a correctness issue. Redis Cluster hash-slot safety remains on hold as recorded
+  above.
