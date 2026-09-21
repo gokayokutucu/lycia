@@ -207,7 +207,8 @@ final validation are complete; see `FINALIZATION`.)
   Microservices run in which every Outbox row settles as `Published` with one attempt (previously
   `ConfirmationUnknown` at the attempt cap); broker outage, SIGKILL, requeued duplicate (absorbed by the
   Inbox) and a stale `Publishing` row at the attempt cap (recovered once) left no stranded row and a healthy
-  journal. Not released: no `v1.18.1` tag,
+  journal. Feature commits `9c1db21` (publisher confirms) and `5ee2e13` (infrastructure contract); merged into
+  `dev` as `3c20278`. Not released: no `v1.18.1` tag,
   `main` merge or publication yet.
 
 # FINALIZATION
