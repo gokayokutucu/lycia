@@ -911,7 +911,7 @@ a replacement for, the existing per-step transition/duplicate-payload checks in
 
 **Outbox** durably captures outgoing message intent (`IOutboxStore.AddAsync`, idempotent on
 `MessageId`) with an explicit lifecycle (`Pending` → `Claimed` → `Publishing` →
-`Published`/`ConfirmationUnknown`/`Failed`). Durable stores exist for InMemory, Redis, SQL Server,
+`Published`/`ConfirmationUnknown`/`Failed`/`Abandoned`). Durable stores exist for InMemory, Redis, SQL Server,
 and PostgreSQL — enable one via `.WithInMemoryOutbox()` / `.WithRedisOutbox()` /
 `.WithSqlServerOutbox()` / `.WithPostgreSqlOutbox()`. Provider selection also registers the hosted
 worker; tune it with `.WithOutboxWorker(options => ...)`. An `IOutboxDispatcher` claims pending or
@@ -933,7 +933,7 @@ lycia.UsePersistence()
 
 ```csharp
 var result = await outboxDispatcher.DispatchPendingBatchAsync(maxCount: 50);
-// result.Published / result.ConfirmationUnknown / result.Failed
+// result.Published / result.ConfirmationUnknown / result.Failed / result.Abandoned
 ```
 
 `Published` requires the transport-neutral `IConfirmedEventBus` capability. Kafka's idempotent
@@ -942,6 +942,16 @@ current RabbitMQ publisher do not claim a broker confirmation, so a completed at
 `ConfirmationUnknown` and is redispatched up to the configured bound with backoff and jitter. This
 is intentionally at least once: `MessageId`/`OutboxId` remain stable and consumers must be idempotent.
 Permanent local envelope/type/serialization failures become `Failed`.
+
+A `ConfirmationUnknown` message becomes eligible for its next attempt only after `RecoveryTimeout`
+elapses, the same window that recovers a claim from a crashed worker. Attempts are therefore spread
+across `MaxAttempts × RecoveryTimeout` rather than being consumed back to back. Once those attempts
+are exhausted without a confirmation the message moves to the terminal `Abandoned` status, records why
+in its failure info, and is logged as a warning naming the `MessageId` and `SagaId`. `Abandoned` is
+deliberately neither `Published` nor `Failed`: the delivery outcome is genuinely unknown, the message
+is never dispatched again automatically, and it needs operator attention. Watch for it — with a
+transport that cannot confirm, such as RabbitMQ, it is the only signal distinguishing "unconfirmed but
+delivered" from "never delivered at all".
 
 Claims left in `Claimed`/`Publishing` by a crashed process become eligible after `RecoveryTimeout`.
 Set it longer than the transport publish timeout. Recovery can duplicate a publish whose original
@@ -1058,8 +1068,8 @@ Implemented today:
   marks it completed/failed afterward, with zero behavior change when no `IInboxStore` is registered
 - `IOutgoingMessagePipeline`, versioned `OutboxEnvelope`, semantic `OutboxDispatcher`, and hosted
   `OutboxWorker`: automatic Context capture, due-schedule handoff, Send/Publish/Respond restoration,
-  bounded redispatch, and the conservative Pending→Claimed→Publishing→Published/ConfirmationUnknown/Failed
-  lifecycle described above. Registered whenever an Outbox provider is selected.
+  bounded redispatch, and the conservative
+  Pending→Claimed→Publishing→Published/ConfirmationUnknown/Failed/Abandoned lifecycle described above. Registered whenever an Outbox provider is selected.
 - `ILyciaPersistenceSession`/`ILyciaPersistenceSessionFactory` — a real, service-local relational
   transaction boundary (`RelationalPersistenceSession`, backed by `Microsoft.Data.SqlClient`/`Npgsql`)
   shared by enabled SQL Server/PostgreSQL SagaStore, Inbox, and Outbox operations when `Auto` resolves
