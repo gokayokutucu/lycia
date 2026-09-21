@@ -169,7 +169,7 @@ public class SagaDispatcher(
         var sagaContextAccessor = serviceProvider.GetService<ISagaContextAccessor>();
         var previous = sagaContextAccessor?.Current;
 
-        // Framework-managed correlation metadata for the canonical journal (Phase 6). Never set by
+        // Framework-managed correlation metadata for the canonical journal. Never set by
         // saga handler code. Cleared in finally like the other scoped accessors above.
         var journalContextAccessor = serviceProvider.GetService<ISagaJournalContextAccessor>();
         var previousJournalContext = journalContextAccessor?.Current;

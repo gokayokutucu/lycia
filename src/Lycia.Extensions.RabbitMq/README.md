@@ -6,25 +6,19 @@ queue/exchange/binding topology, DLQ behavior, and the native TTL + DLX scheduli
 ## Registration
 
 ```csharp
-services.AddLycia(configuration)
-        .AddSagasFromCurrentAssembly()
-        .Build();
-
-services.AddLyciaRabbitMq(); // registers RabbitMqEventBus + listener from Lycia:EventBus options
+services.AddLycia(configuration, lycia =>
+{
+    lycia.AddSagas().FromCurrentAssembly();
+    lycia.UseTransport().RabbitMq(); // or .RabbitMq(options => { ... }); defaults bind from Lycia:EventBus
+});
 ```
 
-Durable transport-independent scheduling (SchedulerWorker, Redis store, vacuum) lives in
+The older `services.AddLyciaRabbitMq()` call still compiles as an `[Obsolete]` wrapper.
+
+Durable transport-independent scheduling (dispatch worker, Redis store, vacuum) lives in
 `Lycia.Extensions.Scheduling`; this package only contributes RabbitMQ's native delay strategy.
-
-## Migrating from Lycia.Extensions
-
-Before the package split, `AddLycia(...)` registered RabbitMQ implicitly. Now:
-
-1. Add a package reference to `Lycia.Extensions.RabbitMq`.
-2. Call `services.AddLyciaRabbitMq()` after `AddLycia(...)`.
-
-Namespaces are unchanged (`Lycia.Extensions.Eventing`, `Lycia.Extensions.Listener`,
-`Lycia.Extensions.Helpers`), so existing `using` directives and type references keep compiling.
+Namespaces (`Lycia.Extensions.Eventing`, `Lycia.Extensions.Listener`, `Lycia.Extensions.Helpers`) are
+unchanged from the earlier combined `Lycia.Extensions` package.
 
 ## RabbitMQ topology
 
@@ -47,7 +41,7 @@ Application keys use invariant lowercase and ignore dash, underscore, dot, and w
 
 ## RabbitMQ scheduling and cleanup
 
-`AddLyciaScheduling` stores scheduling intent in Redis and hosts `SchedulerWorker`, manifest heartbeat, health checks,
+Scheduling (`AddScheduling().WithRedisStore()`) stores scheduling intent in Redis and hosts `SchedulerWorker`, manifest heartbeat, health checks,
 and `VacuumWorker`. Predefined `ScheduleDelay` values lazily declare durable queues with one fixed
 `x-message-ttl`, `x-dead-letter-exchange`, and `x-dead-letter-routing-key` per destination and bucket. Lycia never
 mixes per-message expirations in a shared queue, and an incompatible pre-existing queue fails redeclaration clearly.
@@ -69,10 +63,10 @@ not broker-global exclusivity. Delivery is at least once.
 
 ## Outbox confirmation status
 
-`RabbitMqEventBus` does not implement `IConfirmedEventBus`: RabbitMQ.Client does not currently expose
-a supported way to await broker confirmation for an individual publish. A completed Outbox dispatch
-attempt through RabbitMQ therefore stays `ConfirmationUnknown` rather than `Published`, and is
-redispatched under the normal bounded-retry/backoff window like any other unconfirmed attempt. This
-is a deliberate, honestly-documented limitation, not a bug — `MessageId`/`OutboxId` remain stable
-across redispatch, so consumers only need to stay idempotent, the same requirement Lycia already has
-everywhere.
+`RabbitMqEventBus` does not implement `IConfirmedEventBus`: the transport integration does not currently
+await a per-publish broker confirmation. An Outbox dispatch that RabbitMQ accepts is therefore recorded
+as `ConfirmationUnknown` rather than `Published`, and is redispatched after each `RecoveryTimeout` until
+it reaches `MaxAttempts`. A message that exhausts its attempts after being accepted stays
+`ConfirmationUnknown`; only a message whose last attempt never reached the broker becomes `Abandoned`.
+`MessageId` stays stable across redispatch, so consumers only need to be idempotent, which the Inbox
+provides. This is the current validated behavior and may be revisited.

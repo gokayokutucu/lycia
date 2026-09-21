@@ -8,10 +8,10 @@ namespace Lycia.Persistence.Relational.Internal.Sessions;
 
 /// <summary>
 /// A real relational transaction boundary shared by an open <see cref="DbConnection"/> and
-/// <see cref="DbTransaction"/>. SQL Server/PostgreSQL SagaStore, Inbox, and Outbox operations that
-/// accept a <see cref="DbTransaction"/> can enlist in the same session to prepare for atomic
-/// Saga+Inbox+Outbox commits. Wiring those operations to actually share one session is future work —
-/// this type only provides the boundary itself.
+/// <see cref="DbTransaction"/>. When the persistence boundary resolves to <c>LocalAtomic</c>,
+/// <c>SagaDispatcher</c> owns one session per dispatch, and the SQL Server/PostgreSQL SagaStore, Inbox,
+/// Outbox, reconciliation and journal stores enlist in it through
+/// <c>ILyciaPersistenceSessionAccessor</c>, so their writes commit or roll back together.
 /// </summary>
 public sealed class RelationalPersistenceSession : IRelationalPersistenceSession
 {

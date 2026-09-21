@@ -85,7 +85,7 @@ internal static class ServiceBootstrap
             await reconciler.RestoreLatestAsync(sagaId,token)?Results.Accepted():Results.NotFound());
         app.MapDelete("/debug/projections/{sagaId:guid}",async(Guid sagaId,IOperationalSagaProjectionStore store,CancellationToken token)=>
         { await store.DeleteAsync(sagaId,token); return Results.NoContent(); });
-        // Phase 6: canonical journal inspection. Safe metadata only - no payload/SagaData dump by default.
+        // Canonical journal inspection. Safe metadata only - no payload/SagaData dump by default.
         app.MapGet("/debug/sagas/{sagaId:guid}/journal",async(Guid sagaId,ISagaJournalStore journal,CancellationToken token)=>
         {
             var entries=await journal.ReadAsync(sagaId,afterVersion:0,maxCount:500,token);
@@ -95,8 +95,8 @@ internal static class ServiceBootstrap
                 messageType=e.MessageType,journalSchemaVersion=e.JournalSchemaVersion,createdAtUtc=e.CreatedAtUtc
             }));
         });
-        // Phase 6: rebuilds the operational (Redis) projection strictly from canonical journal history via
-        // the deterministic reducer - distinct from /debug/projections/{sagaId}/restore, which is the Phase 5
+        // Rebuilds the operational (Redis) projection strictly from canonical journal history via the
+        // deterministic reducer - distinct from /debug/projections/{sagaId}/restore, which is the
         // reconciliation-based restore from the latest canonical row, not ordered journal replay.
         app.MapPost("/debug/sagas/{sagaId:guid}/rebuild-from-journal",async(Guid sagaId,ISagaRebuildService rebuildService,CancellationToken token)=>
         {

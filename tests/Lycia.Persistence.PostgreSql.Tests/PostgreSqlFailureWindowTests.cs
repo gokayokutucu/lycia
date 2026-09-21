@@ -12,8 +12,7 @@ using Npgsql;
 namespace Lycia.Persistence.PostgreSql.Tests;
 
 /// <summary>
-/// Phase 7 reliability-hardening coverage: failure windows not already exercised by the Phase 4/6
-/// atomic and journal test suites (unknown-commit-outcome wrapping, and reconnect-after-restart).
+/// Failure windows not already exercised by the atomic-boundary and journal test suites (unknown-commit-outcome wrapping, and reconnect-after-restart).
 /// </summary>
 [Collection("PostgreSqlContainer")]
 public class PostgreSqlFailureWindowTests(PostgreSqlContainerFixture fixture)

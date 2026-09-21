@@ -49,13 +49,15 @@ sufficient, and every inspection command below uses `docker compose exec` instea
 
 ### 1.3 A note on timing
 
-This sample's RabbitMQ publisher does not confirm delivery (see root `README.md` — RabbitMQ stays
-`ConfirmationUnknown` by design; only Kafka/JetStream currently implement broker confirmation). The
-Outbox worker therefore reclaims and redispatches every `ConfirmationUnknown` message after
-`RecoveryTimeout` (1 minute by default) elapses, even when the original publish already succeeded.
-In practice this means **a single hop can take up to about a minute to visibly land**, and a full
-five-hop happy-path checkout can take a few minutes end to end in this demo topology — this is
-expected, not a hang. Poll for the state you want instead of using a short fixed `sleep`:
+A full five-hop happy-path checkout normally completes within a few seconds. Poll for the state you
+want instead of relying on a fixed `sleep`, because timing depends on the host.
+
+This sample's RabbitMQ publisher does not confirm delivery (see root `README.md` — RabbitMQ Outbox
+records stay `ConfirmationUnknown`; Kafka and NATS JetStream confirm). The first publish is delivered
+immediately; the Outbox worker then redispatches each `ConfirmationUnknown` message after
+`RecoveryTimeout` (1 minute by default) until it reaches `MaxAttempts` (5), even though the original
+publish already succeeded. Those redispatches are expected duplicates, and the receiving Inbox skips
+them (see §11).
 
 ```bash
 # wait_for_saga_version <orderId> <minVersion> [timeoutSeconds]
@@ -283,7 +285,8 @@ Jaeger UI: **http://localhost:16686**.
    - `lycia.correlation.id` / `lycia.correlation_id`
    - `lycia.parent_message_id`, `lycia.causation_id`
    - `lycia.handler`, `lycia.application.id` / `lycia.application_id`
-   - `lycia.saga.step.status` (`Completed`, or an error status with `exception.*` tags on failure)
+   - `lycia.saga.step.status` (`Completed`, or `Failed` with an error span status and `exception.*`
+    tags)
    RabbitMQ consumer spans additionally carry `messaging.system=rabbitmq`, `messaging.destination`,
    `messaging.operation=process` (set in `RabbitMqListener`).
 6. Outbox-mediated hops (every hop in this sample, since Outbox is enabled) show an additional
@@ -381,8 +384,8 @@ because Redis was unavailable.
 
 ## 10. Test 3 — Redis projection delete + journal-based rebuild
 
-This test specifically uses the **Phase 6 journal-based rebuild** endpoint
-(`POST /debug/sagas/{sagaId}/rebuild-from-journal`), not the Phase 5 latest-state-copy endpoint
+This test specifically uses the **journal-based rebuild** endpoint
+(`POST /debug/sagas/{sagaId}/rebuild-from-journal`), not the latest-state-copy endpoint
 (`POST /debug/projections/{sagaId}/restore`). The two are intentionally different mechanisms — see
 root `DEVELOPERS.md`.
 
@@ -434,10 +437,11 @@ dependency capable of doing either; see `DEVELOPERS.md`).
 
 ## 11. Test 4 — Duplicate delivery
 
-The Inbox duplicate-suppression path is already exercised naturally by this sample's own runtime
-behavior: RabbitMQ occasionally redelivers a message that was in flight during a busy dispatch
-window, and the same `(MessageId, HandlerType)` pair simply hits Inbox's dedup path. You do not
-need a special debug endpoint to observe this — it shows up in ordinary logs:
+The Inbox duplicate-suppression path is exercised naturally by this sample: every RabbitMQ Outbox
+record is redispatched after each `RecoveryTimeout` until it reaches `MaxAttempts` (see §1.3), and each
+redispatch reaches the receiving service with the same `MessageId`. The receiving Inbox finds the
+`(MessageId, HandlerType)` pair already completed and skips it, which shows up in ordinary logs a minute
+or more after a checkout:
 
 ```bash
 docker compose logs checkout --since 5m | grep "already"
@@ -448,6 +452,9 @@ Look for lines like:
 ```
 Inbox: message <id> for handler CheckoutSagaHandler is already AlreadyCompleted; skipping duplicate execution.
 ```
+
+Re-posting a checkout with the same `messageId` is absorbed even earlier: Outbox capture is idempotent on
+`MessageId`, so no second record is created.
 
 To verify the effect deterministically:
 
@@ -497,8 +504,11 @@ docker compose logs inventory --since 2m | grep -i "injected inventory failure"
 ```
 
 In Jaeger, the trace for this `orderId` ends at the `InventoryHandler` span, which carries an error
-status and `exception.type`/`exception.message` tags (set by `ActivityTracingMiddleware`'s catch
-block) — there is no further continuation into Payment or Shipping.
+status, `lycia.saga.step.status=Failed` and `exception.type`/`exception.message` tags — there is no
+further continuation into Payment or Shipping. The Inventory log shows a matching warning from
+`SagaCompensationCoordinator` naming the saga, message and exception. The handler base class records the
+exception as a failed step instead of rethrowing it, so the message is acknowledged rather than
+redelivered.
 
 ---
 
@@ -551,3 +561,25 @@ Expected:
   dispatch is what re-establishes the Inventory hop after the restart, not a single unbroken span
   across the crash boundary; a restart is a real discontinuity in process lifetime and the trace
   reflects that honestly rather than pretending otherwise.
+
+---
+
+## 15. Test 8 — RabbitMQ reset and topology recovery
+
+Recreate the broker, which wipes every queue, exchange and binding, without restarting the services:
+
+```bash
+docker compose up -d --force-recreate --no-deps rabbitmq
+until docker compose exec -T rabbitmq rabbitmq-diagnostics -q ping >/dev/null 2>&1; do sleep 1; done
+sleep 15   # allow RabbitMQ.Client automatic recovery to reconnect and redeclare topology
+docker compose exec rabbitmq rabbitmqctl list_queues name consumers
+
+ORDER_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+curl -s -X POST http://localhost:8080/checkout -H 'content-type: application/json' -d "{\"orderId\":\"$ORDER_ID\"}"
+echo
+wait_for_saga_version "$ORDER_ID" 5
+```
+
+Expected: every non-DLQ queue is redeclared with one consumer, and the new checkout completes to
+`sagaVersion: 5`. `./reset-state.sh rabbitmq` is the scripted variant; it also restarts all five services
+for a deterministic starting state.
