@@ -173,6 +173,10 @@ return results";
     public Task MarkFailedAsync(Guid messageId, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default) =>
         SetStatusAsync(messageId, OutboxMessageStatus.Failed, setFailureInfo: true, failureInfo, applyRetentionTtl: true);
 
+    /// <inheritdoc />
+    public Task MarkAbandonedAsync(Guid messageId, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default) =>
+        SetStatusAsync(messageId, OutboxMessageStatus.Abandoned, setFailureInfo: true, failureInfo, applyRetentionTtl: true);
+
     // Only the single worker that owns a message post-claim is expected to call these, so a plain
     // read-modify-write (rather than a CAS/Lua script) is sufficient here by construction of the
     // calling contract.
@@ -191,15 +195,17 @@ return results";
 
         await redisDb.StringSetAsync(key, JsonConvert.SerializeObject(message));
 
-        if (status == OutboxMessageStatus.ConfirmationUnknown)
+        if (status is OutboxMessageStatus.Published or OutboxMessageStatus.Failed or OutboxMessageStatus.Abandoned)
         {
-            var sequence = await redisDb.StringIncrementAsync(_seqKey);
-            await redisDb.SortedSetAddAsync(_pendingKey, messageId.ToString(), sequence);
-        }
-        else if (status == OutboxMessageStatus.Published || status == OutboxMessageStatus.Failed)
-        {
+            // Terminal: drop it from the claimable queue for good.
             await redisDb.SortedSetRemoveAsync(_pendingKey, messageId.ToString());
         }
+        // ConfirmationUnknown deliberately leaves the pending-set entry exactly as ClaimPendingBatchAsync
+        // scheduled it, i.e. at (claim time + recoveryTimeout). Re-adding it here with a fresh sequence
+        // score — as this used to do — made it immediately claimable again, so every attempt permitted by
+        // MaxAttempts was burned within seconds and the same message was republished that many times.
+        // ConfirmationUnknown is only reachable through the claim flow, so the future-dated score set by
+        // the claim script is always already in place.
 
         if (applyRetentionTtl && _options.RetentionPeriod.HasValue)
             await redisDb.KeyExpireAsync(key, _options.RetentionPeriod.Value);

@@ -342,6 +342,7 @@ public class LyciaDslTests
         public Task MarkPublishedAsync(Guid messageId, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task MarkConfirmationUnknownAsync(Guid messageId, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task MarkFailedAsync(Guid messageId, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task MarkAbandonedAsync(Guid messageId, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class DslProbeSecondOutboxStore : DslProbeOutboxStore;
