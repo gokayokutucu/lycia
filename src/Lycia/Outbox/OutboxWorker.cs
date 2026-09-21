@@ -49,8 +49,8 @@ public sealed class OutboxWorker(
                     // Individually logged with identities by the dispatcher; this is the aggregate signal a
                     // health check or log-based alert can watch for.
                     logger.LogWarning(
-                        "OutboxWorker abandoned {Abandoned} message(s) after exhausting their dispatch attempts; " +
-                        "their delivery outcome is unknown and they need operator action.",
+                        "OutboxWorker abandoned {Abandoned} message(s) whose last dispatch attempt never reached the " +
+                        "transport; they may never have been delivered and need operator action.",
                         result.Abandoned);
                 }
 

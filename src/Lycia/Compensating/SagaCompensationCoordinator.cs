@@ -85,14 +85,6 @@ public class SagaCompensationCoordinator(
 
 
     /// <summary>
-    /// Compensates the parent saga step of the specified step type.
-    /// </summary>
-    /// <param name="sagaId">The identifier of the saga.</param>
-    /// <param name="stepType">The type of the step whose parent is to be compensated.</param>
-    /// <param name="handlerType"></param>
-    /// <param name="message">The message of the current step</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <summary>
     /// Makes a failed step visible in logs and traces. The saga handler base classes catch the business
     /// exception and record it as a failed step instead of letting it propagate, so the dispatch itself
     /// returns normally: without this, the only trace of the failure would be the durable step record,
@@ -107,7 +99,7 @@ public class SagaCompensationCoordinator(
 
         serviceProvider.GetService<ILogger<SagaCompensationCoordinator>>()?.LogWarning(
             "Saga step {StepType} failed in handler {Handler} [SagaId={SagaId}, MessageId={MessageId}]: {Reason} " +
-            "{ExceptionType} {ExceptionMessage}. The failure is recorded and compensation is starting.",
+            "{ExceptionType} {ExceptionMessage} The failure is recorded and compensation is starting.",
             failedStepType.Name, handlerType.Name, sagaId, message.MessageId, reason, exceptionType, exceptionMessage);
 
         var activity = Activity.Current;
@@ -126,6 +118,14 @@ public class SagaCompensationCoordinator(
         return newLine < 0 ? text : text.Substring(0, newLine);
     }
 
+    /// <summary>
+    /// Compensates the parent saga step of the specified step type.
+    /// </summary>
+    /// <param name="sagaId">The identifier of the saga.</param>
+    /// <param name="stepType">The type of the step whose parent is to be compensated.</param>
+    /// <param name="handlerType"></param>
+    /// <param name="message">The message of the current step</param>
+    /// <param name="cancellationToken">Cancellation token</param>
     public async Task CompensateParentAsync(Guid sagaId, Type stepType, Type handlerType, IMessage message, CancellationToken cancellationToken = default)
     {
         if (serviceProvider.GetService(typeof(IEventBus)) is not IEventBus eventBus)
