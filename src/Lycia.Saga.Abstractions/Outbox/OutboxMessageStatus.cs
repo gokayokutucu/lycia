@@ -25,13 +25,14 @@ public enum OutboxMessageStatus
     Failed,
 
     /// <summary>
-    /// Terminal: the bounded dispatch attempts were exhausted without a positive broker confirmation.
-    /// The delivery outcome is genuinely unknown — the message may have reached the broker on one of the
-    /// attempts, or never at all — so this is deliberately distinct from both
-    /// <see cref="Published"/> and <see cref="Failed"/> (which means a permanent local error before the
-    /// transport was reached). An abandoned message is never dispatched again automatically and requires
-    /// operator action; it exists so exhausted work is discoverable instead of sitting indefinitely in a
-    /// non-terminal state that no worker will ever claim again.
+    /// Terminal: the last permitted dispatch attempt did not reach the transport at all — the publish
+    /// threw, or shutdown cancelled it — so the message may never have been delivered. Deliberately
+    /// distinct from <see cref="Failed"/>, which means a permanent local error before any publish was
+    /// attempted. An abandoned message is never dispatched again automatically and requires operator
+    /// action; it exists so exhausted work is discoverable instead of sitting indefinitely in a
+    /// non-terminal state that no worker will ever claim again. A final attempt that the transport
+    /// accepted but cannot confirm stays <see cref="ConfirmationUnknown"/>: that is the normal outcome
+    /// for an unconfirming transport such as RabbitMQ, not a failure.
     /// </summary>
     Abandoned
 }

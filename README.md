@@ -946,12 +946,21 @@ Permanent local envelope/type/serialization failures become `Failed`.
 A `ConfirmationUnknown` message becomes eligible for its next attempt only after `RecoveryTimeout`
 elapses, the same window that recovers a claim from a crashed worker. Attempts are therefore spread
 across `MaxAttempts × RecoveryTimeout` rather than being consumed back to back. Once those attempts
-are exhausted without a confirmation the message moves to the terminal `Abandoned` status, records why
-in its failure info, and is logged as a warning naming the `MessageId` and `SagaId`. `Abandoned` is
-deliberately neither `Published` nor `Failed`: the delivery outcome is genuinely unknown, the message
-is never dispatched again automatically, and it needs operator attention. Watch for it — with a
-transport that cannot confirm, such as RabbitMQ, it is the only signal distinguishing "unconfirmed but
-delivered" from "never delivered at all".
+are exhausted, the outcome depends on what the last attempt did:
+
+- **The last attempt never reached the transport** (the publish threw, for example because the broker
+  was down, or shutdown cancelled it): the message moves to the terminal `Abandoned` status, records
+  why in its failure info, and is logged as a warning naming the `MessageId` and `SagaId`. It may never
+  have been delivered, it is never dispatched again automatically, and it needs operator attention.
+  `OutboxDispatchResult.Abandoned` carries the count so you can alert on it.
+- **The transport accepted the last attempt but cannot confirm it** (the normal case for RabbitMQ and
+  core NATS): the message stays `ConfirmationUnknown` and is not dispatched again. It was handed to
+  the broker `MaxAttempts` times, so this is ordinary at-least-once delivery, not a failure, and it
+  raises no warning.
+
+`Abandoned` is deliberately neither `Published` nor `Failed`: `Failed` means a permanent local error
+before any publish was attempted, whereas an abandoned message ran out of attempts while the transport
+was unreachable.
 
 Claims left in `Claimed`/`Publishing` by a crashed process become eligible after `RecoveryTimeout`.
 Set it longer than the transport publish timeout. Recovery can duplicate a publish whose original
