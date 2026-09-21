@@ -9,6 +9,11 @@ on:
     # building - and therefore not publishing - depending on what its commit happened to touch.
     # This workflow only fires on main pushes and v* tags, both rare enough to always warrant CI.
 
+# Least privilege by default. Only the publish job additionally gets id-token: write, which is what
+# lets it mint the GitHub OIDC token that NuGet Trusted Publishing exchanges for a short-lived key.
+permissions:
+  contents: read
+
 jobs:
   unit-tests:
     name: Unit tests (.NET Core)
@@ -222,6 +227,15 @@ jobs:
     # Release-only: an ordinary push/merge to main must never publish NuGet packages.
     # This job only runs when the triggering ref is a release tag matching v*.
     if: startsWith(github.ref, 'refs/tags/v')
+    # NuGet Trusted Publishing (https://learn.microsoft.com/nuget/nuget-org/trusted-publishing).
+    # id-token: write lets this job request a GitHub OIDC token; NuGet/login exchanges it for a
+    # short-lived nuget.org API key after checking it against the "lycia-release" trusted publishing
+    # policy (owner gokayokutucu, repository lycia, workflow file dotnet.yml, no environment). No
+    # long-lived API key secret is used. There is deliberately no `environment:` here, because the
+    # policy has no environment constraint.
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Checkout (full history + tags)
@@ -274,39 +288,39 @@ jobs:
           dotnet tool install -g nbgv || true
           nbgv get-version -v SemVer2
 
+      # Everything is packed and validated before anything is pushed, so a failure in any package
+      # stops the release before a partial set reaches nuget.org. Downstream packages resolve Lycia and
+      # Lycia.Extensions from ./artifacts/nupkgs through the source mapping above, so none of them
+      # needs an earlier package to be published first.
       - name: Pack Lycia
         run: dotnet pack src/Lycia/Lycia.csproj -c Release -o artifacts/nupkgs /p:ContinuousIntegrationBuild=true --no-restore
-
-      - name: Validate Lycia package contents
-        run: |
-          ls -la artifacts/nupkgs
-          PKG=$(ls artifacts/nupkgs/Lycia.*.nupkg | sort -V | tail -n1)
-          echo "Lycia nupkg: $PKG"
-          unzip -l "$PKG" | sed -n '1,200p'
-
-      - name: Push Lycia (nuget.org)
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-        run: dotnet nuget push "artifacts/nupkgs/Lycia.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
 
       - name: Compute exact Lycia package version
         id: package-version
         run: |
-          LATEST=$(ls artifacts/nupkgs/Lycia.*.nupkg | sort -V | tail -n1)
+          LATEST=$(find artifacts/nupkgs -maxdepth 1 -name 'Lycia.*.nupkg' | sort -V | tail -n1)
           VER=${LATEST##*/Lycia.}
           VER=${VER%.nupkg}
           echo "Lycia package version: $VER"
-          echo "version=$VER" >> $GITHUB_OUTPUT
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
 
-      - name: Restore Extensions with exact package version (pack mode)
+      - name: Require the package version to match the release tag
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          EXPECTED="${TAG#v}"
+          ACTUAL='${{ steps.package-version.outputs.version }}'
+          echo "Release tag: $TAG  expected package version: $EXPECTED  packed: $ACTUAL"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "ERROR: packed version $ACTUAL does not match release tag $TAG; refusing to publish."
+            exit 1
+          fi
+
+      - name: Pack Lycia.Extensions (exact Lycia version)
         run: |
           dotnet restore src/Lycia.Extensions/Lycia.Extensions.csproj \
             -p:UsePackageRefForLyciaOnPack=true \
             -p:LyciaPackageVersion='${{ steps.package-version.outputs.version }}' \
             --source "./artifacts/nupkgs" --source "https://api.nuget.org/v3/index.json"
-
-      - name: Pack Extensions (no restore)
-        run: |
           dotnet pack src/Lycia.Extensions/Lycia.Extensions.csproj -c Release \
             -o artifacts/nupkgs \
             -p:ContinuousIntegrationBuild=true \
@@ -314,137 +328,19 @@ jobs:
             -p:LyciaPackageVersion='${{ steps.package-version.outputs.version }}' \
             --no-restore
 
-      - name: Validate Lycia.Extensions package contents
-        run: |
-          PKG=$(ls artifacts/nupkgs/Lycia.Extensions.*.nupkg | sort -V | tail -n1)
-          echo "Lycia.Extensions nupkg: $PKG"
-          unzip -l "$PKG" | sed -n '1,200p'
-          echo "NUSPEC dependencies (should only contain Lycia):"
-          unzip -p "$PKG" *.nuspec | sed -n '1,200p'
-
-      - name: Push Lycia.Extensions (nuget.org)
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-        run: dotnet nuget push "artifacts/nupkgs/Lycia.Extensions.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
-
-      - name: Restore RabbitMQ transport and Scheduling with exact Lycia version
-        run: |
-          for PROJECT in Lycia.Extensions.RabbitMq Lycia.Extensions.Scheduling; do
-            dotnet restore "src/$PROJECT/$PROJECT.csproj" \
-              -p:UsePackageRefForLyciaOnPack=true \
-              -p:LyciaPackageVersion='${{ steps.package-version.outputs.version }}' \
-              --source "./artifacts/nupkgs" --source "https://api.nuget.org/v3/index.json"
-          done
-
-      - name: Pack RabbitMQ transport and Scheduling
-        run: |
-          for PROJECT in Lycia.Extensions.RabbitMq Lycia.Extensions.Scheduling; do
-            dotnet pack "src/$PROJECT/$PROJECT.csproj" -c Release \
-              -o artifacts/nupkgs \
-              -p:ContinuousIntegrationBuild=true \
-              -p:UsePackageRefForLyciaOnPack=true \
-              -p:LyciaPackageVersion='${{ steps.package-version.outputs.version }}' \
-              --no-restore
-          done
-
-      - name: Validate RabbitMQ transport and Scheduling packages
-        run: |
-          for PROJECT in Lycia.Extensions.RabbitMq Lycia.Extensions.Scheduling; do
-            PKG=$(ls "artifacts/nupkgs/$PROJECT".*.nupkg | sort -V | tail -n1)
-            echo "$PROJECT nupkg: $PKG"
-            unzip -l "$PKG" | sed -n '1,120p'
-            echo "NUSPEC dependencies (should only contain Lycia and Lycia.Extensions):"
-            unzip -p "$PKG" '*.nuspec' | sed -n '1,160p'
-          done
-
-      - name: Push RabbitMQ transport and Scheduling (nuget.org)
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-        run: |
-          dotnet nuget push "artifacts/nupkgs/Lycia.Extensions.RabbitMq.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
-          dotnet nuget push "artifacts/nupkgs/Lycia.Extensions.Scheduling.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
-
-      - name: Restore NATS and Kafka transports with exact Lycia version
-        run: |
-          for PROJECT in Lycia.Extensions.Nats Lycia.Extensions.Kafka; do
-            dotnet restore "src/$PROJECT/$PROJECT.csproj" \
-              -p:UsePackageRefForLyciaOnPack=true \
-              -p:LyciaPackageVersion='${{ steps.package-version.outputs.version }}' \
-              --source "./artifacts/nupkgs" --source "https://api.nuget.org/v3/index.json"
-          done
-
-      - name: Pack NATS and Kafka transports
-        run: |
-          for PROJECT in Lycia.Extensions.Nats Lycia.Extensions.Kafka; do
-            dotnet pack "src/$PROJECT/$PROJECT.csproj" -c Release \
-              -o artifacts/nupkgs \
-              -p:ContinuousIntegrationBuild=true \
-              -p:UsePackageRefForLyciaOnPack=true \
-              -p:LyciaPackageVersion='${{ steps.package-version.outputs.version }}' \
-              --no-restore
-          done
-
-      - name: Validate transport packages
-        run: |
-          for PROJECT in Lycia.Extensions.Nats Lycia.Extensions.Kafka; do
-            PKG=$(ls "artifacts/nupkgs/$PROJECT".*.nupkg | sort -V | tail -n1)
-            echo "$PROJECT nupkg: $PKG"
-            unzip -l "$PKG" | sed -n '1,120p'
-            unzip -p "$PKG" '*.nuspec' | sed -n '1,160p'
-          done
-
-      - name: Push NATS and Kafka transports (nuget.org)
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-        run: |
-          dotnet nuget push "artifacts/nupkgs/Lycia.Extensions.Nats.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
-          dotnet nuget push "artifacts/nupkgs/Lycia.Extensions.Kafka.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
-
-      - name: Restore OpenTelemetry Extensions with exact package version (pack mode)
-        run: |
-          dotnet restore src/Lycia.Extensions.OpenTelemetry/Lycia.Extensions.OpenTelemetry.csproj \
-            -p:UsePackageRefForLyciaOnPack=true \
-            -p:LyciaPackageVersion='${{ steps.package-version.outputs.version }}' \
-            --source "./artifacts/nupkgs" --source "https://api.nuget.org/v3/index.json"
-
-      - name: Pack Lycia.Extensions.OpenTelemetry (no restore)
-        run: |
-          dotnet pack src/Lycia.Extensions.OpenTelemetry/Lycia.Extensions.OpenTelemetry.csproj -c Release \
-            -o artifacts/nupkgs \
-            -p:ContinuousIntegrationBuild=true \
-            -p:UsePackageRefForLyciaOnPack=true \
-            -p:LyciaPackageVersion='${{ steps.package-version.outputs.version }}' \
-            --no-restore
-
-      - name: Validate Lycia.Extensions.OpenTelemetry package contents
-        run: |
-          PKG=$(ls artifacts/nupkgs/Lycia.Extensions.OpenTelemetry.*.nupkg | sort -V | tail -n1)
-          echo "Lycia.Extensions.OpenTelemetry nupkg: $PKG"
-          unzip -l "$PKG" | sed -n '1,200p'
-          echo "NUSPEC dependencies (should only contain Lycia / Lycia.Extensions if applicable):"
-          unzip -p "$PKG" *.nuspec | sed -n '1,200p'
-
-      - name: Push Lycia.Extensions.OpenTelemetry (nuget.org)
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-        run: dotnet nuget push "artifacts/nupkgs/Lycia.Extensions.OpenTelemetry.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
-
       # The persistence providers are required, not optional: AddLycia refuses to resolve ISagaStore
       # unless exactly one provider is selected, so a release without them cannot actually be used.
-      # They were missing from this job entirely, which is why none of them has ever appeared on
-      # nuget.org even though the packages themselves have been buildable since Phase 1.
-      - name: Restore persistence providers with exact Lycia version
+      - name: Pack transports, scheduling, OpenTelemetry and persistence providers (exact Lycia version)
         run: |
-          for PROJECT in Lycia.Persistence.InMemory Lycia.Persistence.Redis Lycia.Persistence.SqlServer Lycia.Persistence.PostgreSql; do
+          for PROJECT in \
+            Lycia.Extensions.RabbitMq Lycia.Extensions.Scheduling \
+            Lycia.Extensions.Nats Lycia.Extensions.Kafka \
+            Lycia.Extensions.OpenTelemetry \
+            Lycia.Persistence.InMemory Lycia.Persistence.Redis Lycia.Persistence.SqlServer Lycia.Persistence.PostgreSql; do
             dotnet restore "src/$PROJECT/$PROJECT.csproj" \
               -p:UsePackageRefForLyciaOnPack=true \
               -p:LyciaPackageVersion='${{ steps.package-version.outputs.version }}' \
               --source "./artifacts/nupkgs" --source "https://api.nuget.org/v3/index.json"
-          done
-
-      - name: Pack persistence providers
-        run: |
-          for PROJECT in Lycia.Persistence.InMemory Lycia.Persistence.Redis Lycia.Persistence.SqlServer Lycia.Persistence.PostgreSql; do
             dotnet pack "src/$PROJECT/$PROJECT.csproj" -c Release \
               -o artifacts/nupkgs \
               -p:ContinuousIntegrationBuild=true \
@@ -453,33 +349,50 @@ jobs:
               --no-restore
           done
 
-      - name: Validate persistence provider packages
+      - name: Validate all public packages before publishing
         run: |
-          for PROJECT in Lycia.Persistence.InMemory Lycia.Persistence.Redis Lycia.Persistence.SqlServer Lycia.Persistence.PostgreSql; do
-            PKG=$(ls "artifacts/nupkgs/$PROJECT".*.nupkg | sort -V | tail -n1)
-            echo "$PROJECT nupkg: $PKG"
+          VER='${{ steps.package-version.outputs.version }}'
+          PACKAGES="Lycia Lycia.Extensions Lycia.Extensions.RabbitMq Lycia.Extensions.Scheduling Lycia.Extensions.Nats Lycia.Extensions.Kafka Lycia.Extensions.OpenTelemetry Lycia.Persistence.InMemory Lycia.Persistence.Redis Lycia.Persistence.SqlServer Lycia.Persistence.PostgreSql"
+          COUNT=$(find artifacts/nupkgs -maxdepth 1 -name '*.nupkg' | wc -l)
+          echo "nupkg count: $COUNT"
+          if [ "$COUNT" -ne 11 ]; then
+            echo "ERROR: expected exactly 11 public packages, found $COUNT:"; ls artifacts/nupkgs; exit 1
+          fi
+          for PROJECT in $PACKAGES; do
+            PKG="artifacts/nupkgs/$PROJECT.$VER.nupkg"
+            if [ ! -f "$PKG" ]; then echo "ERROR: missing $PKG"; exit 1; fi
+            echo "== $PKG"
             unzip -l "$PKG" | sed -n '1,120p'
-            echo "NUSPEC dependencies (must not reference a non-published Lycia.* support project):"
             unzip -p "$PKG" '*.nuspec' | sed -n '1,160p'
-            if unzip -p "$PKG" '*.nuspec' | grep -qE 'id="Lycia\.(Common|Saga|Saga\.Abstractions|Persistence\.Relational\.Internal)"'; then
-              echo "ERROR: $PROJECT declares a dependency on an internal, unpublished project."
-              exit 1
+            # No public package may depend on a project that is never published on its own.
+            if unzip -p "$PKG" '*.nuspec' | grep -qE 'id="Lycia\.(Common|Saga|Saga\.Abstractions|Persistence\.Relational\.Internal|Persistence\.TestKit)"'; then
+              echo "ERROR: $PROJECT declares a dependency on an internal, unpublished project."; exit 1
             fi
           done
-          # The relational providers carry the internal relational implementation inside the package,
-          # since it is deliberately never published on its own.
+          # The relational providers carry the internal relational implementation inside the package.
           for PROJECT in Lycia.Persistence.SqlServer Lycia.Persistence.PostgreSql; do
-            PKG=$(ls "artifacts/nupkgs/$PROJECT".*.nupkg | sort -V | tail -n1)
-            if ! unzip -l "$PKG" | grep -q "Lycia.Persistence.Relational.Internal.dll"; then
-              echo "ERROR: $PROJECT does not embed Lycia.Persistence.Relational.Internal.dll."
-              exit 1
+            if ! unzip -l "artifacts/nupkgs/$PROJECT.$VER.nupkg" | grep -q "Lycia.Persistence.Relational.Internal.dll"; then
+              echo "ERROR: $PROJECT does not embed Lycia.Persistence.Relational.Internal.dll."; exit 1
             fi
           done
 
-      - name: Push persistence providers (nuget.org)
+      # Requested only now, after everything is packed and validated: the key is valid for one hour and
+      # each OIDC token can be exchanged exactly once. `user` is the nuget.org profile name that owns the
+      # packages (not an email address).
+      - name: NuGet login (GitHub OIDC -> short-lived API key)
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: okutucu
+
+      - name: Push all public packages (nuget.org)
         env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          NUGET_TRUSTED_PUBLISHING_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
         run: |
-          for PROJECT in Lycia.Persistence.InMemory Lycia.Persistence.Redis Lycia.Persistence.SqlServer Lycia.Persistence.PostgreSql; do
-            dotnet nuget push "artifacts/nupkgs/$PROJECT.*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
+          VER='${{ steps.package-version.outputs.version }}'
+          for PROJECT in Lycia Lycia.Extensions Lycia.Extensions.RabbitMq Lycia.Extensions.Scheduling Lycia.Extensions.Nats Lycia.Extensions.Kafka Lycia.Extensions.OpenTelemetry Lycia.Persistence.InMemory Lycia.Persistence.Redis Lycia.Persistence.SqlServer Lycia.Persistence.PostgreSql; do
+            dotnet nuget push "artifacts/nupkgs/$PROJECT.$VER.nupkg" \
+              --source https://api.nuget.org/v3/index.json \
+              --api-key "$NUGET_TRUSTED_PUBLISHING_KEY" \
+              --skip-duplicate
           done
