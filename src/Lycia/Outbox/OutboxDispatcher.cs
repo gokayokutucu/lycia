@@ -29,14 +29,16 @@ public class OutboxDispatcher(IOutboxStore outboxStore, IEventBus eventBus, IMes
         var published = 0;
         var confirmationUnknown = 0;
         var failed = 0;
+        var abandoned = 0;
 
         foreach (var message in claimed)
         {
-            var outcome = await DispatchOneAsync(message, cancellationToken);
+            var outcome = await DispatchOneAsync(message, maxAttempts, cancellationToken);
             switch (outcome)
             {
                 case OutboxMessageStatus.Published: published++; break;
                 case OutboxMessageStatus.ConfirmationUnknown: confirmationUnknown++; break;
+                case OutboxMessageStatus.Abandoned: abandoned++; break;
                 default: failed++; break;
             }
         }
@@ -46,11 +48,13 @@ public class OutboxDispatcher(IOutboxStore outboxStore, IEventBus eventBus, IMes
             Claimed = claimed.Count,
             Published = published,
             ConfirmationUnknown = confirmationUnknown,
-            Failed = failed
+            Failed = failed,
+            Abandoned = abandoned
         };
     }
 
-    private async Task<OutboxMessageStatus> DispatchOneAsync(OutboxMessage message, CancellationToken cancellationToken)
+    private async Task<OutboxMessageStatus> DispatchOneAsync(OutboxMessage message, int maxAttempts,
+        CancellationToken cancellationToken)
     {
         // Local failure before anything left the process: the message never reached the transport,
         // so it's safe to mark Failed rather than ConfirmationUnknown.
@@ -77,6 +81,12 @@ public class OutboxDispatcher(IOutboxStore outboxStore, IEventBus eventBus, IMes
             return OutboxMessageStatus.Failed;
         }
 
+        // The row was only claimable because RetryCount was still below maxAttempts, so this attempt is
+        // attempt number RetryCount + 1. When that is the last permitted attempt, any outcome other than a
+        // positive confirmation must become the terminal Abandoned state: leaving it at
+        // ConfirmationUnknown with the attempt count at the cap would make it invisible to every future
+        // claim query, with no terminal status and no recorded reason — silently dropping the message.
+        var isFinalAttempt = message.RetryCount + 1 >= maxAttempts;
         await outboxStore.MarkPublishingAsync(message.MessageId, cancellationToken);
 
         try
@@ -89,24 +99,56 @@ public class OutboxDispatcher(IOutboxStore outboxStore, IEventBus eventBus, IMes
                 return OutboxMessageStatus.Published;
             }
 
+            if (isFinalAttempt)
+                return await AbandonAsync(message, maxAttempts,
+                    "Outbox dispatch attempts exhausted without a broker confirmation. The transport accepted " +
+                    "the publish but cannot confirm it, so the delivery outcome is unknown.",
+                    null, cancellationToken);
+
             await outboxStore.MarkConfirmationUnknownAsync(message.MessageId, cancellationToken);
             return OutboxMessageStatus.ConfirmationUnknown;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             // A transport call may already have reached the broker. Persist the ambiguous outcome,
-            // then honor shutdown cancellation so the hosted worker stops promptly.
-            await outboxStore.MarkConfirmationUnknownAsync(message.MessageId, CancellationToken.None);
+            // then honor shutdown cancellation so the hosted worker stops promptly. Even here the final
+            // attempt must terminalize, otherwise a shutdown landing on the last attempt strands the row.
+            if (isFinalAttempt)
+                await AbandonAsync(message, maxAttempts,
+                    "Outbox dispatch attempts exhausted; the final attempt was cancelled during shutdown, " +
+                    "so the delivery outcome is unknown.", null, CancellationToken.None);
+            else
+                await outboxStore.MarkConfirmationUnknownAsync(message.MessageId, CancellationToken.None);
             throw;
         }
         catch (Exception ex)
         {
             // The publish attempt reached the transport; we cannot know whether the broker received
             // it before the failure, so this is ConfirmationUnknown, not a definite Failed.
+            if (isFinalAttempt)
+                return await AbandonAsync(message, maxAttempts,
+                    "Outbox dispatch attempts exhausted; the last publish attempt threw, so the delivery " +
+                    "outcome is unknown.", ex, cancellationToken);
+
             logger.LogWarning(ex, "Outbox message {MessageId} publish attempt did not confirm success; marking ConfirmationUnknown.", message.MessageId);
             await outboxStore.MarkConfirmationUnknownAsync(message.MessageId, cancellationToken);
             return OutboxMessageStatus.ConfirmationUnknown;
         }
+    }
+
+    private async Task<OutboxMessageStatus> AbandonAsync(OutboxMessage message, int maxAttempts, string reason,
+        Exception? exception, CancellationToken cancellationToken)
+    {
+        // Warning, not Information: an abandoned message is unshipped business intent that needs a human.
+        logger.LogWarning(exception,
+            "Outbox message {MessageId} (saga {SagaId}) abandoned after {Attempts} of {MaxAttempts} dispatch attempts: {Reason} " +
+            "It will not be dispatched again automatically and requires operator action.",
+            message.MessageId, message.SagaId, message.RetryCount + 1, maxAttempts, reason);
+
+        await outboxStore.MarkAbandonedAsync(message.MessageId,
+            new SagaStepFailureInfo(reason, exception?.GetType().Name ?? nameof(OutboxMessageStatus.Abandoned),
+                exception?.ToString()), cancellationToken);
+        return OutboxMessageStatus.Abandoned;
     }
 
     private async Task DispatchSemanticAsync(OutboxEnvelope envelope, Type messageType, object message,

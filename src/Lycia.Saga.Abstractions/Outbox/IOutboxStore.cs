@@ -6,10 +6,10 @@ using Lycia.Common.SagaSteps;
 namespace Lycia.Saga.Abstractions.Outbox;
 
 /// <summary>
-/// Durably records outgoing message intent before broker publication and exposes the lifecycle
-/// needed for a future dispatcher worker to publish it reliably. This contract only covers durable
-/// capture and status bookkeeping — the publisher worker, retry policy, and broker-confirmation
-/// wiring are a separate, not-yet-implemented concern (see Outbox roadmap in README.md).
+/// Durably records outgoing message intent before broker publication and exposes the lifecycle the
+/// dispatcher worker uses to publish it reliably. This contract covers durable capture and status
+/// bookkeeping; the publisher worker, bounded retry policy, and broker-confirmation wiring live in
+/// <c>IOutboxDispatcher</c>/<c>OutboxWorker</c> and <c>IConfirmedEventBus</c>.
 /// </summary>
 /// <remarks>
 /// Optional and disabled by default. Does not by itself provide exactly-once delivery: Lycia
@@ -28,10 +28,22 @@ public interface IOutboxStore
     Task<OutboxMessage?> GetByMessageIdAsync(Guid messageId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Atomically claims up to <paramref name="maxCount"/> <see cref="OutboxMessageStatus.Pending"/>
-    /// messages, transitioning them to <see cref="OutboxMessageStatus.Claimed"/> so a publisher
-    /// worker can dispatch them without another worker claiming the same rows.
+    /// Atomically claims up to <paramref name="maxCount"/> dispatchable messages, transitioning them to
+    /// <see cref="OutboxMessageStatus.Claimed"/> so a publisher worker can dispatch them without another
+    /// worker claiming the same rows.
     /// </summary>
+    /// <remarks>
+    /// Eligible rows are <see cref="OutboxMessageStatus.Pending"/> ones, plus
+    /// <see cref="OutboxMessageStatus.ConfirmationUnknown"/>, <see cref="OutboxMessageStatus.Claimed"/>,
+    /// and <see cref="OutboxMessageStatus.Publishing"/> ones whose last update is older than
+    /// <paramref name="recoveryTimeout"/>. Applying the recovery window to
+    /// <see cref="OutboxMessageStatus.ConfirmationUnknown"/> as well is deliberate: without it an
+    /// unconfirmed message is re-claimed on the very next dispatch pass, which burns every attempt
+    /// permitted by <paramref name="maxAttempts"/> within seconds and republishes the same message that
+    /// many times. Rows that already reached <paramref name="maxAttempts"/> are never returned; the
+    /// dispatcher is responsible for moving such a row to the terminal
+    /// <see cref="OutboxMessageStatus.Abandoned"/> state so exhausted work stays discoverable.
+    /// </remarks>
     Task<IReadOnlyList<OutboxMessage>> ClaimPendingBatchAsync(int maxCount, CancellationToken cancellationToken = default,
         int maxAttempts = 5, TimeSpan? recoveryTimeout = null);
 
@@ -44,4 +56,17 @@ public interface IOutboxStore
     Task MarkConfirmationUnknownAsync(Guid messageId, CancellationToken cancellationToken = default);
 
     Task MarkFailedAsync(Guid messageId, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Marks a message whose bounded dispatch attempts were exhausted without a positive broker
+    /// confirmation, moving it to the terminal <see cref="OutboxMessageStatus.Abandoned"/> state.
+    /// </summary>
+    /// <remarks>
+    /// This exists so an exhausted message cannot silently become invisible: without it a row sits at
+    /// <see cref="OutboxMessageStatus.ConfirmationUnknown"/> with its attempt count at the cap, which no
+    /// claim query will ever return again, leaving no terminal state and no recorded reason. Implementations
+    /// must record <paramref name="failureInfo"/> and must remove the message from any pending/claimable
+    /// queue.
+    /// </remarks>
+    Task MarkAbandonedAsync(Guid messageId, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default);
 }

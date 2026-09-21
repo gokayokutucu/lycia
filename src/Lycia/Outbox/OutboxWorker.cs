@@ -44,7 +44,17 @@ public sealed class OutboxWorker(
             try
             {
                 var result = await RunOnceAsync(stoppingToken).ConfigureAwait(false);
-                if (result.ConfirmationUnknown > 0 || result.Failed > 0)
+                if (result.Abandoned > 0)
+                {
+                    // Individually logged with identities by the dispatcher; this is the aggregate signal a
+                    // health check or log-based alert can watch for.
+                    logger.LogWarning(
+                        "OutboxWorker abandoned {Abandoned} message(s) after exhausting their dispatch attempts; " +
+                        "their delivery outcome is unknown and they need operator action.",
+                        result.Abandoned);
+                }
+
+                if (result.ConfirmationUnknown > 0 || result.Failed > 0 || result.Abandoned > 0)
                 {
                     consecutiveUnconfirmedPasses++;
                     delay = RetryDelay(value, consecutiveUnconfirmedPasses);

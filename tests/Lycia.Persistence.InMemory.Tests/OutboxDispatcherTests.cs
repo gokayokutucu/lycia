@@ -194,13 +194,22 @@ public class OutboxDispatcherTests
         var evt = new DispatcherProbeEvent { Payload = "stable" };
         await pipeline.Publish(evt, null, null);
 
-        for (var attempt = 0; attempt < 3; attempt++)
-            Assert.Equal(1, (await dispatcher.DispatchPendingBatchAsync(maxAttempts: 3)).ConfirmationUnknown);
-        Assert.Equal(0, (await dispatcher.DispatchPendingBatchAsync(maxAttempts: 3)).Claimed);
+        // recoveryTimeout: Zero makes each unconfirmed attempt immediately re-claimable, which is what
+        // lets this test drive the whole attempt budget without waiting out a real recovery window.
+        // The first two attempts stay retryable; the third is the last permitted one, so it terminalizes.
+        for (var attempt = 0; attempt < 2; attempt++)
+            Assert.Equal(1, (await dispatcher.DispatchPendingBatchAsync(50, default, 3, TimeSpan.Zero))
+                .ConfirmationUnknown);
+
+        Assert.Equal(1, (await dispatcher.DispatchPendingBatchAsync(50, default, 3, TimeSpan.Zero)).Abandoned);
+        Assert.Equal(0, (await dispatcher.DispatchPendingBatchAsync(50, default, 3, TimeSpan.Zero)).Claimed);
 
         var durable = await store.GetByMessageIdAsync(evt.MessageId);
         Assert.Equal(evt.MessageId, durable!.MessageId);
         Assert.Equal(3, durable.RetryCount);
-        Assert.Equal(OutboxMessageStatus.ConfirmationUnknown, durable.Status);
+        // Exhausted attempts must not leave the row in the non-terminal ConfirmationUnknown status, where
+        // no claim query would ever return it again and nothing records why it stopped.
+        Assert.Equal(OutboxMessageStatus.Abandoned, durable.Status);
+        Assert.NotNull(durable.FailureInfo);
     }
 }

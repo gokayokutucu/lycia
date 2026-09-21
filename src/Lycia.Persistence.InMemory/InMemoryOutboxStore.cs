@@ -40,8 +40,9 @@ public class InMemoryOutboxStore : IOutboxStore
             var staleBefore = DateTime.UtcNow.Subtract(recoveryTimeout ?? TimeSpan.FromMinutes(1));
             var claimed = _messages.Values
                 .Where(m => (m.Status == OutboxMessageStatus.Pending ||
-                             m.Status == OutboxMessageStatus.ConfirmationUnknown ||
-                             ((m.Status == OutboxMessageStatus.Claimed || m.Status == OutboxMessageStatus.Publishing) &&
+                             ((m.Status == OutboxMessageStatus.ConfirmationUnknown ||
+                               m.Status == OutboxMessageStatus.Claimed ||
+                               m.Status == OutboxMessageStatus.Publishing) &&
                               m.UpdatedAtUtc <= staleBefore)) && m.RetryCount < maxAttempts)
                 .OrderBy(m => m.CreatedAtUtc)
                 .Take(maxCount)
@@ -73,11 +74,18 @@ public class InMemoryOutboxStore : IOutboxStore
         SetStatus(messageId, OutboxMessageStatus.ConfirmationUnknown);
 
     /// <inheritdoc />
-    public Task MarkFailedAsync(Guid messageId, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default)
+    public Task MarkFailedAsync(Guid messageId, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default) =>
+        SetTerminalStatus(messageId, OutboxMessageStatus.Failed, failureInfo);
+
+    /// <inheritdoc />
+    public Task MarkAbandonedAsync(Guid messageId, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default) =>
+        SetTerminalStatus(messageId, OutboxMessageStatus.Abandoned, failureInfo);
+
+    private Task SetTerminalStatus(Guid messageId, OutboxMessageStatus status, SagaStepFailureInfo? failureInfo)
     {
         if (_messages.TryGetValue(messageId, out var message))
         {
-            message.Status = OutboxMessageStatus.Failed;
+            message.Status = status;
             message.FailureInfo = failureInfo;
             message.UpdatedAtUtc = DateTime.UtcNow;
         }

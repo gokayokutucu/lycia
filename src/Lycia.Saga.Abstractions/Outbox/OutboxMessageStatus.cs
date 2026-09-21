@@ -22,5 +22,16 @@ public enum OutboxMessageStatus
     ConfirmationUnknown,
 
     /// <summary>Publishing failed and will not be retried automatically.</summary>
-    Failed
+    Failed,
+
+    /// <summary>
+    /// Terminal: the bounded dispatch attempts were exhausted without a positive broker confirmation.
+    /// The delivery outcome is genuinely unknown — the message may have reached the broker on one of the
+    /// attempts, or never at all — so this is deliberately distinct from both
+    /// <see cref="Published"/> and <see cref="Failed"/> (which means a permanent local error before the
+    /// transport was reached). An abandoned message is never dispatched again automatically and requires
+    /// operator action; it exists so exhausted work is discoverable instead of sitting indefinitely in a
+    /// non-terminal state that no worker will ever claim again.
+    /// </summary>
+    Abandoned
 }

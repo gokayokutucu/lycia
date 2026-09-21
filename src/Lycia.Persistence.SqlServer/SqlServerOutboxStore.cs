@@ -92,8 +92,9 @@ public class SqlServerOutboxStore(SqlServerOutboxOptions options,
             FROM (
                 SELECT TOP (@maxCount) *
                 FROM {OutboxTable} WITH (ROWLOCK, READPAST)
-                WHERE (Status = @pendingStatus OR Status = @unknownStatus OR
-                      ((Status = @claimedStatus OR Status = @publishingStatus) AND UpdatedAtUtc <= @staleBefore))
+                WHERE (Status = @pendingStatus OR
+                      ((Status = @unknownStatus OR Status = @claimedStatus OR Status = @publishingStatus)
+                       AND UpdatedAtUtc <= @staleBefore))
                   AND RetryCount < @maxAttempts
                 ORDER BY CreatedAtUtc
             ) AS claimed;
@@ -155,6 +156,10 @@ public class SqlServerOutboxStore(SqlServerOutboxOptions options,
     /// <inheritdoc />
     public Task MarkFailedAsync(Guid messageId, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default) =>
         UpdateStatusAsync(messageId, OutboxMessageStatus.Failed, failureInfo, cancellationToken);
+
+    /// <inheritdoc />
+    public Task MarkAbandonedAsync(Guid messageId, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default) =>
+        UpdateStatusAsync(messageId, OutboxMessageStatus.Abandoned, failureInfo, cancellationToken);
 
     private async Task UpdateStatusAsync(Guid messageId, OutboxMessageStatus status, SagaStepFailureInfo? failureInfo,
         CancellationToken cancellationToken, bool incrementRetry = false)

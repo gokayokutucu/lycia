@@ -99,8 +99,9 @@ public class PostgreSqlOutboxStore(PostgreSqlOutboxOptions options,
             SET status = @claimedStatus, updated_at_utc = now()
             WHERE message_id IN (
                 SELECT message_id FROM {OutboxTable}
-                WHERE (status = @pendingStatus OR status = @unknownStatus OR
-                      ((status = @claimedStatus OR status = @publishingStatus) AND updated_at_utc <= @staleBefore))
+                WHERE (status = @pendingStatus OR
+                      ((status = @unknownStatus OR status = @claimedStatus OR status = @publishingStatus)
+                       AND updated_at_utc <= @staleBefore))
                   AND retry_count < @maxAttempts
                 ORDER BY created_at_utc
                 LIMIT @maxCount
@@ -142,6 +143,10 @@ public class PostgreSqlOutboxStore(PostgreSqlOutboxOptions options,
     /// <inheritdoc />
     public Task MarkFailedAsync(Guid messageId, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default) =>
         UpdateStatusAsync(messageId, OutboxMessageStatus.Failed, failureInfo, cancellationToken);
+
+    /// <inheritdoc />
+    public Task MarkAbandonedAsync(Guid messageId, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default) =>
+        UpdateStatusAsync(messageId, OutboxMessageStatus.Abandoned, failureInfo, cancellationToken);
 
     private async Task UpdateStatusAsync(Guid messageId, OutboxMessageStatus status, SagaStepFailureInfo? failureInfo,
         CancellationToken cancellationToken, bool incrementRetry = false)

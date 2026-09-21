@@ -111,19 +111,72 @@ public abstract class OutboxStoreConformanceTests
     {
         var store = CreateStore();
         var message = NewMessage();
+        var recoveryTimeout = TimeSpan.FromMilliseconds(10);
         await store.AddAsync(message);
 
         for (var attempt = 1; attempt <= 3; attempt++)
         {
-            Assert.Equal(message.MessageId, Assert.Single(await store.ClaimPendingBatchAsync(1, maxAttempts: 3)).MessageId);
+            Assert.Equal(message.MessageId,
+                Assert.Single(await store.ClaimPendingBatchAsync(1, maxAttempts: 3, recoveryTimeout: recoveryTimeout))
+                    .MessageId);
             await store.MarkPublishingAsync(message.MessageId);
             await store.MarkConfirmationUnknownAsync(message.MessageId);
             Assert.Equal(attempt, (await store.GetByMessageIdAsync(message.MessageId))!.RetryCount);
+            await Task.Delay(30);
         }
 
-        Assert.Empty(await store.ClaimPendingBatchAsync(1, maxAttempts: 3));
+        Assert.Empty(await store.ClaimPendingBatchAsync(1, maxAttempts: 3, recoveryTimeout: recoveryTimeout));
         Assert.Equal(OutboxMessageStatus.ConfirmationUnknown,
             (await store.GetByMessageIdAsync(message.MessageId))!.Status);
+    }
+
+    /// <summary>
+    /// An unconfirmed message must wait out the recovery window before it is handed back. Without this,
+    /// every attempt permitted by <c>maxAttempts</c> is consumed within seconds of the first one and the
+    /// same message is republished that many times in a burst.
+    /// </summary>
+    [Fact]
+    public async Task ConfirmationUnknown_Is_Not_Reclaimed_Before_The_Recovery_Window_Elapses()
+    {
+        var store = CreateStore();
+        var message = NewMessage();
+        var recoveryTimeout = TimeSpan.FromMinutes(5);
+        await store.AddAsync(message);
+
+        Assert.Equal(message.MessageId,
+            Assert.Single(await store.ClaimPendingBatchAsync(1, recoveryTimeout: recoveryTimeout)).MessageId);
+        await store.MarkPublishingAsync(message.MessageId);
+        await store.MarkConfirmationUnknownAsync(message.MessageId);
+
+        Assert.Empty(await store.ClaimPendingBatchAsync(1, recoveryTimeout: recoveryTimeout));
+
+        // ...and it is handed back once that window has passed.
+        Assert.Equal(message.MessageId,
+            Assert.Single(await store.ClaimPendingBatchAsync(1, recoveryTimeout: TimeSpan.Zero)).MessageId);
+    }
+
+    /// <summary>
+    /// The terminal state for exhausted attempts. It must be distinct from both Published and Failed, must
+    /// carry the recorded reason, and must never be handed back by a claim query again.
+    /// </summary>
+    [Fact]
+    public async Task MarkAbandonedAsync_Is_Terminal_And_Records_Why()
+    {
+        var store = CreateStore();
+        var message = NewMessage();
+        await store.AddAsync(message);
+        await store.ClaimPendingBatchAsync(10);
+
+        var failureInfo = new Lycia.Common.SagaSteps.SagaStepFailureInfo(
+            "attempts exhausted without confirmation", nameof(TimeoutException), null);
+        await store.MarkAbandonedAsync(message.MessageId, failureInfo);
+
+        var loaded = await store.GetByMessageIdAsync(message.MessageId);
+        Assert.Equal(OutboxMessageStatus.Abandoned, loaded!.Status);
+        Assert.Equal("attempts exhausted without confirmation", loaded.FailureInfo?.Reason);
+
+        // Terminal: not claimable again, even with the recovery window fully elapsed.
+        Assert.Empty(await store.ClaimPendingBatchAsync(10, recoveryTimeout: TimeSpan.Zero));
     }
 
     [Fact]
