@@ -82,10 +82,14 @@ public class OutboxDispatcher(IOutboxStore outboxStore, IEventBus eventBus, IMes
         }
 
         // The row was only claimable because RetryCount was still below maxAttempts, so this attempt is
-        // attempt number RetryCount + 1. When that is the last permitted attempt, any outcome other than a
-        // positive confirmation must become the terminal Abandoned state: leaving it at
-        // ConfirmationUnknown with the attempt count at the cap would make it invisible to every future
-        // claim query, with no terminal status and no recorded reason — silently dropping the message.
+        // attempt number RetryCount + 1. When that is the last permitted attempt and it does not reach the
+        // transport at all (the publish throws, or shutdown cancels it), the row must become the terminal
+        // Abandoned state: left at ConfirmationUnknown with the attempt count at the cap it would be
+        // invisible to every future claim query, with no terminal status and no recorded reason, and a
+        // broker outage longer than the attempt budget would drop the message silently.
+        // A final attempt the transport *accepted* is different and stays ConfirmationUnknown. An
+        // unconfirming transport such as RabbitMQ reports every successful publish that way, so abandoning
+        // it would raise an "operator action required" warning for essentially every delivered message.
         var isFinalAttempt = message.RetryCount + 1 >= maxAttempts;
         await outboxStore.MarkPublishingAsync(message.MessageId, cancellationToken);
 
@@ -100,10 +104,10 @@ public class OutboxDispatcher(IOutboxStore outboxStore, IEventBus eventBus, IMes
             }
 
             if (isFinalAttempt)
-                return await AbandonAsync(message, maxAttempts,
-                    "Outbox dispatch attempts exhausted without a broker confirmation. The transport accepted " +
-                    "the publish but cannot confirm it, so the delivery outcome is unknown.",
-                    null, cancellationToken);
+                logger.LogInformation(
+                    "Outbox message {MessageId} used its last of {MaxAttempts} dispatch attempts; the transport accepted " +
+                    "it but cannot confirm delivery, so it remains ConfirmationUnknown and will not be redispatched.",
+                    message.MessageId, maxAttempts);
 
             await outboxStore.MarkConfirmationUnknownAsync(message.MessageId, cancellationToken);
             return OutboxMessageStatus.ConfirmationUnknown;

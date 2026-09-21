@@ -40,9 +40,11 @@ public interface IOutboxStore
     /// <see cref="OutboxMessageStatus.ConfirmationUnknown"/> as well is deliberate: without it an
     /// unconfirmed message is re-claimed on the very next dispatch pass, which burns every attempt
     /// permitted by <paramref name="maxAttempts"/> within seconds and republishes the same message that
-    /// many times. Rows that already reached <paramref name="maxAttempts"/> are never returned; the
-    /// dispatcher is responsible for moving such a row to the terminal
-    /// <see cref="OutboxMessageStatus.Abandoned"/> state so exhausted work stays discoverable.
+    /// many times. Rows that already reached <paramref name="maxAttempts"/> are never returned. When the
+    /// last permitted attempt did not reach the transport the dispatcher moves the row to the terminal
+    /// <see cref="OutboxMessageStatus.Abandoned"/> state so undelivered work stays discoverable; when the
+    /// transport accepted it but could not confirm, the row stays
+    /// <see cref="OutboxMessageStatus.ConfirmationUnknown"/> at the cap.
     /// </remarks>
     Task<IReadOnlyList<OutboxMessage>> ClaimPendingBatchAsync(int maxCount, CancellationToken cancellationToken = default,
         int maxAttempts = 5, TimeSpan? recoveryTimeout = null);
@@ -58,13 +60,14 @@ public interface IOutboxStore
     Task MarkFailedAsync(Guid messageId, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Marks a message whose bounded dispatch attempts were exhausted without a positive broker
-    /// confirmation, moving it to the terminal <see cref="OutboxMessageStatus.Abandoned"/> state.
+    /// Marks a message whose last permitted dispatch attempt did not reach the transport, moving it to the
+    /// terminal <see cref="OutboxMessageStatus.Abandoned"/> state.
     /// </summary>
     /// <remarks>
-    /// This exists so an exhausted message cannot silently become invisible: without it a row sits at
-    /// <see cref="OutboxMessageStatus.ConfirmationUnknown"/> with its attempt count at the cap, which no
-    /// claim query will ever return again, leaving no terminal state and no recorded reason. Implementations
+    /// This exists so a message that was never handed to the transport cannot silently become invisible:
+    /// without it a row sits at <see cref="OutboxMessageStatus.ConfirmationUnknown"/> with its attempt
+    /// count at the cap, which no claim query will ever return again, leaving no terminal state and no
+    /// recorded reason. Implementations
     /// must record <paramref name="failureInfo"/> and must remove the message from any pending/claimable
     /// queue.
     /// </remarks>

@@ -447,12 +447,16 @@ exception is also `ConfirmationUnknown`; only a permanent local envelope/type/se
 worker, so attempts are spread across `MaxAttempts × RecoveryTimeout`. Two things follow. First, an
 unconfirming transport no longer republishes the same message `MaxAttempts` times in a burst, which
 is what happened while `ConfirmationUnknown` was re-claimable on the very next pass. Second, once the
-attempts really are exhausted the dispatcher moves the row to the terminal `Abandoned` status via
+attempts really are exhausted and the last one never reached the transport — the publish threw or
+shutdown cancelled it — the dispatcher moves the row to the terminal `Abandoned` status via
 `MarkAbandonedAsync`, records the reason in its failure info, and logs a warning with the `MessageId`
 and `SagaId`; `OutboxDispatchResult.Abandoned` carries the aggregate count so `OutboxWorker` can log
-it too. `Abandoned` is intentionally neither `Published` nor `Failed` — the delivery outcome is
-unknown — and it exists because the alternative was worse: a row that reached the attempt cap while
-still marked `ConfirmationUnknown` is returned by no claim query ever again, so a broker outage that
+it too. A last attempt the transport *accepted* without confirming stays `ConfirmationUnknown` at the
+cap and only logs at Information: an unconfirming transport such as RabbitMQ reports every successful
+publish that way, so abandoning it would flag essentially every delivered message as needing operator
+action. `Abandoned` is intentionally neither `Published` nor `Failed`, and it exists because the
+alternative was worse: a row that reached the attempt cap after only failed publishes, while still
+marked `ConfirmationUnknown`, is returned by no claim query ever again, so a broker outage that
 outlasted roughly four seconds of backoff dropped the outgoing message permanently, with nothing
 recording that it had stopped. This mirrors how Split Store reconciliation already terminalizes its
 own exhausted intents as `AttemptsExhausted`.

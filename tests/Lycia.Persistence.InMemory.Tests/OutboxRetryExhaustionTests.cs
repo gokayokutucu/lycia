@@ -181,6 +181,39 @@ public class OutboxRetryExhaustionTests
         Assert.Equal(1, bus.PublishAttempts);
     }
 
+    /// <summary>
+    /// An unconfirming transport such as RabbitMQ reports every successful publish as ConfirmationUnknown.
+    /// Running out of attempts that the broker accepted is ordinary at-least-once delivery, so it must not
+    /// be escalated to Abandoned — otherwise essentially every delivered message would demand operator action.
+    /// </summary>
+    [Fact]
+    public async Task Exhausting_attempts_the_transport_accepted_stays_ConfirmationUnknown_not_Abandoned()
+    {
+        const int maxAttempts = 3;
+        var store = new InMemoryOutboxStore();
+        var bus = new UnconfirmingEventBus();
+        var serializer = new NewtonsoftJsonMessageSerializer();
+        var dispatcher = CreateDispatcher(store, bus);
+
+        var evt = new ProbeEvent();
+        await new OutboxOutgoingMessagePipeline(store, serializer).Publish(evt, null, null);
+
+        var abandoned = 0;
+        for (var pass = 1; pass <= maxAttempts + 2; pass++)
+            abandoned += (await dispatcher.DispatchPendingBatchAsync(50, default, maxAttempts, TimeSpan.Zero)).Abandoned;
+
+        Assert.Equal(maxAttempts, bus.PublishAttempts);
+        Assert.Equal(0, abandoned);
+
+        var row = await store.GetByMessageIdAsync(evt.MessageId);
+        Assert.Equal(OutboxMessageStatus.ConfirmationUnknown, row!.Status);
+        Assert.Equal(maxAttempts, row.RetryCount);
+
+        // Still bounded: the cap stops further redispatch.
+        Assert.Equal(0, (await dispatcher.DispatchPendingBatchAsync(50, default, maxAttempts, TimeSpan.Zero)).Claimed);
+        Assert.Equal(maxAttempts, bus.PublishAttempts);
+    }
+
     [Fact]
     public async Task A_confirmed_transport_never_abandons_on_the_final_attempt()
     {
