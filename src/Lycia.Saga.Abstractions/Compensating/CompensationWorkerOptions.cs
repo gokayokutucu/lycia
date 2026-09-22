@@ -5,8 +5,8 @@ namespace Lycia.Saga.Abstractions.Compensating;
 
 /// <summary>
 /// Controls the hosted <c>CompensationWorker</c> recovery loop and the immediate in-request propagation
-/// attempt <c>ThenBubbleUp</c>/<c>Context.BubbleUpCompensationAsync</c> makes. Registered unconditionally
-/// by <c>AddLycia</c> with these defaults - compensation propagation durability is part of SagaStore
+/// attempt <c>ThenBubbleUp</c> makes. Registered unconditionally by <c>AddLycia</c> with these defaults -
+/// compensation propagation durability is part of SagaStore
 /// correctness, not an opt-in capability, so there is no separate "enable compensation" switch. Use
 /// <c>LyciaPersistenceBuilder.WithCompensationWorker(...)</c> only to tune these values.
 /// </summary>

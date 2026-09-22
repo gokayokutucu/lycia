@@ -13,7 +13,7 @@ namespace Lycia.Compensating;
 
 /// <summary>
 /// Recovery-only safety net for durable compensation-propagation edges (<c>CompensationPropagationIntent</c>).
-/// It is never the mandatory happy-path executor: on the healthy path, <c>Context.BubbleUpCompensationAsync</c>
+/// It is never the mandatory happy-path executor: on the healthy path, <c>ThenBubbleUp(ct)</c>
 /// (via <c>SagaCompensationCoordinator.CompensateParentAsync</c>) durably claims and immediately attempts
 /// propagation in the same call, and this worker never sees that edge at all. This worker only resumes edges
 /// left <c>Pending</c> (the immediate attempt never ran - e.g. the process crashed right after the durable

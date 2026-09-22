@@ -15,4 +15,10 @@
     <ItemGroup>
         <ProjectReference Include="..\Lycia.Saga.Abstractions\Lycia.Saga.Abstractions.csproj"/>
     </ItemGroup>
+
+    <!-- API-surface/encapsulation tests need to construct SagaCompensationContinuation directly to prove
+         its internal IBubbleUpCompensationPrimitive guard behavior. -->
+    <ItemGroup>
+        <InternalsVisibleTo Include="Lycia.Tests" />
+    </ItemGroup>
 </Project>

@@ -25,7 +25,8 @@ public class SagaContext<TInitialMessage>(
     ISagaIdGenerator sagaIdGenerator,
     ISagaCompensationCoordinator compensationCoordinator,
     IMessageScheduler? messageScheduler = null,
-    IOutgoingMessagePipeline? outgoingMessagePipeline = null) : ISagaContext<TInitialMessage>, ISchedulingSagaContext
+    IOutgoingMessagePipeline? outgoingMessagePipeline = null)
+    : ISagaContext<TInitialMessage>, ISchedulingSagaContext, IBubbleUpCompensationPrimitive
     where TInitialMessage : IMessage
 {
     public ISagaStore SagaStore { get; } = sagaStore;
@@ -166,7 +167,17 @@ public class SagaContext<TInitialMessage>(
             StepStatus.Compensated, HandlerTypeOfCurrentStep, CurrentStep, (Exception?)null, cancellationToken);
     }
 
-    public virtual Task BubbleUpCompensationAsync<TStep>(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Explicit implementation of the internal bubble-up primitive - not reachable through <see cref="ISagaContext{TInitialMessage}"/>
+    /// or this class's own public surface. Application code reaches it only via
+    /// <c>ContinueCompensation()...ThenBubbleUp(ct)</c>. Delegates to the protected, overridable
+    /// <see cref="BubbleUpCompensationCoreAsync{TStep}"/> so <see cref="SagaContext{TInitialMessage,TSagaData}"/>
+    /// can still customize the behavior without itself exposing a public/explicit-interface method.
+    /// </summary>
+    Task IBubbleUpCompensationPrimitive.BubbleUpCompensationAsync<TStep>(CancellationToken cancellationToken) =>
+        BubbleUpCompensationCoreAsync<TStep>(cancellationToken);
+
+    protected virtual Task BubbleUpCompensationCoreAsync<TStep>(CancellationToken cancellationToken = default)
         where TStep : IMessage
     {
         // No SagaData exists at this (reactive, non-generic-data) level, so there is nothing to save here -
@@ -401,7 +412,7 @@ public class SagaContext<TInitialMessage, TSagaData> : SagaContext<TInitialMessa
             StepStatus.CompensationFailed, HandlerTypeOfCurrentStep, CurrentStep, ex, cancellationToken);
     }
 
-    public override async Task BubbleUpCompensationAsync<TStep>(CancellationToken cancellationToken = default)
+    protected override async Task BubbleUpCompensationCoreAsync<TStep>(CancellationToken cancellationToken = default)
     {
         await _sagaStore.SaveSagaDataAsync(SagaId, Data, cancellationToken);
         await _compensationCoordinator.CompensateParentAsync(SagaId, CurrentStep.GetType(), HandlerTypeOfCurrentStep,
@@ -423,7 +434,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
     ISagaCompensationCoordinator compensationCoordinator,
     IMessageScheduler? messageScheduler = null,
     IOutgoingMessagePipeline? outgoingMessagePipeline = null)
-    : ISagaContext<TCurrentStepAdapter>, ISchedulingSagaContext
+    : ISagaContext<TCurrentStepAdapter>, ISchedulingSagaContext, IBubbleUpCompensationPrimitive
     where TCurrentStepAdapter : IMessage
 {
     private IOutgoingMessagePipeline OutgoingMessagePipeline { get; } =
@@ -611,8 +622,11 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
             StepStatus.Compensated, HandlerTypeOfCurrentStep, CurrentStep, (SagaStepFailureInfo?)null, cancellationToken);
     }
 
-    public Task BubbleUpCompensationAsync<TAdapterStep>(CancellationToken cancellationToken = default)
-        where TAdapterStep : IMessage
+    /// <summary>
+    /// Explicit implementation of the internal bubble-up primitive - not reachable through <see cref="ISagaContext{TCurrentStepAdapter}"/>.
+    /// Application code reaches it only via <c>ContinueCompensation()...ThenBubbleUp(ct)</c>.
+    /// </summary>
+    Task IBubbleUpCompensationPrimitive.BubbleUpCompensationAsync<TAdapterStep>(CancellationToken cancellationToken)
     {
         // No SagaData exists at this (reactive, non-generic-data) level, so there is nothing to save here -
         // only the compensation coordinator's durable propagation flow, which itself logs the current step
@@ -684,7 +698,7 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
     ISagaCompensationCoordinator compensationCoordinator,
     IMessageScheduler? messageScheduler = null,
     IOutgoingMessagePipeline? outgoingMessagePipeline = null)
-    : ISagaContext<TCurrentStepAdapter, TSagaDataAdapter>, ISchedulingSagaContext
+    : ISagaContext<TCurrentStepAdapter, TSagaDataAdapter>, ISchedulingSagaContext, IBubbleUpCompensationPrimitive
     where TCurrentStepAdapter : IMessage
     where TSagaDataAdapter : SagaData
 {
@@ -936,8 +950,12 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
             StepStatus.Compensated, HandlerTypeOfCurrentStep, StepAdapter, (Exception?)null, cancellationToken);
     }
 
-    public async Task BubbleUpCompensationAsync<TMarkStep>(CancellationToken cancellationToken = default)
-        where TMarkStep : IMessage
+    /// <summary>
+    /// Explicit implementation of the internal bubble-up primitive - not reachable through
+    /// <see cref="ISagaContext{TCurrentStepAdapter,TSagaDataAdapter}"/>. Application code reaches it only
+    /// via <c>ContinueCompensation()...ThenBubbleUp(ct)</c>.
+    /// </summary>
+    async Task IBubbleUpCompensationPrimitive.BubbleUpCompensationAsync<TMarkStep>(CancellationToken cancellationToken)
     {
         await sagaStore.SaveSagaDataAsync(SagaId, Data, cancellationToken);
         // The compensation coordinator logs the current step Compensated, durably requires parent

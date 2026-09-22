@@ -63,8 +63,8 @@ public abstract class CoordinatedSagaHandler<TMessage, TSagaData> :
 
     public abstract Task HandleAsync(TMessage message, CancellationToken cancellationToken = default);
     
-    public virtual Task CompensateAsync(TMessage message, CancellationToken cancellationToken = default) => 
-        Context.BubbleUpCompensationAsync<TMessage>(cancellationToken);
+    public virtual Task CompensateAsync(TMessage message, CancellationToken cancellationToken = default) =>
+        Context.ContinueCompensation().ThenMarkAsCompensated<TMessage>().ThenBubbleUp(cancellationToken);
     
     protected Task MarkAsComplete(CancellationToken cancellationToken = default) => Context.MarkAsComplete<TMessage>(cancellationToken);
     protected Task MarkAsFailed(CancellationToken cancellationToken = default) => Context.MarkAsFailed<TMessage>(cancellationToken);

@@ -34,4 +34,11 @@
     <ItemGroup>
         <ProjectReference Include="..\Lycia.Common\Lycia.Common.csproj" />
     </ItemGroup>
+
+    <!-- Lycia.Saga's concrete saga-context classes implement IBubbleUpCompensationPrimitive (internal by
+         design - see its doc comment) so ContinueCompensation()...ThenBubbleUp(ct) has an execution
+         primitive that application code cannot call directly on the context. -->
+    <ItemGroup>
+        <InternalsVisibleTo Include="Lycia.Saga" />
+    </ItemGroup>
 </Project>

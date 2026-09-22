@@ -25,8 +25,21 @@ internal sealed class SagaCompensationContinuation<TInitialMessage>(ISagaContext
     }
 
     /// <inheritdoc />
-    public ICompensatedContinuation ThenMarkAsCompensated<TStep>() where TStep : IMessage =>
-        new SagaCompensatedContinuation(context.BubbleUpCompensationAsync<TStep>);
+    public ICompensatedContinuation ThenMarkAsCompensated<TStep>() where TStep : IMessage
+    {
+        // IBubbleUpCompensationPrimitive is deliberately internal (see its doc comment) so application
+        // code cannot call BubbleUpCompensationAsync directly on the context - only through this staged
+        // chain. Every built-in ISagaContext implementation implements it; a custom implementation that
+        // doesn't cannot support ThenBubbleUp, which this check reports clearly instead of an opaque
+        // InvalidCastException.
+        if (context is not IBubbleUpCompensationPrimitive primitive)
+            throw new InvalidOperationException(
+                $"'{context.GetType().FullName}' does not support compensation bubble-up " +
+                $"(it does not implement the internal IBubbleUpCompensationPrimitive). " +
+                "ThenBubbleUp is only available for ISagaContext implementations provided by Lycia.");
+
+        return new SagaCompensatedContinuation(primitive.BubbleUpCompensationAsync<TStep>);
+    }
 }
 
 /// <summary>
