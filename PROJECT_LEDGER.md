@@ -49,7 +49,7 @@ final validation are complete; see `FINALIZATION`.)
 - **Pending spikes (not started, no code):** a `Lycia.Extensions.Kafka.Preview` package concept spike (a
   separate opt-in package would be the only way to expose preview broker features); and a Messaging
   Semantics Architecture Spike (Queue / Stream / PubSub abstractions and what each transport can honestly
-  promise). Neither is scheduled; `/diagnostics/lycia` also remains unimplemented.
+  promise). Neither is scheduled.
 - Infrastructure contract follow-ups: PostgreSQL 14 reaches its final release on 12 November 2026, after
   which the PostgreSQL minimum must be reviewed under the DEVELOPERS.md policy; the NATS minimum (2.9) rests
   on the technical floor because NATS publishes no server support policy; the Windows CI jobs (Memurai and
@@ -210,6 +210,28 @@ final validation are complete; see `FINALIZATION`.)
   journal. Feature commits `9c1db21` (publisher confirms) and `5ee2e13` (infrastructure contract); merged into
   `dev` as `3c20278`. Not released: no `v1.18.1` tag,
   `main` merge or publication yet.
+- **Post-1.18.0 patch — ASP.NET Core reliability diagnostics endpoint:** `app.MapLyciaDiagnostics()`
+  (default `GET /diagnostics/lycia`, or a custom path) is a thin, opt-in HTTP projection of the existing
+  `ILyciaReliabilityDiagnostics.GetSnapshot()` - delivery guarantee, persistence mode/provider, Split
+  Store canonical/operational stores, and Inbox/Outbox/journal/reconciliation flags - never a second
+  topology-inference engine. It is a configuration/topology endpoint, not a health check: no network
+  calls, no probe of configured infrastructure, normally `200 OK`. `AddLycia(...)` never maps it.
+  **New public package (12th):** `Lycia.Extensions.AspNetCore` (`net8.0;net9.0;net10.0` only, with
+  `FrameworkReference Microsoft.AspNetCore.App`) - Minimal API routing does not exist below net8.0, and
+  every other package floors at `netstandard2.0`, so this could not live in `Lycia.Extensions` without
+  imposing an ASP.NET Core runtime dependency on every consumer. The release workflow's pack loop and
+  11-package validation are updated to 12. **`LyciaReliabilitySnapshot` gains `SagaStoreProvider`**
+  (the registered SagaStore's provider name outside Split Store). **Fix in the existing diagnostics
+  abstraction:** `GetSnapshot()` checked Inbox/Outbox/journal/rebuild registration with
+  `GetService<T>() != null`, which for providers whose store factories resolve a connection eagerly (for
+  example Redis, via `IConnectionMultiplexer`) actually opened a real connection on every snapshot read -
+  registration presence is now checked with `IServiceProviderIsService.IsService(typeof(T))`, which never
+  invokes a factory. Verified live on the Microservices Split Store stack (topology reported correctly;
+  identical fast `200 OK` with RabbitMQ and Redis both stopped) and with dedicated ASP.NET Core
+  `TestServer` tests (mapping/opt-in, snapshot projection across Standard/LocalAtomic/Independent/Split
+  Store, secret sentinel values never present in the response, `RequireAuthorization` enforced by standard
+  ASP.NET Core authorization, and a timing-based proof no connection is attempted against an unroutable
+  Redis address). Feature commit `90ed223`; merged into `dev` as `348288e`. Not released.
 
 # FINALIZATION
 
