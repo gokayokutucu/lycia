@@ -34,9 +34,20 @@ Git rules. Agents must update this file as phases move through the milestone.
 - Coordinated compensation continuation is `Context.ContinueCompensation().ThenMarkAsCompensated<TStep>()`
   (defers) `.ThenBubbleUp(cancellationToken)` (terminal; propagates to the logical parent) — or the
   two-stage `.ThenMarkAsCompensated<TStep>(cancellationToken)` (terminal; does not propagate). Do not have
-  `ThenBubbleUp` also call `MarkAsCompensated`: `CompensateAndBubbleUp` already logs the step Compensated
-  as part of walking the parent lineage, and a second `MarkAsCompensated` call first would make
-  `CompensateParentAsync`'s own idempotency guard skip propagation entirely.
+  `ThenBubbleUp` also call `MarkAsCompensated` first: `Context.BubbleUpCompensationAsync<TStep>` (what
+  `ThenBubbleUp` calls) already logs the step Compensated as one step of its own durable propagation walk.
+- Compensation propagation durability is part of `ISagaStore` correctness, not an optional add-on: the
+  current step's `Compensated` status is never treated as proof that propagation to its logical parent
+  completed, started, or is even required — those are separate durable facts
+  (`CompensationPropagationIntent`, state machine Pending → Claimed → Completed/Failed, identity
+  `SagaId + ChildMessageId`). `CompensationWorker` (recovery-only; the immediate in-request attempt is the
+  happy path) is registered unconditionally by `AddLycia`/`AddLyciaInMemory`, the same precedent
+  `LyciaPersistenceBuilder.UseSplitStore()` set for `ReconciliationWorker`. A root step
+  (`ParentMessageId == Guid.Empty`) never creates a propagation intent. Do not reintroduce a guard that
+  treats an already-`Compensated` step as proof propagation is unnecessary — that is the exact mechanism
+  the closed crash window (see `COMPLETED`) depended on. See DEVELOPERS.md, "Coordinated compensation
+  continuation", for the full state machine, persistence authority per provider, and crash-injection test
+  mapping.
 
 # ACTIVE
 
@@ -49,23 +60,13 @@ final validation are complete; see `FINALIZATION`.)
 
 # HOLD / BACKLOG
 
-- **Durable, crash-safe coordinated compensation propagation (bubble-up):** `SagaCompensationCoordinator
-  .CompensateParentAsync` persists the current step as `Compensated` and then, in the same call and with
-  no durable intermediate record, invokes the parent's compensation handler in-process. If the process
-  crashes (or the handler throws) between those two things, the child already reads `Compensated`, so a
-  retry's `IsStepAlreadyInStatus` guard skips the parent forever — the same guard that correctly makes
-  ordinary message redelivery idempotent. `Context.ContinueCompensation().ThenMarkAsCompensated<T>()
-  .ThenBubbleUp(ct)` (and the `CompensateAndBubbleUp<T>(ct)` it wraps) is documented as not crash-safe;
-  `tests/Lycia.Tests/CompensationContinuationTests.cs` (`KnownGap_...`) reproduces the gap directly. A real
-  fix needs a durable "propagation pending" record kept apart from the child's own terminal status (so
-  recovery can distinguish "compensated, not yet propagated" from "compensated, already propagated"),
-  provider schema for it (not just relational providers), a claim/lease mechanism so concurrent replicas
-  cannot invoke the same parent handler twice, and a dedicated recovery worker — explicitly not the Outbox
-  worker (drives transport delivery, not in-process handler invocation) and not the Split Store
-  `ReconciliationWorker` (repairs the Redis projection from canonical state; no compensation-propagation
-  concept). Sized like a dedicated phase (comparable to the Outbox or Split Store subsystems), not
-  attempted as part of the fluent-API/CancellationToken cleanup that added `ContinueCompensation()`. See
-  DEVELOPERS.md, "Coordinated compensation continuation".
+- ~~Durable, crash-safe coordinated compensation propagation (bubble-up)~~ — **CLOSED**, see `COMPLETED`
+  ("Durable compensation propagation" entry) and DEVELOPERS.md, "Coordinated compensation continuation".
+  `CompensateParentAsync` no longer treats the child step's own `Compensated` status as proof that parent
+  propagation happened; a durable `CompensationPropagationIntent` per edge, claimed atomically and resumed
+  by a dedicated `CompensationWorker` on crash, replaces that guard. Proven by
+  `CompensationCrashInjectionTests.cs` and `CompensationContinuationTests.cs`, plus provider conformance
+  coverage in `Lycia.Persistence.TestKit.SagaStoreConformanceTests` run against every built-in provider.
 - **PostgreSQL WAL / logical decoding CDC projection feed (future evaluation, not a current-release change or committed roadmap item):** In a PostgreSQL deployment, canonical state changes could be exposed through WAL (*Write-Ahead Log*) logical decoding and CDC (*Change Data Capture*) and consumed to update the Redis operational projection. This would provide a durable feed of **committed** PostgreSQL changes; it would not make PostgreSQL and Redis atomic or eliminate normal replication lag. Redis remains a rebuildable, eventually consistent projection, and its writer must retain version fencing/CAS so delayed or redelivered records cannot overwrite a newer projection. This is distinct from the Journal: `Journal != WAL`; the Journal remains Lycia's framework-level canonical transition history and deterministic rebuild source, while WAL/CDC is only a database change-propagation mechanism. The current provider-neutral `ReconciliationIntent + ReconciliationWorker` remains the default. A possible later boundary is `IProjectionChangeFeed`, with `ReconciliationIntentFeed` and an opt-in PostgreSQL-only `PostgreSqlLogicalReplicationFeed`; only one feed may write a deployment's projection. Candidate consumers include Debezium and a custom logical-replication consumer. Any evaluation must explicitly own replication-slot lag, retained-WAL/disk-pressure, consumer health, LSN progress, recovery, and monitoring. CDC could also be evaluated as an Outbox relay transport (WAL/CDC to broker) while retaining the transactional Outbox record itself and its at-least-once/confirmation semantics. Because Lycia is provider-neutral, this must remain an optional PostgreSQL strategy, never a core requirement.
 - Redis Cluster hash-slot-safe multi-key atomicity: inventoried during Phase 7 (Redis Inbox/Outbox
   Lua scripts touch multiple keys — `outbox:msg:{id}`, `outbox:pending` — without hash-tag key naming,
@@ -287,6 +288,51 @@ final validation are complete; see `FINALIZATION`.)
   confirm and Outbox-recovery suites above remain intact (nothing in this change touched transport,
   persistence-provider, Outbox, or Split Store internals — only the saga-context/handler/fluent layer
   above them). Feature commit `5ba04e5`; merged into `dev` as `f67e958`. Not released.
+- **Post-1.18.0 patch — durable compensation propagation (closes the bubble-up crash window):** The known
+  gap above is closed. `CompensateParentAsync` no longer decides whether to propagate by reading the child
+  step's own status (the exact mechanism that stranded propagation on a crash); it durably ensures-and-claims
+  a `CompensationPropagationIntent` (identity `SagaId + ChildMessageId`, state machine
+  `Pending → Claimed → Completed/Failed`) for the edge and only the claim outcome governs whether the
+  immediate in-process attempt runs. Five new methods live directly on `ISagaStore` (not a separate
+  interface — propagation durability is `SagaStore` correctness, not an optional add-on), implemented by
+  all four built-in providers: InMemory (a locked dictionary), SQL Server / PostgreSQL (a dedicated
+  unconditionally-migrated `005_CompensationPropagation` table, the same `ROWLOCK READPAST` / `FOR UPDATE
+  SKIP LOCKED` claim pattern already used for Outbox), and Redis (a JSON blob per edge plus one due-time
+  ZSET, atomic Lua `EVAL`s). Split Store is a pure pass-through to the canonical store, so it inherits
+  canonical durability automatically. `CompensationWorker` (a `BackgroundService`, `OutboxWorker`'s
+  shape) is the recovery-only safety net — never the mandatory happy-path executor — registered
+  unconditionally by `AddLycia`/`AddLyciaInMemory`, the same precedent `UseSplitStore()` set for
+  `ReconciliationWorker`; `LyciaPersistenceBuilder.WithCompensationWorker(...)` only tunes its options. A
+  root step creates no propagation intent; propagation follows `ParentMessageId` per edge only, never a
+  global scan. Lycia remains at-least-once, never exactly-once, here as everywhere: a parent's compensation
+  handler can run more than once for the same logical propagation, and this is documented as the
+  compensation handler's own idempotency responsibility, not framework-level exactly-once. Removed
+  `CompensateAndBubbleUp<TStep>` entirely (not deprecated) in favor of
+  `Context.BubbleUpCompensationAsync<TStep>(ct)`, the primitive `ContinueCompensation()...ThenBubbleUp(ct)`
+  already wrapped — same public two/three-stage fluent surface as before, no new concept exposed to
+  ordinary handler code. Three real bugs were found and fixed only by writing and running the
+  crash-injection and provider-conformance tests against real behavior, not by design review alone: the
+  InMemory batch-claim path was checking staleness against the wrong parameter (`leaseDuration` instead of
+  `recoveryTimeout`); the Redis batch-claim Lua script reconstructed an edge key using the wrong member
+  separator, silently dropping every batch-claimed edge; and a C#-side edge rewrite
+  (`MarkCompensationPropagationCompletedAsync`/`FailedAsync`) serialized the status enum as an integer,
+  breaking every later Lua string comparison against that edge. `SagaStoreConformanceTests` gained the
+  shared compensation-propagation suite (intent creation and its idempotent identity, claim, concurrent
+  claim with exactly one winner, stale-claim recovery, completion, retry, attempts exhaustion), run against
+  every built-in provider; `CompensationCrashInjectionTests.cs` is new, covering the documented
+  crash-window boundaries directly (durable intent before the immediate attempt runs; a stale claim after
+  its owner died; bounded retry and terminal exhaustion during the parent's own business compensation;
+  idempotent retry after a simulated completion-recording crash; the next edge in a multi-hop chain staying
+  durable; cancellation before/after the durable handoff; root and sibling-branching behavior).
+  `CompensationContinuationTests`'s former `KnownGap_...` test is now
+  `Crash_Simulated_Between_Persisting_Compensated_And_Invoking_The_Parent_No_Longer_Strands_Propagation`,
+  proving the same pre-seeded crash state now recovers instead of documenting that it doesn't. Full
+  regression green: `Lycia.Tests` (net9.0/net10.0) and `Lycia.Tests.NetFramework` (net48), InMemory/Redis/
+  SQL Server/PostgreSQL provider suites (real containers), `Lycia.IntegrationTests` (RabbitMQ
+  publisher-confirm, Outbox recovery, saga compensation), `Lycia.Extensions.AspNetCore.Tests`, full
+  solution build, `git diff --check`. See DEVELOPERS.md, "Coordinated compensation continuation", for the
+  full state machine, persistence authority, worker behavior, and crash-boundary-to-test mapping.
+  Feature commit `5a7badb`; merged into `dev` as `30654a6`. Not released.
 
 # FINALIZATION
 
