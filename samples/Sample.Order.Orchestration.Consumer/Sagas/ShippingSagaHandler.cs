@@ -31,6 +31,9 @@ public class ShippingSagaHandler :
     public override Task CompensateAsync(ShipOrderCommand message, CancellationToken cancellationToken = default)
     {
         Context.Data.ShippingCompensated = true; // Sample flag to indicate compensation
-        return Context.CompensateAndBubbleUp<ShipOrderCommand>(cancellationToken);
+        return Context
+            .ContinueCompensation()
+            .ThenMarkAsCompensated<ShipOrderCommand>()
+            .ThenBubbleUp(cancellationToken);
     }
 }

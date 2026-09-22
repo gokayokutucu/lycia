@@ -35,4 +35,5 @@ public class SqlServerSagaStoreOptions
 
     internal string SagaDataTable => $"{SchemaName}.LyciaSagaData";
     internal string SagaStepsTable => $"{SchemaName}.LyciaSagaSteps";
+    internal string CompensationPropagationTable => $"{SchemaName}.LyciaCompensationPropagation";
 }

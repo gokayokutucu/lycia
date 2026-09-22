@@ -156,4 +156,31 @@ internal sealed class SplitStoreSagaStore(
         Array.Copy(hash, bytes, bytes.Length);
         return new Guid(bytes);
     }
+
+    // Compensation propagation durability always belongs to the canonical relational store, never to the
+    // Redis operational projection - these are plain pass-throughs, the same delegation every other
+    // ISagaStore member on this wrapper already uses.
+    public Task<CompensationPropagationClaim> EnsureAndClaimCompensationPropagationAsync(Guid sagaId,
+        Guid childMessageId, Guid parentMessageId, string owner, TimeSpan leaseDuration, int maxAttempts,
+        CancellationToken cancellationToken = default) =>
+        canonicalStore.EnsureAndClaimCompensationPropagationAsync(sagaId, childMessageId, parentMessageId, owner,
+            leaseDuration, maxAttempts, cancellationToken);
+
+    public Task<IReadOnlyList<CompensationPropagationIntent>> ClaimDueCompensationPropagationsAsync(int maxCount,
+        string owner, TimeSpan leaseDuration, TimeSpan recoveryTimeout, int maxAttempts,
+        CancellationToken cancellationToken = default) =>
+        canonicalStore.ClaimDueCompensationPropagationsAsync(maxCount, owner, leaseDuration, recoveryTimeout,
+            maxAttempts, cancellationToken);
+
+    public Task MarkCompensationPropagationCompletedAsync(Guid sagaId, Guid childMessageId,
+        CancellationToken cancellationToken = default) =>
+        canonicalStore.MarkCompensationPropagationCompletedAsync(sagaId, childMessageId, cancellationToken);
+
+    public Task MarkCompensationPropagationFailedAsync(Guid sagaId, Guid childMessageId,
+        SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default) =>
+        canonicalStore.MarkCompensationPropagationFailedAsync(sagaId, childMessageId, failureInfo, cancellationToken);
+
+    public Task<CompensationPropagationIntent?> GetCompensationPropagationIntentAsync(Guid sagaId,
+        Guid childMessageId, CancellationToken cancellationToken = default) =>
+        canonicalStore.GetCompensationPropagationIntentAsync(sagaId, childMessageId, cancellationToken);
 }

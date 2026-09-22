@@ -34,7 +34,11 @@ public static class PostgreSqlSchemaMigrator
 
         var scripts = new List<RelationalMigrationScript>
         {
-            new("001_InitialSchema", ReadEmbeddedScript("001_InitialSchema.sql"))
+            new("001_InitialSchema", ReadEmbeddedScript("001_InitialSchema.sql")),
+            // Compensation propagation durability is core SagaStore correctness (any coordinated/reactive
+            // saga may bubble up compensation to a logical parent), not an opt-in capability like
+            // Inbox/Outbox, so its schema is applied unconditionally alongside the base SagaStore tables.
+            new("005_CompensationPropagation", ReadEmbeddedScript("005_CompensationPropagation.sql"))
         };
 
         return RelationalMigrationRunner.RunAsync(

@@ -18,6 +18,7 @@ using ISagaIdGenerator = Lycia.Saga.Abstractions.ISagaIdGenerator;
 
 namespace Lycia.Tests;
 
+[Collection(Lycia.Tests.Messages.CompensationHandlerFixtureCollection.Name)]
 public class SagaCompensationCoordinatorTests
 {
     [Fact]
@@ -374,11 +375,13 @@ public class SagaCompensationCoordinatorTests
         await store.LogStepAsync(fixedSagaId, messageIdOfGrandParent, Guid.Empty, stepType, 
             StepStatus.Compensated,
             typeof(GrandparentCompensationHandler), grandparent, (SagaStepFailureInfo?)null);
-        // Parent
+        // Parent - pre-seeded via the same overload CompensateParentAsync itself uses for this transition
+        // (Exception-based, not SagaStepFailureInfo-based), so the Act below's idempotent re-log of the
+        // same Compensated status is recognized as such rather than misread as a differing-payload conflict.
         await store.LogStepAsync(fixedSagaId, messageIdOfParent, messageIdOfGrandParent, stepType,
             StepStatus.Compensated,
             typeof(ParentCompensationHandler),
-            parent, (SagaStepFailureInfo?)null);
+            parent, (Exception?)null);
         // Child (last step failed)
         await store.LogStepAsync(fixedSagaId, messageIdOfChild, messageIdOfParent, stepType,
             StepStatus.CompensationFailed,
@@ -394,12 +397,21 @@ public class SagaCompensationCoordinatorTests
         var coordinator = new SagaCompensationCoordinator(provider, sagaIdGen, provider.GetRequiredService<IMessageSerializer>());
 
         // Act
+        // 1) The child is already durably CompensationFailed - a genuine terminal business failure, not a
+        //    retry of a success. CompensateParentAsync must refuse to overwrite it as Compensated and must
+        //    not propagate from it: the parent must never be invoked as if the child's compensation had
+        //    succeeded.
         await coordinator.CompensateParentAsync(fixedSagaId, stepType, typeof(ChildCompensationHandler), child);
+        // 2) A separate, independent edge: the parent's own compensation (already durably Compensated)
+        //    legitimately has its own logical parent (the grandparent) and its own propagation edge. Per
+        //    ParentMessageId-lineage-only propagation (never "child compensation failed, so stop the whole
+        //    chain"), this call must still reach the grandparent - it is not gated by the unrelated child
+        //    edge's terminal failure.
         await coordinator.CompensateParentAsync(fixedSagaId, stepType, typeof(ParentCompensationHandler), parent);
 
         // Assert
-        Assert.Empty(ParentCompensationHandler.Invocations);
-        Assert.Empty(GrandparentCompensationHandler.Invocations);
+        Assert.Empty(ParentCompensationHandler.Invocations); // never invoked - the failed child never propagated to it
+        Assert.Single(GrandparentCompensationHandler.Invocations); // reached via the parent's own, independent edge
     }
 
     [Fact]

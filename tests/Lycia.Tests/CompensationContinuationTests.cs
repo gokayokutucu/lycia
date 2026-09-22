@@ -21,6 +21,7 @@ namespace Lycia.Tests;
 /// Coverage for the coordinated compensation continuation fluent API:
 /// <c>Context.ContinueCompensation().ThenMarkAsCompensated&lt;TStep&gt;(...)[.ThenBubbleUp(...)]</c>.
 /// </summary>
+[Collection(Lycia.Tests.Messages.CompensationHandlerFixtureCollection.Name)]
 public class CompensationContinuationTests
 {
     private static (SagaContext<DummyEvent> Context, Mock<ISagaStore> SagaStore,
@@ -73,8 +74,8 @@ public class CompensationContinuationTests
         using var cts = new CancellationTokenSource();
         await continuation.ThenBubbleUp(cts.Token);
 
-        // ThenBubbleUp delegates to CompensateAndBubbleUp<TStep>, which itself both persists the current
-        // step as Compensated and walks the parent lineage - see CompensateParentAsync.
+        // ThenBubbleUp delegates to Context.BubbleUpCompensationAsync<TStep>, which itself both persists
+        // the current step as Compensated and walks the parent lineage - see CompensateParentAsync.
         coordinator.Verify(c => c.CompensateParentAsync(It.IsAny<Guid>(), typeof(DummyEvent), It.IsAny<Type>(),
             It.IsAny<Lycia.Saga.Abstractions.Messaging.IMessage>(), cts.Token), Times.Once);
     }
@@ -123,7 +124,7 @@ public class CompensationContinuationTests
 
     // End-to-end through the real coordinator + a real InMemorySagaStore (no mocks on the compensation
     // path): ThenBubbleUp on a REACTIVE context actually invokes the parent's compensation handler. This
-    // is the fix for the previous no-op StepSpecificSagaContextAdapter<T>.CompensateAndBubbleUp stub -
+    // is the fix for the previous no-op StepSpecificSagaContextAdapter<T>.BubbleUpCompensationAsync stub -
     // before the fix, this exact call silently did nothing for every reactive saga.
     [Fact]
     public async Task ThenBubbleUp_On_A_Reactive_Context_Invokes_The_Parent_Compensation_Handler()
@@ -208,15 +209,18 @@ public class CompensationContinuationTests
         Assert.Single(ParentCompensationHandler.Invocations);
     }
 
-    // KNOWN, DOCUMENTED GAP (see DEVELOPERS.md "Coordinated compensation continuation" / PROJECT_LEDGER.md):
-    // CompensateParentAsync persists the current step as Compensated *before* invoking the parent's
-    // handler, with no separate durable "propagation pending" record. If the process crashes in that
-    // window - after the child is durably Compensated but before the parent handler runs - a retry of the
-    // same failed-event message is guarded away by IsStepAlreadyInStatus(Compensated, CompensationFailed)
-    // and the parent is never invoked. This test proves that gap exists today; it must be updated (not
-    // silently deleted) if a durable propagation-intent mechanism ever closes it.
+    // CLOSED GAP (formerly KnownGap_A; see DEVELOPERS.md "Coordinated compensation continuation" and
+    // PROJECT_LEDGER.md for the durable-propagation architecture that closed it). The old design used the
+    // child step's own Compensated status as the sole guard against re-running propagation, so a crash
+    // between persisting Compensated and invoking the parent stranded the parent forever - a retry read
+    // "already Compensated" and skipped propagation entirely. CompensateParentAsync no longer uses that
+    // guard: it always re-logs Compensated (a safe no-op via step-transition validation) and then durably
+    // ensures-and-claims a CompensationPropagationIntent for the edge, which is the sole authority for
+    // whether propagation is still outstanding. This test reproduces the exact same pre-seeded state - the
+    // child already durably Compensated, no record of the parent's own attempt - and proves the parent is
+    // now invoked anyway.
     [Fact]
-    public async Task KnownGap_A_Simulated_Crash_Between_Persisting_Compensated_And_Invoking_The_Parent_Strands_Propagation()
+    public async Task Crash_Simulated_Between_Persisting_Compensated_And_Invoking_The_Parent_No_Longer_Strands_Propagation()
     {
         var fixedSagaId = Guid.NewGuid();
         var parentMessageId = Guid.NewGuid();
@@ -233,10 +237,15 @@ public class CompensationContinuationTests
         var store = new InMemorySagaStore(eventBusMock.Object, sagaIdGen, Mock.Of<ISagaCompensationCoordinator>());
         await store.LogStepAsync(fixedSagaId, parentMessageId, Guid.Empty, typeof(DummyEvent), StepStatus.Failed,
             typeof(ParentCompensationHandler), parent, (SagaStepFailureInfo?)null);
-        // Simulates the crash: the child is already durably Compensated, as CompensateParentAsync would
-        // have left it, but the parent's handler never ran (no record for the parent's own attempt).
+        // Simulates the crash: the child is already durably Compensated, exactly as CompensateParentAsync
+        // would have left it, but the parent's handler never ran (no record for the parent's own attempt),
+        // and - crucially - no propagation intent exists yet either (the crash happened before that fact
+        // was durably recorded too).
+        // Matches the exact overload CompensateParentAsync itself uses for this transition, so a genuine
+        // at-least-once retry re-logging the identical Compensated status for this step is recognized as
+        // idempotent rather than misread as a differing-payload conflict.
         await store.LogStepAsync(fixedSagaId, childMessageId, parentMessageId, typeof(DummyEvent), StepStatus.Compensated,
-            typeof(ParentCompensationHandler), child, (SagaStepFailureInfo?)null);
+            typeof(ParentCompensationHandler), child, (Exception?)null);
         services.AddSingleton<ISagaStore>(store);
         services.AddSingleton<IEventBus>(eventBusMock.Object);
         services.AddSingleton<ParentCompensationHandler>();
@@ -248,7 +257,11 @@ public class CompensationContinuationTests
         // A "retry" after the simulated crash - the same call an at-least-once redelivery would make.
         await context.ContinueCompensation().ThenMarkAsCompensated<DummyEvent>().ThenBubbleUp(CancellationToken.None);
 
-        // This is the gap: the parent is never invoked, because the child already reads as Compensated.
-        Assert.Empty(ParentCompensationHandler.Invocations);
+        // The gap is closed: the parent is invoked even though the child already read as Compensated,
+        // because propagation is decided by the durable intent, not by the child's own step status.
+        Assert.Single(ParentCompensationHandler.Invocations);
+        var intent = await store.GetCompensationPropagationIntentAsync(fixedSagaId, childMessageId);
+        Assert.NotNull(intent);
+        Assert.Equal(CompensationPropagationStatus.Completed, intent!.Status);
     }
 }

@@ -26,7 +26,7 @@ internal sealed class SagaCompensationContinuation<TInitialMessage>(ISagaContext
 
     /// <inheritdoc />
     public ICompensatedContinuation ThenMarkAsCompensated<TStep>() where TStep : IMessage =>
-        new SagaCompensatedContinuation(context.CompensateAndBubbleUp<TStep>);
+        new SagaCompensatedContinuation(context.BubbleUpCompensationAsync<TStep>);
 }
 
 /// <summary>
