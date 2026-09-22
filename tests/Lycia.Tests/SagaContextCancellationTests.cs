@@ -6,6 +6,7 @@ using Lycia.Extensions.Serialization;
 using Lycia.Outbox;
 using Lycia.Persistence.InMemory;
 using Lycia.Saga.Abstractions;
+using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Abstractions.Outbox;
 using Lycia.Saga.Abstractions.Scheduling;
 using Lycia.Saga.Contexts;
@@ -260,17 +261,58 @@ public class SagaContextCancellationTests
             Times.Never);
     }
 
-    // 16. Source compatibility: the older WithTracking(message, cancellationToken).Then...() shape still
-    // works, and its token still reaches the deferred Send via fallback when the terminal token is default.
+    // 16. A failure in the deferred outgoing operation prevents the saga-step transition from running:
+    // RunAsync awaits `operation` before `transition`, so an exception thrown from Send propagates and
+    // MarkAsComplete's underlying LogStepAsync is never reached.
     [Fact]
-    public async Task Legacy_WithTracking_Token_Still_Reaches_Send_Via_Fallback()
+    public async Task Deferred_Operation_Failure_Prevents_The_Transition()
     {
-        var (context, eventBus, _, _) = CreateContext();
+        var eventBusMock = new Mock<IEventBus>();
+        eventBusMock.SetupGet(b => b.ApplicationId).Returns("TestApp");
+        eventBusMock.Setup(b => b.Send(It.IsAny<CreateOrderCommand>(), It.IsAny<Type>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("transport unavailable"));
+
+        var sagaStoreMock = new Mock<ISagaStore>();
+        var currentStep = new OrderCreatedEvent { OrderId = Guid.NewGuid() };
+        var context = new SagaContext<OrderCreatedEvent>(
+            Guid.NewGuid(), currentStep, typeof(SagaContextCancellationTests),
+            eventBusMock.Object, sagaStoreMock.Object, Mock.Of<ISagaIdGenerator>(),
+            Mock.Of<ISagaCompensationCoordinator>(), Mock.Of<IMessageScheduler>());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            context.SendWithTracking(new CreateOrderCommand()).ThenMarkAsComplete());
+
+        sagaStoreMock.Verify(s => s.LogStepAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<Type>(),
+                It.IsAny<StepStatus>(), It.IsAny<Type>(), It.IsAny<object?>(), (Common.SagaSteps.SagaStepFailureInfo?)null, It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    // Cancellation behavior is consistent across all four WithTracking entry points: none of them accept a
+    // token, and a pre-cancelled terminal token prevents each deferred operation the same way.
+    [Theory]
+    [InlineData("Publish")]
+    [InlineData("Respond")]
+    [InlineData("Schedule")]
+    public async Task Cancelled_Terminal_Token_Prevents_Every_Deferred_WithTracking_Operation(string kind)
+    {
+        var (context, eventBus, _, scheduler) = CreateContext();
         using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
 
-        await context.SendWithTracking(new CreateOrderCommand(), cts.Token).ThenMarkAsComplete();
+        ISagaStepFluent tracked = kind switch
+        {
+            "Publish" => context.PublishWithTracking(new OrderCreatedEvent()),
+            "Respond" => context.RespondWithTracking(new CreateOrderCommand(), new OrderCreatedResponse()),
+            "Schedule" => context.ScheduleWithTracking(new OrderCreatedEvent(), ScheduleDelay.FiveSeconds),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind))
+        };
 
-        eventBus.Verify(b => b.Send(It.IsAny<CreateOrderCommand>(), It.IsAny<Type>(), It.IsAny<Guid>(), cts.Token), Times.Once);
+        await Assert.ThrowsAsync<OperationCanceledException>(() => tracked.ThenMarkAsComplete(cts.Token));
+
+        eventBus.Verify(b => b.Publish(It.IsAny<OrderCreatedEvent>(), It.IsAny<Type>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        eventBus.Verify(b => b.Respond(It.IsAny<CreateOrderCommand>(), It.IsAny<OrderCreatedResponse>(), It.IsAny<Type>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        scheduler.Verify(s => s.ScheduleAsync(It.IsAny<IMessage>(), It.IsAny<IMessage>(), It.IsAny<Type>(), It.IsAny<Guid>(),
+            It.IsAny<ScheduleDelay>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // --- Explicit generic terminal step selection --------------------------------------------------

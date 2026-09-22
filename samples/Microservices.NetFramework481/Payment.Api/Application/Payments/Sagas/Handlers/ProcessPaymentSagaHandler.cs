@@ -82,7 +82,7 @@ public sealed class ProcessPaymentSagaHandler(
         catch (OperationCanceledException ex)
         {
             await Context.Publish(new PaymentProcessedFailedEvent(ex.Message) { OrderId = message.OrderId }, cancellationToken);
-            await Context.MarkAsCancelled<StockReservedEvent>(ex);
+            await Context.MarkAsCancelled<StockReservedEvent>(ex, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -99,11 +99,11 @@ public sealed class ProcessPaymentSagaHandler(
             if (payment != null && payment.Status == PaymentStatus.Completed)
                 await paymentRepository.UpdateStatusAsync(payment.Id, PaymentStatus.Refunded, cancellationToken);
 
-            await Context.MarkAsCompensated<ShipmentScheduledFailedEvent>();
+            await Context.MarkAsCompensated<ShipmentScheduledFailedEvent>(cancellationToken);
         }
         catch (Exception ex)
         {
-            await Context.MarkAsCompensationFailed<ShipmentScheduledFailedEvent>(ex);
+            await Context.MarkAsCompensationFailed<ShipmentScheduledFailedEvent>(ex, cancellationToken);
         }
     }
 }

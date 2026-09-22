@@ -16,7 +16,7 @@ public class DeliverOrderSagaHandler : CoordinatedSagaHandler<OrderShippedEvent,
         await Context.PublishWithTracking(new OrderDeliveredEvent
         {
             OrderId = command.OrderId
-        }, cancellationToken)
-            .ThenMarkAsComplete();
+        })
+            .ThenMarkAsComplete(cancellationToken);
     }
 }

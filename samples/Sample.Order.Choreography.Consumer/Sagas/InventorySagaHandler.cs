@@ -30,7 +30,7 @@ public sealed class InventorySagaHandler :
             },
             cancellationToken);
 
-        await Context.MarkAsComplete<OrderCreatedEvent>();
+        await Context.MarkAsComplete<OrderCreatedEvent>(cancellationToken);
     }
 
     public async Task CompensateAsync(
@@ -45,7 +45,7 @@ public sealed class InventorySagaHandler :
         // Release inventory because payment failed.
         InventoryService.ReleaseStock(failed.OrderId);
 
-        await Context.MarkAsCompensated<PaymentFailedEvent>();
+        await Context.MarkAsCompensated<PaymentFailedEvent>(cancellationToken);
     }
 
     public async Task CompensateAsync(
@@ -60,6 +60,6 @@ public sealed class InventorySagaHandler :
         // Release inventory because the paid order could not be shipped.
         InventoryService.ReleaseStock(failed.OrderId);
 
-        await Context.MarkAsCompensated<OrderShippingFailedEvent>();
+        await Context.MarkAsCompensated<OrderShippingFailedEvent>(cancellationToken);
     }
 }

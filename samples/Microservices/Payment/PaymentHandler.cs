@@ -7,7 +7,7 @@ public sealed class PaymentHandler:CoordinatedResponsiveSagaHandler<ProcessPayme
         if (message.InjectFailure)
             throw new InvalidOperationException("Injected payment failure.");
         Context.Data.OrderId=message.OrderId;
-        await Context.RespondWithTracking(message,new PaymentSucceededResponse{OrderId=message.OrderId},token)
+        await Context.RespondWithTracking(message,new PaymentSucceededResponse{OrderId=message.OrderId})
             .ThenMarkAsComplete<ProcessPaymentCommand>(token);
     }
 }

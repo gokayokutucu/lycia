@@ -61,7 +61,7 @@ public sealed class ScheduleShipmentSagaHandler(
         catch (OperationCanceledException ex)
         {
             await Context.Publish(new ShipmentScheduledFailedEvent(ex.Message) { OrderId = message.OrderId }, cancellationToken);
-            await Context.MarkAsCancelled<PaymentProcessedEvent>(ex);
+            await Context.MarkAsCancelled<PaymentProcessedEvent>(ex, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -77,11 +77,11 @@ public sealed class ScheduleShipmentSagaHandler(
             var delivery = await deliveryRepository.GetByOrderIdAsync(message.OrderId, cancellationToken);
             if (delivery != null)
                 await deliveryRepository.UpdateStatusAsync(delivery.Id, DeliveryStatus.Cancelled, cancellationToken);
-            await Context.MarkAsCompensated<CustomerNotifiedFailedEvent>();
+            await Context.MarkAsCompensated<CustomerNotifiedFailedEvent>(cancellationToken);
         }
         catch (Exception ex)
         {
-            await Context.MarkAsCompensationFailed<CustomerNotifiedFailedEvent>(ex);
+            await Context.MarkAsCompensationFailed<CustomerNotifiedFailedEvent>(ex, cancellationToken);
         }
     }
 }

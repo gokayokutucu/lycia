@@ -13,7 +13,7 @@ public sealed class CheckoutSagaHandler : StartCoordinatedSagaHandler<StartCheck
     {
         Context.Data.OrderId = message.OrderId; Context.Data.Status = "CreatingOrder";
         Context.Data.FailAt = message.FailAt;
-        await Context.SendWithTracking(new CreateOrderCommand { OrderId = message.OrderId }, token)
+        await Context.SendWithTracking(new CreateOrderCommand { OrderId = message.OrderId })
             .ThenMarkAsComplete<StartCheckoutCommand>(token);
     }
     public async Task HandleSuccessResponseAsync(OrderCreatedResponse response, CancellationToken token = default)
@@ -23,7 +23,7 @@ public sealed class CheckoutSagaHandler : StartCoordinatedSagaHandler<StartCheck
         {
             OrderId=response.OrderId,
             InjectFailure=string.Equals(Context.Data.FailAt,"inventory",StringComparison.OrdinalIgnoreCase)
-        },token).ThenMarkAsComplete<OrderCreatedResponse>(token);
+        }).ThenMarkAsComplete<OrderCreatedResponse>(token);
     }
     public Task HandleFailResponseAsync(OrderCreatedResponse response, FailResponse fail, CancellationToken token=default)=>Fail<OrderCreatedResponse>(token);
     public async Task HandleSuccessResponseAsync(InventoryReservedResponse response,CancellationToken token=default)
@@ -33,11 +33,11 @@ public sealed class CheckoutSagaHandler : StartCoordinatedSagaHandler<StartCheck
         {
             OrderId=response.OrderId,
             InjectFailure=string.Equals(Context.Data.FailAt,"payment",StringComparison.OrdinalIgnoreCase)
-        },token).ThenMarkAsComplete<InventoryReservedResponse>(token);
+        }).ThenMarkAsComplete<InventoryReservedResponse>(token);
     }
     public Task HandleFailResponseAsync(InventoryReservedResponse response,FailResponse fail,CancellationToken token=default)=>Fail<InventoryReservedResponse>(token);
     public async Task HandleSuccessResponseAsync(PaymentSucceededResponse response,CancellationToken token=default)
-    { Context.Data.Status="Shipping"; await Context.SendWithTracking(new ShipOrderCommand { OrderId=response.OrderId },token).ThenMarkAsComplete<PaymentSucceededResponse>(token); }
+    { Context.Data.Status="Shipping"; await Context.SendWithTracking(new ShipOrderCommand { OrderId=response.OrderId }).ThenMarkAsComplete<PaymentSucceededResponse>(token); }
     public Task HandleFailResponseAsync(PaymentSucceededResponse response,FailResponse fail,CancellationToken token=default)=>Fail<PaymentSucceededResponse>(token);
     public async Task HandleSuccessResponseAsync(OrderShippedResponse response,CancellationToken token=default)
     { Context.Data.Status="Completed"; Context.Data.IsCompleted=true; await Context.Publish(new CheckoutCompletedEvent { OrderId=response.OrderId },token); await Context.MarkAsComplete<OrderShippedResponse>(token); }

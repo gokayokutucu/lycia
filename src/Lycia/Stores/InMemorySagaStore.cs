@@ -42,16 +42,18 @@ public class InMemorySagaStore(
 
     /// <inheritdoc />
     public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
-        Type handlerType, object? payload, Exception? exception)
+        Type handlerType, object? payload, Exception? exception, CancellationToken cancellationToken = default)
     {
-        return LogStepAsync(sagaId, messageId, parentMessageId, stepType, status, handlerType, payload, 
-            new SagaStepFailureInfo("Exception occurred", exception?.GetType().Name, exception?.ToString()  ));
+        return LogStepAsync(sagaId, messageId, parentMessageId, stepType, status, handlerType, payload,
+            new SagaStepFailureInfo("Exception occurred", exception?.GetType().Name, exception?.ToString()), cancellationToken);
     }
-    
+
     /// <inheritdoc />
     public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
-        Type handlerType, object? payload, SagaStepFailureInfo? failureInfo)
+        Type handlerType, object? payload, SagaStepFailureInfo? failureInfo,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var stepDict = _stepLogs.GetOrAdd(sagaId, _ => new ConcurrentDictionary<string, SagaStepMetadata>());
         var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
 
@@ -260,12 +262,13 @@ public class InMemorySagaStore(
     }
 
     /// <inheritdoc />
-    public Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data)
+    public Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data, CancellationToken cancellationToken = default)
         where TSagaData : SagaData
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (data is null) return Task.CompletedTask;
         data.SagaId = sagaId;
-        
+
         _sagaData[sagaId] = data;
         return Task.CompletedTask;
     }
@@ -300,9 +303,11 @@ public class InMemorySagaStore(
     }
 
     /// <inheritdoc />
-    public Task<long> SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData data, long expectedVersion)
+    public Task<long> SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData data, long expectedVersion,
+        CancellationToken cancellationToken = default)
         where TSagaData : SagaData
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (data is null) throw new ArgumentNullException(nameof(data));
 
         lock (_versionLock)
@@ -321,9 +326,11 @@ public class InMemorySagaStore(
     }
 
     /// <inheritdoc />
-    public Task<(TSagaData Data, long Version)> LoadSagaDataWithVersionAsync<TSagaData>(Guid sagaId)
+    public Task<(TSagaData Data, long Version)> LoadSagaDataWithVersionAsync<TSagaData>(Guid sagaId,
+        CancellationToken cancellationToken = default)
         where TSagaData : SagaData, new()
     {
+        cancellationToken.ThrowIfCancellationRequested();
         lock (_versionLock)
         {
             if (!_sagaVersions.TryGetValue(sagaId, out var version)) version = 0L;

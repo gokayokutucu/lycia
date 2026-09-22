@@ -60,16 +60,19 @@ return {1, tonumber(ARGV[1]) + 1}";
 
     /// <inheritdoc />
     public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
-        Type handlerType, object? payload, Exception? exception)
+        Type handlerType, object? payload, Exception? exception, CancellationToken cancellationToken = default)
     {
         return LogStepAsync(sagaId, messageId, parentMessageId, stepType, status, handlerType, payload,
-            new SagaStepFailureInfo("Exception occurred", exception?.GetType().Name, exception?.ToString()));
+            new SagaStepFailureInfo("Exception occurred", exception?.GetType().Name, exception?.ToString()),
+            cancellationToken);
     }
 
     /// <inheritdoc />
     public async Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
-        Type handlerType, object? payload, SagaStepFailureInfo? failureInfo)
+        Type handlerType, object? payload, SagaStepFailureInfo? failureInfo,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
         var applicationId = ApplicationId();
         var messageTypeName = SagaStoreLogicHelper.GetMessageTypeName(stepType);
@@ -129,7 +132,7 @@ return {1, tonumber(ARGV[1]) + 1}";
             }
 
             // Optionally: add Task.Delay(10 * attempt) for backoff
-            await Task.Delay(5 * attempt);
+            await Task.Delay(5 * attempt, cancellationToken);
         }
     }
 
@@ -313,19 +316,25 @@ return {1, tonumber(ARGV[1]) + 1}";
     }
 
     /// <inheritdoc />
-    public async Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data)
+    public async Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data,
+        CancellationToken cancellationToken = default)
         where TSagaData : SagaData
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (data is null) return;
         data.SagaId = sagaId;
-        // Set the saga data in Redis, applying TTL/expiration if configured in options
+        // Set the saga data in Redis, applying TTL/expiration if configured in options. StackExchange.Redis
+        // does not accept a CancellationToken on this call; the guard above still stops an already-cancelled
+        // operation from starting.
         await redisDb.StringSetAsync(SagaDataKey(sagaId), JsonHelper.SerializeSafe(data), _options.StepLogTtl);
     }
 
     /// <inheritdoc />
-    public async Task<long> SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData data, long expectedVersion)
+    public async Task<long> SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData data, long expectedVersion,
+        CancellationToken cancellationToken = default)
         where TSagaData : SagaData
     {
+        cancellationToken.ThrowIfCancellationRequested();
         data.SagaId = sagaId;
         data.Version = expectedVersion + 1;
         var newDataJson = JsonHelper.SerializeSafe(data);
@@ -348,9 +357,11 @@ return {1, tonumber(ARGV[1]) + 1}";
     }
 
     /// <inheritdoc />
-    public async Task<(TSagaData Data, long Version)> LoadSagaDataWithVersionAsync<TSagaData>(Guid sagaId)
+    public async Task<(TSagaData Data, long Version)> LoadSagaDataWithVersionAsync<TSagaData>(Guid sagaId,
+        CancellationToken cancellationToken = default)
         where TSagaData : SagaData, new()
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var dataJson = await redisDb.StringGetAsync(SagaDataKey(sagaId));
         if (!dataJson.HasValue) return (new TSagaData(), 0);
 
