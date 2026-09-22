@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="assets/transparent_logo.png" alt="Lycia Logo" width="220">
-</p>
+![Lycia Logo](https://raw.githubusercontent.com/gokayokutucu/lycia/main/assets/transparent_logo.png)
 
 # Lycia
 
@@ -9,7 +7,6 @@
 ![Target Framework](https://img.shields.io/badge/.NET-netstandard2.0%20%7C%20net8.0%20%7C%20net9.0%20%7C%20net10.0-blue)
 [![Build](https://github.com/gokayokutucu/lycia/actions/workflows/dotnet.yml/badge.svg)](https://github.com/gokayokutucu/lycia/actions/workflows/dotnet.yml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![GitHub release](https://img.shields.io/github/v/release/gokayokutucu/lycia)](https://github.com/gokayokutucu/lycia/releases)
 
 **Lycia** is a message-driven saga framework for .NET applications.
 
@@ -37,6 +34,14 @@ boundary narrow the windows in which duplicates or lost intent can occur; none o
 fundamental guarantee.
 
 For architecture, internals and contributor documentation, see [DEVELOPERS.md](DEVELOPERS.md).
+
+---
+
+## Project History
+
+Lycia has been in development since May 28, 2023, with the goal of making distributed saga workflows easier
+to model, operate, and understand. The name is inspired by the Lycian Way and the idea of turning difficult
+paths into understandable routes.
 
 ---
 
@@ -83,9 +88,15 @@ dotnet add package Lycia.Extensions.RabbitMq
 Add a persistence provider. A SagaStore provider is required:
 
 ```bash
-dotnet add package Lycia.Persistence.PostgreSql
-# or: Lycia.Persistence.SqlServer / Lycia.Persistence.Redis / Lycia.Persistence.InMemory
+dotnet add package Lycia.Persistence.Redis
 ```
+
+Alternatives:
+
+- `Lycia.Persistence.PostgreSql` — relational, and required for the `LocalAtomic` boundary (see
+  [Atomic persistence boundary](#atomic-persistence-boundary))
+- `Lycia.Persistence.SqlServer` — relational, same `LocalAtomic` support as PostgreSQL
+- `Lycia.Persistence.InMemory` — tests and local development; requires no external infrastructure
 
 Optional:
 
@@ -114,10 +125,14 @@ services.AddLycia(configuration, lycia =>
 
     lycia
         .UsePersistence()
-            .WithPostgreSqlSagaStore(options =>
+            .WithRedisSagaStore(options =>
                 options.ConnectionString = configuration.GetConnectionString("Lycia"));
 });
 ```
+
+`WithRedisSagaStore` is one of several provider methods on `UsePersistence()`; `WithPostgreSqlSagaStore(...)`
+and `WithSqlServerSagaStore(...)` are the relational equivalents, used when the [atomic persistence
+boundary](#atomic-persistence-boundary) or [Split Store](#split-store) is needed.
 
 The DSL is organized by concern:
 
@@ -572,13 +587,26 @@ are always `Independent`.
 ### Split Store
 
 Split Store makes PostgreSQL or SQL Server the canonical store and Redis an asynchronously reconciled,
-rebuildable operational projection:
+rebuildable operational projection. Either relational provider offers the same canonical SagaStore, Inbox
+and Outbox role; Redis is always the operational side:
 
 ```csharp
 lycia.UsePersistence()
     .WithPostgreSqlCanonicalSagaStore(options => options.ConnectionString = postgres)
     .WithPostgreSqlInbox(options => options.ConnectionString = postgres)
     .WithPostgreSqlOutbox(options => options.ConnectionString = postgres)
+    .WithRedisOperationalSagaStore(options => options.ConnectionString = redis)
+    .RequireAtomicBoundary()
+    .UseSplitStore();
+```
+
+SQL Server is the equivalent canonical provider, with the same Inbox/Outbox and Split Store calls:
+
+```csharp
+lycia.UsePersistence()
+    .WithSqlServerCanonicalSagaStore(options => options.ConnectionString = sqlServer)
+    .WithSqlServerInbox(options => options.ConnectionString = sqlServer)
+    .WithSqlServerOutbox(options => options.ConnectionString = sqlServer)
     .WithRedisOperationalSagaStore(options => options.ConnectionString = redis)
     .RequireAtomicBoundary()
     .UseSplitStore();
@@ -795,14 +823,17 @@ is the single file [`infrastructure-versions.json`](infrastructure-versions.json
 service images, the compose files and this table are all checked against it, so none of them can drift
 silently.
 
-| Integration | Supported minimum | Tested minimum | Tested current | Not supported |
-| --- | --- | --- | --- | --- |
-| RabbitMQ | 3.13 | 3.13 | 4.3 | RabbitMQ Streams and Super Streams (not implemented) |
-| Redis | 6.2 | 6.2 | 8.10 | Redis Cluster |
-| PostgreSQL | 14 | 14 | 18 | — |
-| SQL Server | 2017 | 2017 (CU31) | 2025 (CU9) | — |
-| Kafka | 3.8 | 3.8 | 4.3 | Kafka Share Groups (KIP-932) |
-| NATS | 2.9 | 2.9 | 2.15 | — |
+| Integration | Supported minimum | Tested minimum | Tested current | Current capability | Not supported |
+| --- | --- | --- | --- | --- | --- |
+| RabbitMQ | 3.13 | 3.13 | 4.3 | Transport; publisher confirms (`Published`/`ConfirmationUnknown`); native TTL + DLX scheduling | RabbitMQ Streams and Super Streams (not implemented) |
+| Redis | 6.2 | 6.2 | 8.10 | SagaStore, Inbox, Outbox; Split Store operational projection; scheduling store | Redis Cluster |
+| PostgreSQL | 14 | 14 | 18 | SagaStore, Inbox, Outbox; `LocalAtomic` boundary; Split Store canonical side; journal | — |
+| SQL Server | 2017 | 2017 (CU31) | 2025 (CU9) | SagaStore, Inbox, Outbox; `LocalAtomic` boundary; Split Store canonical side; journal | — |
+| Kafka | 3.8 | 3.8 | 4.3 | Transport (no publisher confirms; Outbox stays `ConfirmationUnknown`) | Kafka Share Groups (KIP-932) |
+| NATS | 2.9 | 2.9 | 2.15 | Transport; JetStream confirms (`Published`) when `UseJetStream = true` (default); Core NATS has no confirmation | — |
+
+`Lycia.Persistence.InMemory` requires no external infrastructure and therefore has no version entry above —
+it is for tests and local development, not a durable store.
 
 The four terms are kept apart on purpose:
 
@@ -871,16 +902,6 @@ Deferred work, not available today:
 - delivery is at least once, handlers remain idempotent, and retries are bounded
 - transport behavior stays outside the core
 - operational guarantees are documented without exactly-once claims
-
----
-
-## Project History
-
-Lycia began on **May 28, 2023** with the goal of making distributed saga workflows easier to model,
-operate and understand. The name is inspired by the Lycian Way and the idea of turning difficult paths
-into understandable routes.
-
----
 
 ## License
 
