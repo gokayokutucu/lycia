@@ -86,10 +86,10 @@ public interface ISchedulingSagaContext
     /// <summary>
     /// Creates a deferred tracked schedule operation for a predefined delay bucket; the underlying schedule
     /// call is not made until a terminal method on the returned <see cref="ISagaStepFluent"/> is awaited, at
-    /// which point the terminal method's <see cref="CancellationToken"/> governs the whole operation.
+    /// which point the terminal method's <see cref="CancellationToken"/> governs the whole operation. This
+    /// entry point never accepts a token itself.
     /// </summary>
-    ISagaStepFluent ScheduleWithTracking<TMessage>(TMessage message, ScheduleDelay delay,
-        CancellationToken cancellationToken = default) where TMessage : IMessage;
+    ISagaStepFluent ScheduleWithTracking<TMessage>(TMessage message, ScheduleDelay delay) where TMessage : IMessage;
 }
 
 /// <summary>Dispatches a due durable record with its original Send, Publish, or Respond semantic.</summary>

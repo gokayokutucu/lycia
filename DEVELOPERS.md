@@ -697,7 +697,7 @@ eager-connection risk is also covered directly against `LyciaReliabilityDiagnost
 | Pattern | State | Handlers |
 | --- | --- | --- |
 | Choreography (reactive) | Stateless, no `TSagaData`; compensation through `ISagaCompensationHandler<T>` | `StartReactiveSagaHandler<TStart>`, `ReactiveSagaHandler<TMessage>` |
-| Sequential orchestration (coordinated) | `TSagaData`; failures compensate through `CompensateAndBubbleUp()` | `StartCoordinatedSagaHandler<TStart, TSagaData>`, `CoordinatedSagaHandler<TMessage, TSagaData>` |
+| Sequential orchestration (coordinated) | `TSagaData`; failures compensate through `Context.ContinueCompensation().ThenMarkAsCompensated<T>().ThenBubbleUp(ct)` (or the lower-level `CompensateAndBubbleUp<T>(ct)` it wraps) | `StartCoordinatedSagaHandler<TStart, TSagaData>`, `CoordinatedSagaHandler<TMessage, TSagaData>` |
 | Request-response orchestration | `TSagaData`; each step sends a command and continues on the response | `StartCoordinatedResponsiveSagaHandler<TStart, TResponse, TSagaData>`, `CoordinatedResponsiveSagaHandler<TMessage, TResponse, TSagaData>`, `IResponseSagaHandler<TResponse>` |
 
 `Sample.Order.Orchestration.Consumer` and the Microservices sample use request-response orchestration.
@@ -705,6 +705,126 @@ eager-connection risk is also covered directly against `LyciaReliabilityDiagnost
 Reactive handlers guard against duplicates with `Context.IsAlreadyCompleted<T>()`, governed by
 `SagaOptions.DefaultIdempotency` (default `true`) and overridable per handler through
 `EnforceIdempotency`.
+
+---
+
+## CancellationToken ownership in deferred/composite fluent APIs
+
+Two APIs are deferred/composite: nothing they build executes until a terminal method is awaited, and one
+`CancellationToken` governs the whole thing. Both follow the same rule: **the entry method never accepts
+a token; only the terminal method does.**
+
+- **Tracked messaging** (`SendWithTracking`/`PublishWithTracking`/`RespondWithTracking`/
+  `ScheduleWithTracking` → `ISagaStepFluent.Then...`). `ReactiveSagaStepFluent`/`CoordinatedSagaStepFluent`
+  (`Lycia.Saga`) close over an `Func<CancellationToken, Task> operation` built by the entry method (for
+  example `ct => Send(nextCommand, ct)`) and run it from `RunAsync(CancellationToken, Func<CancellationToken, Task> transition)`:
+  ```csharp
+  private async Task RunAsync(CancellationToken cancellationToken, Func<CancellationToken, Task> transition)
+  {
+      cancellationToken.ThrowIfCancellationRequested();
+      await operation(cancellationToken);
+      await transition(cancellationToken);
+  }
+  ```
+  A pre-cancelled terminal token throws before `operation` runs at all. There used to be a second,
+  captured token accepted by the WithTracking call itself, resolved against the terminal token by
+  `SagaStepFluentToken.Resolve(terminal, captured)` (terminal wins unless left `default`, in which case the
+  captured token was used as a fallback). That type, and the captured-token constructor parameters on both
+  fluent classes, are removed: there is now exactly one token per deferred tracked operation.
+- **Compensation continuation** (`ContinueCompensation()` → `ICompensationContinuation`/`ICompensatedContinuation`,
+  below) follows the identical shape, deliberately, for consistency.
+
+This invariant does not extend to plain synchronous accessors or to APIs that were never deferred
+(`Context.Send`/`Publish`/`Respond`/`Schedule`, `MarkAsComplete`, etc., which already took a token
+directly and still do).
+
+## Coordinated compensation continuation
+
+### Staged fluent interfaces
+
+```csharp
+ICompensationContinuation ContinueCompensation();   // on ISagaContext<TInitialMessage>
+
+public interface ICompensationContinuation
+{
+    Task ThenMarkAsCompensated<TStep>(CancellationToken cancellationToken) where TStep : IMessage;
+    ICompensatedContinuation ThenMarkAsCompensated<TStep>() where TStep : IMessage;
+}
+
+public interface ICompensatedContinuation
+{
+    Task ThenBubbleUp(CancellationToken cancellationToken);
+}
+```
+
+(`Lycia.Saga.Abstractions.Compensating`, implemented by `SagaCompensationContinuation`/
+`SagaCompensatedContinuation` in `Lycia.Saga.Compensating`.) The two-parameter-list overload of
+`ThenMarkAsCompensated<TStep>` is what makes `ThenBubbleUp` unreachable before it: the no-token overload
+is the only one that returns `ICompensatedContinuation`, so the compiler only exposes `ThenBubbleUp` after
+that specific call. `ContinueCompensation()` itself, and the no-token `ThenMarkAsCompensated<TStep>()`,
+touch neither the SagaStore nor the compensation coordinator - `SagaCompensationContinuation` holds only a
+context reference, and `SagaCompensatedContinuation` holds only a closed-over `Func<CancellationToken, Task>`
+(`context.CompensateAndBubbleUp<TStep>`, a method-group conversion - no reflection needed, unlike the
+tracked-messaging fluent classes, because `ContinueCompensation()` is an ordinary instance method on an
+already strongly-typed `ISagaContext<TInitialMessage>`, not something reached through a non-generic factory).
+
+- **Two-stage terminal**: `ThenMarkAsCompensated<TStep>(ct)` calls only `context.MarkAsCompensated<TStep>(ct)`
+  - the same call `Context.MarkAsCompensated<TStep>(ct)` makes directly. No propagation.
+- **Three-stage**: `ThenMarkAsCompensated<TStep>()` (no token) defers; `ThenBubbleUp(ct)` calls only
+  `context.CompensateAndBubbleUp<TStep>(ct)`. It does **not** also call `MarkAsCompensated` first - doing
+  both would double-log the step, and `CompensateParentAsync`'s own idempotency guard (below) would then
+  see the step already `Compensated` and skip propagation entirely. `CompensateAndBubbleUp` already logs
+  `Compensated` as part of its own walk.
+
+### `SagaCompensationCoordinator.CompensateParentAsync`
+
+1. Reads the current step's recorded status; returns immediately if it is already `Compensated` or
+   `CompensationFailed` (redelivery/idempotency guard).
+2. Logs the current step `Compensated`.
+3. Reads the current step's `ParentMessageId` and looks up that step in the saga's step snapshot,
+   skipping one orchestrator response hop if the immediate parent is a `Start...Responsive...` handler's
+   response record (`FindLogicalParentFromSnapshot`). A root step (`ParentMessageId == Guid.Empty`, or no
+   resolvable parent) returns after step 2 - root steps have no propagation requirement.
+4. Deserializes the parent's original message and resolves its compensation handler
+   (`ISagaCompensationHandler<T>` or the parent's own generated `CompensateAsyncInternal`), then invokes it
+   **synchronously, in-process**.
+
+### Crash safety: what is and is not closed
+
+**Not closed.** Steps 2 and 4 are not one atomic unit, and there is no durable record of "propagation to
+the parent is still pending" independent of the child's own `Compensated` status. If the process
+crashes, or the parent handler throws, after step 2 commits but before step 4 finishes, nothing retries
+step 4: the child already reads as `Compensated`, so the guard in step 1 makes any later
+`CompensateParentAsync` call for that same child return immediately without invoking the parent, even
+though the parent's own compensation never ran. `CompensationContinuationTests.KnownGap_...` proves this
+concretely (a real, provider-free reproduction, not a description): pre-seed the child at `Compensated`
+with no record of the parent, call `ThenBubbleUp` again, and no handler runs.
+
+**Closed as part of this change.** Before, `StepSpecificSagaContextAdapter<TCurrentStepAdapter>` (the
+reactive fluent's context adapter) and the base, non-generic-data `SagaContext<TInitialMessage>` both
+implemented `CompensateAndBubbleUp<TStep>` as `return Task.CompletedTask;` - a silent no-op. Every
+reactive saga's bubble-up call did nothing at all, with no exception and no log line. Both now delegate to
+`compensationCoordinator.CompensateParentAsync(...)`, the same call the coordinated contexts already made
+(`CompensationContinuationTests.ThenBubbleUp_On_A_Reactive_Context_...` proves this against a real
+`InMemorySagaStore`, not a mock).
+
+**Idempotent against ordinary redelivery**, which is different from the crash window above: calling
+`ContinueCompensation()...ThenBubbleUp(ct)` twice for the *same already-fully-completed* propagation (the
+parent's handler already ran and the child is `Compensated`) invokes the parent's handler only once - the
+guard in step 1 is correct and load-bearing for this case (`CompensationContinuationTests.ThenBubbleUp_Is_Idempotent_On_Retry_...`).
+It only becomes a problem when it fires between steps 2 and 4 of the *same* attempt.
+
+**What a real fix needs**, if undertaken as a separate change: a durable "propagation pending for child
+X → parent Y" record independent of the child's terminal status, so a recovery pass can tell "child
+Compensated, propagation not yet done" apart from "child Compensated, propagation already done." That
+implies its own persistence capability (schema in every provider, not just relational ones), a claim/lease
+mechanism so concurrent replicas do not invoke the same parent handler twice, and a dedicated recovery
+worker - **not** the Outbox worker (it drives transport delivery, not in-process handler invocation) and
+**not** the Split Store `ReconciliationWorker` (it repairs the Redis projection from canonical state; it
+has no concept of pending compensation propagation). This was scoped out of the current change: it is
+sized like the Outbox or Split Store subsystems themselves, each a dedicated milestone phase in this
+repository's history, not a corollary of a fluent-API/CancellationToken cleanup. See `PROJECT_LEDGER.md`
+for the current backlog entry.
 
 ---
 

@@ -20,12 +20,14 @@ public interface IVersionedSagaStore
     /// <exception cref="Lycia.Saga.Exceptions.SagaConcurrencyException">
     /// Thrown when the stored version does not match <paramref name="expectedVersion"/>.
     /// </exception>
-    Task<long> SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData data, long expectedVersion)
+    Task<long> SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData data, long expectedVersion,
+        CancellationToken cancellationToken = default)
         where TSagaData : SagaData;
 
     /// <summary>
     /// Loads the saga data together with its current version. Returns version 0 when the saga has no data yet.
     /// </summary>
-    Task<(TSagaData Data, long Version)> LoadSagaDataWithVersionAsync<TSagaData>(Guid sagaId)
+    Task<(TSagaData Data, long Version)> LoadSagaDataWithVersionAsync<TSagaData>(Guid sagaId,
+        CancellationToken cancellationToken = default)
         where TSagaData : SagaData, new();
 }

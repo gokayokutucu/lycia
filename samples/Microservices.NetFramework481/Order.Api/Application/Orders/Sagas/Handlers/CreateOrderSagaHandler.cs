@@ -85,7 +85,7 @@ public sealed class CreateOrderSagaHandler(
         catch (OperationCanceledException ex)
         {
             logger.LogError(ex, "💥 [CreateOrderSaga] Saga was canceled");
-            await Context.MarkAsCancelled<CreateOrderSagaCommand>(ex);
+            await Context.MarkAsCancelled<CreateOrderSagaCommand>(ex, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -98,11 +98,11 @@ public sealed class CreateOrderSagaHandler(
     {
         try
         {
-            await Context.MarkAsCompensated<CreateOrderSagaCommand>();
+            await Context.MarkAsCompensated<CreateOrderSagaCommand>(cancellationToken);
         }
         catch (Exception ex)
         {
-            await Context.MarkAsCompensationFailed<CreateOrderSagaCommand>(ex);
+            await Context.MarkAsCompensationFailed<CreateOrderSagaCommand>(ex, cancellationToken);
         }
     }
 
@@ -117,11 +117,11 @@ public sealed class CreateOrderSagaHandler(
                 await orderRepository.UpdateAsync(order, cancellationToken);
             }
 
-            await Context.MarkAsCompensated<StockReservedFailedEvent>();
+            await Context.MarkAsCompensated<StockReservedFailedEvent>(cancellationToken);
         }
         catch (Exception ex)
         {
-            await Context.MarkAsCompensationFailed<StockReservedFailedEvent>(ex);
+            await Context.MarkAsCompensationFailed<StockReservedFailedEvent>(ex, cancellationToken);
         }
     }
 }

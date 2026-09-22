@@ -234,12 +234,111 @@ public sealed class InventorySagaHandler
 }
 ```
 
+### Deferred tracked operations
+
+`SendWithTracking`, `PublishWithTracking`, `RespondWithTracking` and `ScheduleWithTracking` defer the
+outgoing operation until a terminal `Then...` method on the returned fluent object is awaited - nothing
+is sent, published, responded or scheduled before that. **The `CancellationToken` belongs only to the
+terminal call**, never to the entry method, and that one token governs the whole deferred operation
+(the outgoing message and the saga-step transition that follows it):
+
+```csharp
+await Context
+    .SendWithTracking(command)
+    .ThenMarkAsComplete(cancellationToken);
+```
+
+Not `SendWithTracking(command, cancellationToken)` - the entry methods do not accept a token at all. The
+same rule applies to `PublishWithTracking`, `RespondWithTracking` and `ScheduleWithTracking`, and to the
+compensation continuation fluent API below.
+
 ### Handler failures
 
 When a handler throws, the saga handler base classes catch the exception, record the step as `Failed`
 in the SagaStore and start compensation; the message itself is acknowledged, not redelivered. The
 failure is logged as a warning and the handler's trace span is marked as an error with `exception.*`
 tags. Cancellation records the step as `Cancelled`.
+
+---
+
+## Compensation
+
+Several distinct things are all called "compensation," and Lycia keeps them separate:
+
+- **Business compensation** — your own undo logic (`inventory.ReleaseReservation(...)`, a refund, a
+  cancellation). Lycia never performs this; it only tracks that a step compensated and, optionally,
+  propagates that fact.
+- **`Context.Compensate(failedEvent, cancellationToken)`** — publishes a reactive compensation *event*.
+  This starts a choreography flow (other handlers' `CompensateAsync` react to that event); it is not the
+  same thing as coordinated parent-lineage bubble-up below.
+- **`Context.MarkAsCompensated<TStep>(cancellationToken)`** — a standalone, terminal state transition. It
+  marks the current step compensated in the SagaStore and stops there; nothing propagates further. Use
+  this for a root step, or any step with no logical parent to continue to.
+- **`Context.ContinueCompensation()`** — begins a coordinated compensation *continuation* for the current
+  step. It performs no business rollback and executes nothing by itself; it only returns a staged fluent
+  object with two valid next calls.
+- **`.ThenMarkAsCompensated<TStep>()`** (no token) — marks the step compensated as the first stage of a
+  three-stage chain and returns a continuation whose only member is `ThenBubbleUp`. Nothing runs until
+  that is awaited.
+- **`.ThenBubbleUp(cancellationToken)`** — terminal: continues compensation through the logical parent
+  (via `ParentMessageId`), invoking the parent's compensation handler. This is what "bubble up" means in
+  Lycia: parent-lineage propagation, never a global broadcast.
+
+**Root vs. intermediate.** A root/final step has no logical parent, so it only ever marks itself
+compensated:
+
+```csharp
+public override async Task CompensateStartAsync(
+    CreateOrderCommand command,
+    CancellationToken cancellationToken = default)
+{
+    await orderService.Cancel(command.OrderId);
+
+    await Context.MarkAsCompensated<CreateOrderCommand>(
+        cancellationToken);
+}
+```
+
+An intermediate coordinated step does its business compensation first, then marks itself compensated
+*and* continues to its logical parent:
+
+```csharp
+public override async Task CompensateAsync(
+    ReserveInventoryCommand command,
+    CancellationToken cancellationToken = default)
+{
+    await inventory.ReleaseReservation(command.OrderId);
+
+    await Context
+        .ContinueCompensation()
+        .ThenMarkAsCompensated<ReserveInventoryCommand>()
+        .ThenBubbleUp(cancellationToken);
+}
+```
+
+`ContinueCompensation()` never accepts a `CancellationToken`. As with
+[the deferred tracked operations above](#deferred-tracked-operations), **the token belongs only to the
+terminal call in the chain** — here, `ThenBubbleUp`. A two-stage form exists for when compensation
+completes at this step without a separate bubble-up call, equivalent to
+`MarkAsCompensated<TStep>(cancellationToken)` above:
+
+```csharp
+await Context
+    .ContinueCompensation()
+    .ThenMarkAsCompensated<TStep>(cancellationToken);
+```
+
+**Lineage, not global order.** `ParentMessageId` is the only field bubble-up traverses. A strictly
+sequential coordinated saga (A → B → C) makes bubble-up look like simple reverse-order compensation
+(C → B → A), but that is a special case of a single unbranched chain, not a rule: a saga with branching
+lineage (two children of the same parent) bubbles each branch independently toward its own parent, never
+across siblings. Reactive choreography compensation (`Context.Compensate(...)` and handlers reacting to
+the resulting event) has no such structure to traverse at all, and therefore no strict global
+reverse-delivery-order guarantee — handlers react as the compensation event reaches them.
+
+See [DEVELOPERS.md](DEVELOPERS.md#coordinated-compensation-continuation) for the compensation
+coordinator's parent-lookup algorithm, idempotency guarantees, and the currently known limits of
+bubble-up's crash recovery.
 
 ---
 

@@ -38,11 +38,11 @@ public sealed class CreateOrderSagaHandler :
         {
             // Cancel or remove the initially created order.
 
-            await Context.MarkAsCompensated<CreateOrderCommand>();
+            await Context.MarkAsCompensated<CreateOrderCommand>(cancellationToken);
         }
         catch
         {
-            await Context.MarkAsCompensationFailed<CreateOrderCommand>();
+            await Context.MarkAsCompensationFailed<CreateOrderCommand>(cancellationToken);
 
             throw;
         }
@@ -59,7 +59,7 @@ public sealed class CreateOrderSagaHandler :
 
         // Mark the order as cancelled because payment failed.
 
-        await Context.MarkAsCompensated<PaymentFailedEvent>();
+        await Context.MarkAsCompensated<PaymentFailedEvent>(cancellationToken);
     }
 
     public async Task CompensateAsync(
@@ -73,6 +73,6 @@ public sealed class CreateOrderSagaHandler :
 
         // Mark the order as cancelled because shipping failed.
 
-        await Context.MarkAsCompensated<OrderShippingFailedEvent>();
+        await Context.MarkAsCompensated<OrderShippingFailedEvent>(cancellationToken);
     }
 }

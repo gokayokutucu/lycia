@@ -11,30 +11,32 @@ namespace Lycia.Saga;
 
 // TInitialMessage is the type of message that the ISagaContext is primarily associated with.
 
+/// <summary>
+/// Terminal continuation for a deferred, coordinated tracked message operation created by
+/// <c>SendWithTracking</c>/<c>PublishWithTracking</c>/<c>RespondWithTracking</c>/<c>ScheduleWithTracking</c>.
+/// The underlying message operation does not run until a terminal <c>Then...</c> method here is awaited;
+/// that method's <see cref="CancellationToken"/> is the single token governing the whole deferred
+/// operation - both the outgoing message and the saga-step transition that follows it. The WithTracking
+/// call that created this instance never accepts a token of its own.
+/// </summary>
 public class CoordinatedSagaStepFluent<TInitialMessage, TSagaData>(
     ISagaContext<TInitialMessage, TSagaData> context,
-    Func<CancellationToken, Task> operation,
-    CancellationToken capturedCancellationToken = default) : ISagaStepFluent
+    Func<CancellationToken, Task> operation) : ISagaStepFluent
     where TInitialMessage : IMessage
     where TSagaData : SagaData
 {
-    public static object Create(Type stepType, Type sagaDataType, object context, Func<CancellationToken, Task> operation,
-        CancellationToken capturedCancellationToken = default)
+    public static object Create(Type stepType, Type sagaDataType, object context, Func<CancellationToken, Task> operation)
     {
         var open = typeof(CoordinatedSagaStepFluent<,>);
         var closed = open.MakeGenericType(stepType, sagaDataType);
-        return Activator.CreateInstance(closed, context, operation, capturedCancellationToken)!;
+        return Activator.CreateInstance(closed, context, operation)!;
     }
 
-    // Preferred: pass the token here, not to the WithTracking(...) call that created this instance.
-    // If the caller still supplied one there, it is used as a fallback when this token is left default,
-    // for source compatibility with the WithTracking(msg, cancellationToken).Then...() call shape.
     private async Task RunAsync(CancellationToken cancellationToken, Func<CancellationToken, Task> transition)
     {
-        var token = SagaStepFluentToken.Resolve(cancellationToken, capturedCancellationToken);
-        token.ThrowIfCancellationRequested();
-        await operation(token);
-        await transition(token);
+        cancellationToken.ThrowIfCancellationRequested();
+        await operation(cancellationToken);
+        await transition(cancellationToken);
     }
 
     /// <summary>Transitions the step the context was constructed for (the step being handled, not the outgoing message).</summary>
@@ -64,13 +66,17 @@ public class CoordinatedSagaStepFluent<TInitialMessage, TSagaData>(
     public Task ThenMarkAsCancelled<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage =>
         RunAsync(cancellationToken, token => context.MarkAsCancelled<TStep>(cancellationToken: token));
 
-    /// <summary>Transitions and bubbles up compensation for the step the context was constructed for.</summary>
+    /// <summary>
+    /// Transitions the step the context was constructed for to compensated. This does not bubble
+    /// compensation up to the logical parent; use <c>Context.ContinueCompensation()...ThenBubbleUp(...)</c>
+    /// or <c>Context.CompensateAndBubbleUp&lt;TStep&gt;(...)</c> for that.
+    /// </summary>
     public Task ThenMarkAsCompensated(CancellationToken cancellationToken = default) =>
-        RunAsync(cancellationToken, token => context.CompensateAndBubbleUp<TInitialMessage>(token));
+        RunAsync(cancellationToken, token => context.MarkAsCompensated<TInitialMessage>(token));
 
     /// <summary>Explicit form of <see cref="ThenMarkAsCompensated(CancellationToken)"/> naming the step at the call site.</summary>
     public Task ThenMarkAsCompensated<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage =>
-        RunAsync(cancellationToken, token => context.CompensateAndBubbleUp<TStep>(token));
+        RunAsync(cancellationToken, token => context.MarkAsCompensated<TStep>(token));
 
     public Task ThenMarkAsCompensationFailed(CancellationToken cancellationToken = default) =>
         RunAsync(cancellationToken, token => context.MarkAsCompensationFailed<TInitialMessage>(token));

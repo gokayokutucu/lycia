@@ -28,11 +28,14 @@ public class AuditShippingSagaHandler :
     {
         try
         {
-            await Context.CompensateAndBubbleUp<PaymentProcessedEvent>(cancellationToken);
+            await Context
+                .ContinueCompensation()
+                .ThenMarkAsCompensated<PaymentProcessedEvent>()
+                .ThenBubbleUp(cancellationToken);
         }
         catch (Exception)
         {
-            await Context.MarkAsCompensationFailed<PaymentProcessedEvent>();
+            await Context.MarkAsCompensationFailed<PaymentProcessedEvent>(cancellationToken);
             throw;
         }
     }

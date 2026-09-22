@@ -23,9 +23,10 @@ public interface ISagaStore
     /// <param name="handlerType">The type of the handler managing the saga step.</param>
     /// <param name="payload">Optional payload data associated with the saga step.</param>
     /// <param name="exception">An optional exception providing details in case of a failure.</param>
+    /// <param name="cancellationToken">A token to observe while awaiting the write.</param>
     /// <returns>A task that represents the asynchronous operation.</returns>
     Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
-        Type handlerType, object? payload, Exception? exception);
+        Type handlerType, object? payload, Exception? exception, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Logs a saga step's execution status along with optional payload data and failure information.
@@ -39,9 +40,11 @@ public interface ISagaStore
     /// <param name="handlerType">The type of the handler processing the saga step.</param>
     /// <param name="payload">An optional object containing additional payload data for the saga step.</param>
     /// <param name="failureInfo">Optional information about a failure, including the reason and exception details.</param>
+    /// <param name="cancellationToken">A token to observe while awaiting the write.</param>
     /// <returns>A task that represents the asynchronous operation.</returns>
     Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
-        Type handlerType, object? payload, SagaStepFailureInfo? failureInfo);
+        Type handlerType, object? payload, SagaStepFailureInfo? failureInfo,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Checks whether a specific step in a saga has already been completed.
@@ -102,7 +105,11 @@ public interface ISagaStore
     /// <summary>
     /// Saves the saga's state data to persistent storage.
     /// </summary>
-    Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data) where TSagaData : SagaData;
+    /// <param name="sagaId">The unique identifier of the saga instance.</param>
+    /// <param name="data">The saga data to persist.</param>
+    /// <param name="cancellationToken">A token to observe while awaiting the write.</param>
+    Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data, CancellationToken cancellationToken = default)
+        where TSagaData : SagaData;
     /// <summary>
     /// Loads the full saga context (including metadata and tracking state) for the given saga identifier.
     /// </summary>

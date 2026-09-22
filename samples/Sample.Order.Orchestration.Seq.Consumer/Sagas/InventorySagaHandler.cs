@@ -35,8 +35,15 @@ public class InventorySagaHandler :
 
     public override async Task CompensateAsync(ReserveInventoryCommand message, CancellationToken cancellationToken = default)
     {
-        // Compensation logic: release reserved inventory
+        // Business compensation first: release reserved inventory.
         Context.Data.InventoryCompensated = true;
-        await Context.CompensateAndBubbleUp<ReserveInventoryCommand>(cancellationToken);
+
+        // Then the framework-level transition: mark this step compensated and continue compensation
+        // through the logical parent (via ParentMessageId). Only the terminal ThenBubbleUp call carries
+        // the CancellationToken; it governs the whole three-stage operation.
+        await Context
+            .ContinueCompensation()
+            .ThenMarkAsCompensated<ReserveInventoryCommand>()
+            .ThenBubbleUp(cancellationToken);
     }
 }

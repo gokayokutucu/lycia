@@ -60,7 +60,7 @@ public class SagaCompensationCoordinator(
             return;
 
         await sagaStore.LogStepAsync(sagaId, message.MessageId, message.ParentMessageId, failedStepType,
-            StepStatus.Failed, handlerType, message, failInfo);
+            StepStatus.Failed, handlerType, message, failInfo, cancellationToken);
         ReportStepFailure(sagaId, failedStepType, handlerType, message, failInfo);
 
         stepKeyValuePair = await sagaStore.GetSagaHandlerStepAsync(sagaId, message.MessageId);
@@ -140,7 +140,7 @@ public class SagaCompensationCoordinator(
             return;
         // Log the step as failed before compensating
         await sagaStore.LogStepAsync(sagaId, message.MessageId, message.ParentMessageId, stepType,
-            StepStatus.Compensated, handlerType, message, (Exception?)null);
+            StepStatus.Compensated, handlerType, message, (Exception?)null, cancellationToken);
         
         var steps = await sagaStore.GetSagaHandlerStepsAsync(sagaId);
         

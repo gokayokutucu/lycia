@@ -59,7 +59,7 @@ public sealed class ReserveStockSagaHandler(
         {
             logger.LogError(ex, "💥 [ReserveStockSaga] Saga was canceled");
             await Context.Publish(new StockReservedFailedEvent(ex.Message){ OrderId = message.OrderId }, cancellationToken);
-            await Context.MarkAsCancelled<OrderCreatedEvent>(ex);
+            await Context.MarkAsCancelled<OrderCreatedEvent>(ex, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -75,11 +75,11 @@ public sealed class ReserveStockSagaHandler(
         {
             await productRepository.ReleaseStockAsync(message.OrderId, message.Items, cancellationToken);
             await Context.Publish(new StockReservedFailedEvent(message.Reason) { OrderId = message.OrderId }, cancellationToken);
-            await Context.MarkAsCompensated<PaymentProcessedFailedEvent>();
+            await Context.MarkAsCompensated<PaymentProcessedFailedEvent>(cancellationToken);
         }
         catch (Exception ex )
         {
-            await Context.MarkAsCompensationFailed<PaymentProcessedFailedEvent>(ex);
+            await Context.MarkAsCompensationFailed<PaymentProcessedFailedEvent>(ex, cancellationToken);
         }
     }
 }

@@ -21,12 +21,15 @@ internal sealed class SplitStoreSagaStore(
     : ISagaStore, IVersionedSagaStore
 {
     public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
-        Type handlerType, object? payload, Exception? exception) =>
-        canonicalStore.LogStepAsync(sagaId, messageId, parentMessageId, stepType, status, handlerType, payload, exception);
+        Type handlerType, object? payload, Exception? exception, CancellationToken cancellationToken = default) =>
+        canonicalStore.LogStepAsync(sagaId, messageId, parentMessageId, stepType, status, handlerType, payload,
+            exception, cancellationToken);
 
     public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
-        Type handlerType, object? payload, SagaStepFailureInfo? failureInfo) =>
-        canonicalStore.LogStepAsync(sagaId, messageId, parentMessageId, stepType, status, handlerType, payload, failureInfo);
+        Type handlerType, object? payload, SagaStepFailureInfo? failureInfo,
+        CancellationToken cancellationToken = default) =>
+        canonicalStore.LogStepAsync(sagaId, messageId, parentMessageId, stepType, status, handlerType, payload,
+            failureInfo, cancellationToken);
 
     public Task<bool> IsStepCompletedAsync(Guid sagaId, Guid messageId, Type stepType, Type handlerType) =>
         canonicalStore.IsStepCompletedAsync(sagaId, messageId, stepType, handlerType);
@@ -50,10 +53,11 @@ internal sealed class SplitStoreSagaStore(
     public Task<TSagaData> LoadSagaDataAsync<TSagaData>(Guid sagaId) where TSagaData : SagaData, new() =>
         canonicalStore.LoadSagaDataAsync<TSagaData>(sagaId);
 
-    public async Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data) where TSagaData : SagaData
+    public async Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data,
+        CancellationToken cancellationToken = default) where TSagaData : SagaData
     {
         if (data is null) return;
-        await canonicalStore.SaveSagaDataAsync(sagaId, data).ConfigureAwait(false);
+        await canonicalStore.SaveSagaDataAsync(sagaId, data, cancellationToken).ConfigureAwait(false);
         var version = data.Version;
         if (version <= 0)
             throw new InvalidOperationException("The canonical SagaStore did not return an authoritative saga version.");
@@ -62,24 +66,26 @@ internal sealed class SplitStoreSagaStore(
         await AddJournalEntryAsync(sagaId, data, expectedVersion, version).ConfigureAwait(false);
     }
 
-    public async Task<long> SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData data, long expectedVersion)
+    public async Task<long> SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData data, long expectedVersion,
+        CancellationToken cancellationToken = default)
         where TSagaData : SagaData
     {
         if (canonicalStore is not IVersionedSagaStore versioned)
             throw new InvalidOperationException("Split Store requires a versioned relational canonical SagaStore.");
 
-        var targetVersion = await versioned.SaveSagaDataAsync(sagaId, data, expectedVersion).ConfigureAwait(false);
+        var targetVersion = await versioned.SaveSagaDataAsync(sagaId, data, expectedVersion, cancellationToken).ConfigureAwait(false);
         await AddIntentAsync(sagaId, data, expectedVersion, targetVersion).ConfigureAwait(false);
         await AddJournalEntryAsync(sagaId, data, expectedVersion, targetVersion).ConfigureAwait(false);
         return targetVersion;
     }
 
-    public Task<(TSagaData Data, long Version)> LoadSagaDataWithVersionAsync<TSagaData>(Guid sagaId)
+    public Task<(TSagaData Data, long Version)> LoadSagaDataWithVersionAsync<TSagaData>(Guid sagaId,
+        CancellationToken cancellationToken = default)
         where TSagaData : SagaData, new()
     {
         if (canonicalStore is not IVersionedSagaStore versioned)
             throw new InvalidOperationException("Split Store requires a versioned relational canonical SagaStore.");
-        return versioned.LoadSagaDataWithVersionAsync<TSagaData>(sagaId);
+        return versioned.LoadSagaDataWithVersionAsync<TSagaData>(sagaId, cancellationToken);
     }
 
     public Task<ISagaContext<TMessage, TSagaData>> LoadContextAsync<TMessage, TSagaData>(Guid sagaId,

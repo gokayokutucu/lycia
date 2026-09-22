@@ -54,16 +54,19 @@ public class SqlServerSagaStore(
 
     /// <inheritdoc />
     public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
-        Type handlerType, object? payload, Exception? exception)
+        Type handlerType, object? payload, Exception? exception, CancellationToken cancellationToken = default)
     {
         return LogStepAsync(sagaId, messageId, parentMessageId, stepType, status, handlerType, payload,
-            new SagaStepFailureInfo("Exception occurred", exception?.GetType().Name, exception?.ToString()));
+            new SagaStepFailureInfo("Exception occurred", exception?.GetType().Name, exception?.ToString()),
+            cancellationToken);
     }
 
     /// <inheritdoc />
     public async Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
-        Type handlerType, object? payload, SagaStepFailureInfo? failureInfo)
+        Type handlerType, object? payload, SagaStepFailureInfo? failureInfo,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var stepTypeName = stepType.GetSimplifiedQualifiedName();
         var handlerTypeName = handlerType.GetSimplifiedQualifiedName();
         var messageTypeName = SagaStoreLogicHelper.GetMessageTypeName(stepType);
@@ -364,8 +367,10 @@ public class SqlServerSagaStore(
     }
 
     /// <inheritdoc />
-    public async Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data) where TSagaData : SagaData
+    public async Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data,
+        CancellationToken cancellationToken = default) where TSagaData : SagaData
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (data is null) return;
         data.SagaId = sagaId;
 
@@ -384,11 +389,11 @@ public class SqlServerSagaStore(
             """, lease.Transaction))
         {
             AddSagaDataParameters(update, sagaId, dataJson, dataType, data);
-            var version = await update.ExecuteScalarAsync().ConfigureAwait(false);
+            var version = await update.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
             if (version != null)
             {
                 data.Version = Convert.ToInt64(version);
-                await SynchronizeSerializedVersionAsync(lease.Connection, lease.Transaction, sagaId, data)
+                await SynchronizeSerializedVersionAsync(lease.Connection, lease.Transaction, sagaId, data, cancellationToken)
                     .ConfigureAwait(false);
                 return;
             }
@@ -402,7 +407,7 @@ public class SqlServerSagaStore(
                 VALUES (@sagaId, @applicationId, @dataType, @dataJson, 1, @isCompleted, @completedAt, @failedAt, SYSUTCDATETIME());
                 """, lease.Transaction);
             AddSagaDataParameters(insert, sagaId, dataJson, dataType, data);
-            data.Version = Convert.ToInt64(await insert.ExecuteScalarAsync().ConfigureAwait(false));
+            data.Version = Convert.ToInt64(await insert.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
         }
         catch (SqlException ex) when (IsUniqueViolation(ex))
         {
@@ -416,15 +421,16 @@ public class SqlServerSagaStore(
                 WHERE SagaId = @sagaId;
                 """, lease.Transaction);
             AddSagaDataParameters(update, sagaId, dataJson, dataType, data);
-            data.Version = Convert.ToInt64(await update.ExecuteScalarAsync().ConfigureAwait(false));
+            data.Version = Convert.ToInt64(await update.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
         }
 
-        await SynchronizeSerializedVersionAsync(lease.Connection, lease.Transaction, sagaId, data)
+        await SynchronizeSerializedVersionAsync(lease.Connection, lease.Transaction, sagaId, data, cancellationToken)
             .ConfigureAwait(false);
     }
 
     private async Task SynchronizeSerializedVersionAsync<TSagaData>(SqlConnection connection,
-        SqlTransaction? transaction, Guid sagaId, TSagaData data) where TSagaData : SagaData
+        SqlTransaction? transaction, Guid sagaId, TSagaData data, CancellationToken cancellationToken = default)
+        where TSagaData : SagaData
     {
         using var command = CreateCommand(connection, $"""
             UPDATE {DataTable}
@@ -434,7 +440,7 @@ public class SqlServerSagaStore(
         command.Parameters.AddWithValue("@dataJson", JsonHelper.SerializeSafe(data));
         command.Parameters.AddWithValue("@sagaId", sagaId);
         command.Parameters.AddWithValue("@version", data.Version);
-        await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private void AddSagaDataParameters<TSagaData>(SqlCommand command, Guid sagaId, string dataJson, string dataType,
@@ -450,9 +456,11 @@ public class SqlServerSagaStore(
     }
 
     /// <inheritdoc />
-    public async Task<long> SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData data, long expectedVersion)
+    public async Task<long> SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData data, long expectedVersion,
+        CancellationToken cancellationToken = default)
         where TSagaData : SagaData
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (data == null) throw new ArgumentNullException(nameof(data));
         data.SagaId = sagaId;
 
@@ -471,13 +479,13 @@ public class SqlServerSagaStore(
                     VALUES (@sagaId, @applicationId, @dataType, @dataJson, 1, @isCompleted, @completedAt, @failedAt, SYSUTCDATETIME());
                     """, lease.Transaction);
                 AddSagaDataParameters(insert, sagaId, dataJson, dataType, data);
-                await insert.ExecuteNonQueryAsync().ConfigureAwait(false);
+                await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
                 data.Version = 1;
                 return 1;
             }
             catch (SqlException ex) when (IsUniqueViolation(ex))
             {
-                var actual = await SelectCurrentVersionAsync(lease.Connection, lease.Transaction, sagaId)
+                var actual = await SelectCurrentVersionAsync(lease.Connection, lease.Transaction, sagaId, cancellationToken)
                     .ConfigureAwait(false) ?? 0;
                 throw new SagaConcurrencyException(sagaId, 0, actual);
             }
@@ -492,7 +500,7 @@ public class SqlServerSagaStore(
         {
             AddSagaDataParameters(update, sagaId, dataJson, dataType, data);
             update.Parameters.AddWithValue("@expectedVersion", expectedVersion);
-            var rows = await update.ExecuteNonQueryAsync().ConfigureAwait(false);
+            var rows = await update.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             if (rows > 0)
             {
                 var newVersion = expectedVersion + 1;
@@ -501,23 +509,25 @@ public class SqlServerSagaStore(
             }
         }
 
-        var actualVersion = await SelectCurrentVersionAsync(lease.Connection, lease.Transaction, sagaId)
+        var actualVersion = await SelectCurrentVersionAsync(lease.Connection, lease.Transaction, sagaId, cancellationToken)
             .ConfigureAwait(false) ?? 0;
         throw new SagaConcurrencyException(sagaId, expectedVersion, actualVersion);
     }
 
     /// <inheritdoc />
-    public async Task<(TSagaData Data, long Version)> LoadSagaDataWithVersionAsync<TSagaData>(Guid sagaId)
+    public async Task<(TSagaData Data, long Version)> LoadSagaDataWithVersionAsync<TSagaData>(Guid sagaId,
+        CancellationToken cancellationToken = default)
         where TSagaData : SagaData, new()
     {
+        cancellationToken.ThrowIfCancellationRequested();
         await using var lease = await RelationalConnectionLease<SqlConnection, SqlTransaction>.OpenAsync(
             sessionAccessor, CreateConnection).ConfigureAwait(false);
         using var command = CreateCommand(lease.Connection,
             $"SELECT DataJson, Version FROM {DataTable} WHERE SagaId = @sagaId;", lease.Transaction);
         command.Parameters.AddWithValue("@sagaId", sagaId);
 
-        using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
-        if (!await reader.ReadAsync().ConfigureAwait(false)) return (new TSagaData(), 0);
+        using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) return (new TSagaData(), 0);
 
         var data = JsonConvert.DeserializeObject<TSagaData>(reader.GetString(0)) ?? new TSagaData();
         data.SagaId = sagaId;
@@ -526,11 +536,12 @@ public class SqlServerSagaStore(
         return (data, version);
     }
 
-    private async Task<long?> SelectCurrentVersionAsync(SqlConnection connection, SqlTransaction? transaction, Guid sagaId)
+    private async Task<long?> SelectCurrentVersionAsync(SqlConnection connection, SqlTransaction? transaction, Guid sagaId,
+        CancellationToken cancellationToken = default)
     {
         using var command = CreateCommand(connection, $"SELECT Version FROM {DataTable} WHERE SagaId = @sagaId;", transaction);
         command.Parameters.AddWithValue("@sagaId", sagaId);
-        var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
+        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
         return result == null || result == DBNull.Value ? null : (long)result;
     }
 
