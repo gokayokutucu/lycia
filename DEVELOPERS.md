@@ -9,7 +9,7 @@ Git workflow.
 
 ## Repository and package layout
 
-Eleven packages are published. Four projects are internal and never published on their own:
+Twelve packages are published. Four projects are internal and never published on their own:
 
 | Internal project | Shipped inside |
 | --- | --- |
@@ -38,8 +38,11 @@ exact version being packed (`[x.y.z]`).
 All in-memory implementations are for tests and local development and are never durable.
 
 **Target frameworks.** Every src project targets `netstandard2.0;net8.0;net9.0;net10.0`, except
-`Lycia.Persistence.PostgreSql` (`net8.0;net9.0;net10.0`). Code must compile on `netstandard2.0`: for
-example, use `set` rather than `init` accessors in shipped code (no `IsExternalInit`).
+`Lycia.Persistence.PostgreSql` (`net8.0;net9.0;net10.0`) and `Lycia.Extensions.AspNetCore`
+(`net8.0;net9.0;net10.0` only, plus `FrameworkReference Microsoft.AspNetCore.App` - Minimal API endpoint
+routing does not exist for `netstandard2.0`/net48, and no other package takes an ASP.NET Core dependency;
+see "Diagnostics endpoint" below). Code must compile on `netstandard2.0`: for example, use `set` rather
+than `init` accessors in shipped code (no `IsExternalInit`).
 
 ---
 
@@ -614,6 +617,79 @@ plus registration checks for `ISagaJournalStore`, `ISagaRebuildService`, `IInbox
 `IOutboxStore`. It keeps no second copy of topology state and is registered unconditionally by
 `AddLycia`.
 
+Registration presence is checked with `IServiceProviderIsService.IsService(typeof(T))`, never
+`GetService<T>() != null`. Several store factories (for example the Redis Inbox/Outbox registrations)
+resolve `IConnectionMultiplexer`, whose own registration calls `ConnectionMultiplexer.Connect(...)`
+synchronously the first time it is resolved - `GetService<T>()` would have turned a "is this configured?"
+read into a real connection attempt, which is exactly what this abstraction exists to avoid. Any future
+capability check added to `GetSnapshot()` must use the same `IsService` pattern.
+
+### Diagnostics endpoint
+
+`Lycia.Extensions.AspNetCore` (`MapLyciaDiagnostics()`) is a thin HTTP projection on top of the flow
+above, and adds nothing to it:
+
+```
+configuration -> topology resolution (PersistenceTopologyResolver)
+              -> IPersistenceTopology.Current
+              -> ILyciaReliabilityDiagnostics.GetSnapshot() -> LyciaReliabilitySnapshot
+                     |                    |
+                     v                    v
+              startup logging /    LyciaDiagnosticsResponse.FromSnapshot(...)
+              custom tooling              |
+                                           v
+                                  GET /diagnostics/lycia
+```
+
+`LyciaDiagnosticsEndpointExtensions.MapLyciaDiagnostics` resolves `ILyciaReliabilityDiagnostics` from
+`HttpContext.RequestServices` per request (it is registered `Scoped`) and calls only `GetSnapshot()`. It
+never touches `IServiceCollection`, never resolves a store instance, and never re-derives `Mode`,
+`ResolvedStrategy`, `CanonicalStore`/`OperationalStore` or the capability flags - doing so would create a
+second topology-inference engine that could drift from `ILyciaReliabilityDiagnostics`. Extending what the
+endpoint reports always means extending `LyciaReliabilitySnapshot` (and, through it, `GetSnapshot()`)
+first, never adding logic to the endpoint itself.
+
+**Diagnostics vs. health checks.** This endpoint answers "how is Lycia configured and what topology did
+it resolve?", never "is Redis/RabbitMQ/PostgreSQL/SQL Server/Kafka/NATS reachable right now?". It performs
+no network calls and normally returns `200 OK`, independent of whether the described infrastructure is up.
+A liveness/readiness probe is a different, unrelated concern the application wires up on its own (for
+example `Microsoft.Extensions.Diagnostics.HealthChecks`, already a transitive dependency of
+`Lycia.Extensions`) - Lycia does not conflate the two, and `MapLyciaDiagnostics()` must never grow a
+dependency-reachability code path.
+
+**Secret-free boundary.** `LyciaDiagnosticsResponse` (`Lycia.Extensions.AspNetCore`) is a deliberate,
+closed DTO: `DeliveryGuarantee`, `Persistence` (`Mode`, `Provider`, `ResolvedStrategy`, `CanonicalStore`,
+`OperationalStore`) and `Capabilities` (`Inbox`, `Outbox`, `Journal`, `JournalRebuild`, `Reconciliation`).
+It is built only from `LyciaReliabilitySnapshot`, which is itself already secret-free by construction -
+notably it carries `PersistenceStoreDescriptor.ProviderName` but never `ConnectionIdentity` (the
+normalized `host/database` string used internally for `LocalAtomic`/Split Store matching), so a host name
+never reaches the wire. Nothing in the DTO is a message payload, `SagaData`, an Inbox/Outbox record, a
+journal entry, or raw configuration. `LyciaDiagnosticsResponseTests`-equivalent coverage lives in
+`tests/Lycia.Extensions.AspNetCore.Tests` (`SecretsTests`), which asserts unmistakable secret sentinel
+values never appear in the serialized response from a fully wired application, not just from the DTO's
+declared shape.
+
+**Package placement.** `Lycia.Extensions.AspNetCore` is its own package (`net8.0;net9.0;net10.0`, plus
+`FrameworkReference Microsoft.AspNetCore.App`) rather than a method added to `Lycia.Extensions`, because
+Minimal API endpoint routing requires the ASP.NET Core shared framework, which does not exist for
+`netstandard2.0`/net48 - every other Lycia package's floor - and a `FrameworkReference` would impose that
+runtime dependency on every consumer, including plain worker/console services with no HTTP surface at
+all. It depends only on `Lycia` and `Lycia.Extensions` (the same pattern every other add-on package uses),
+never on a transport or persistence-provider package, and it is entirely opt-in: `AddLycia(...)` registers
+`ILyciaReliabilityDiagnostics` unconditionally (see above) but never maps a route; only an explicit
+`MapLyciaDiagnostics()` call does.
+
+**Tests protecting the contract** (`tests/Lycia.Extensions.AspNetCore.Tests`, in-memory `TestServer`, no
+external infrastructure): `MappingTests` (default/custom route, opt-in, unsupported verbs);
+`ProjectionTests` (the response is exactly what a stub `ILyciaReliabilityDiagnostics` returns, across
+Standard/LocalAtomic/Independent/Split Store and every provider name); `SecretsTests` (a real `AddLycia` +
+`WithRedisSagaStore` wired with secret sentinel values never leak into the response); `CompositionTests`
+(`RequireAuthorization(...)` on the returned builder is enforced by standard ASP.NET Core authentication/
+authorization - Lycia implements none of its own); `NoProbeTests` (the request completes in milliseconds
+against an unroutable Redis address, proving no connection is attempted on the request path). The same
+eager-connection risk is also covered directly against `LyciaReliabilityDiagnostics.GetSnapshot()` in
+`tests/Lycia.Tests/LyciaReliabilityDiagnosticsTests.cs`.
+
 ---
 
 ## Saga patterns
@@ -686,15 +762,17 @@ are `[Obsolete]` wrappers over the same registration logic.
 | `Lycia.Persistence.InMemory.Tests` | TestKit against InMemory, plus Outbox retry/exhaustion tests | no |
 | `Lycia.Persistence.Redis.Tests`, `.SqlServer.Tests`, `.PostgreSql.Tests` | TestKit and provider-specific tests (atomic boundary, failure windows, Split Store, journal) against real engines | yes |
 | `Lycia.IntegrationTests`, `Lycia.IntegrationTests.NetFramework` | RabbitMQ/Redis transport and compensation integration | yes |
+| `Lycia.Extensions.AspNetCore.Tests` | `MapLyciaDiagnostics()` endpoint tests (in-memory `TestServer`) | no |
 
 Every provider must pass the same TestKit suites, which is what keeps step-transition validation,
 idempotency, concurrency, Inbox takeover and Outbox claim semantics identical across providers. Inbox and
 Outbox claim SQL and Lua only run against real engines in the provider suites, so changes to them must be
 validated there.
 
-The CI workflow runs `Lycia.Tests`, `Lycia.IntegrationTests`, the four provider suites
-(`Lycia.Persistence.{InMemory,Redis,PostgreSql,SqlServer}.Tests`) and the two NetFramework projects on
-every `main`/`dev` push and `v*` tag. The Microservices end-to-end run is part of release validation. The
+The CI workflow runs `Lycia.Tests`, `Lycia.Extensions.AspNetCore.Tests`, `Lycia.IntegrationTests`, the
+four provider suites (`Lycia.Persistence.{InMemory,Redis,PostgreSql,SqlServer}.Tests`) and the two
+NetFramework projects on every `main`/`dev` push and `v*` tag. The Microservices end-to-end run is part of
+release validation. The
 container-backed suites pull every image from [`infrastructure-versions.json`](infrastructure-versions.json)
 (see [Supported infrastructure versions](#supported-infrastructure-versions)); no test hard-codes an image.
 
@@ -795,10 +873,10 @@ matching tag a public release with exactly that version. Builds of branches carr
   `github.ref` starts with `refs/tags/v` for a `push` event (a schedule or manual run never publishes),
   and only after all test jobs pass, including the minimum-version compatibility job.
 - Before publishing, the job requires the packed `Lycia` version to equal the tag without its `v`, and
-  validates that exactly the eleven public packages were produced at that version, that no package
+  validates that exactly the twelve public packages were produced at that version, that no package
   depends on an internal project, and that the relational providers embed
   `Lycia.Persistence.Relational.Internal.dll`. Internal and test projects are never packed or pushed.
-- All eleven packages are pushed with `--skip-duplicate`, so rerunning a release never republishes an
+- All twelve packages are pushed with `--skip-duplicate`, so rerunning a release never republishes an
   existing version.
 
 ### NuGet Trusted Publishing
@@ -835,7 +913,7 @@ updating the policy first.
    `refs/tags/v<version>` and a local `dotnet pack` both produce exactly that version.
 3. Push `main` and wait for CI to pass.
 4. Tag the validated `main` commit `v<version>` and push the tag.
-5. Watch the workflow, then confirm all eleven packages at that version on nuget.org.
+5. Watch the workflow, then confirm all twelve packages at that version on nuget.org.
 
 ---
 

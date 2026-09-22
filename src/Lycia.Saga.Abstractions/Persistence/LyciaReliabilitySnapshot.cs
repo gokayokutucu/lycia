@@ -13,6 +13,14 @@ public sealed class LyciaReliabilitySnapshot
     /// <summary>The persistence topology mode (single-store or Split Store).</summary>
     public PersistenceMode Mode { get; set; }
 
+    /// <summary>
+    /// The registered SagaStore provider name (for example <c>"Redis"</c>, <c>"PostgreSql"</c>,
+    /// <c>"SqlServer"</c>, <c>"InMemory"</c>) outside Split Store, or <c>null</c> if no SagaStore is
+    /// registered. In Split Store this is <c>null</c>; <see cref="CanonicalStore"/> names the SagaStore's
+    /// provider instead, since Split Store's canonical store always owns the SagaStore.
+    /// </summary>
+    public string? SagaStoreProvider { get; set; }
+
     /// <summary>The canonical SagaStore provider name, or <c>null</c> outside Split Store.</summary>
     public string? CanonicalStore { get; set; }
 

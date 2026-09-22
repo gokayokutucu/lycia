@@ -49,12 +49,24 @@ jobs:
       - name: Run unit tests
         run: dotnet test tests/Lycia.Tests/Lycia.Tests.csproj -c Release --no-build --logger "trx;LogFileName=unit.trx"
 
+      # In-memory ASP.NET Core TestServer only - no external infrastructure, so it runs alongside the
+      # plain unit tests rather than in provider-tests or integration-tests.
+      - name: Run ASP.NET Core diagnostics endpoint tests
+        run: dotnet test tests/Lycia.Extensions.AspNetCore.Tests/Lycia.Extensions.AspNetCore.Tests.csproj -c Release --no-build --logger "trx;LogFileName=aspnetcore-diagnostics.trx"
+
       - name: Publish test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: unit-test-results
           path: '**/unit.trx'
+
+      - name: Publish ASP.NET Core diagnostics test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aspnetcore-diagnostics-test-results
+          path: '**/aspnetcore-diagnostics.trx'
 
   integration-tests:
     name: Integration tests (.NET Core)
@@ -398,7 +410,7 @@ jobs:
           for PROJECT in \
             Lycia.Extensions.RabbitMq Lycia.Extensions.Scheduling \
             Lycia.Extensions.Nats Lycia.Extensions.Kafka \
-            Lycia.Extensions.OpenTelemetry \
+            Lycia.Extensions.OpenTelemetry Lycia.Extensions.AspNetCore \
             Lycia.Persistence.InMemory Lycia.Persistence.Redis Lycia.Persistence.SqlServer Lycia.Persistence.PostgreSql; do
             dotnet restore "src/$PROJECT/$PROJECT.csproj" \
               -p:UsePackageRefForLyciaOnPack=true \
@@ -415,11 +427,11 @@ jobs:
       - name: Validate all public packages before publishing
         run: |
           VER='${{ steps.package-version.outputs.version }}'
-          PACKAGES="Lycia Lycia.Extensions Lycia.Extensions.RabbitMq Lycia.Extensions.Scheduling Lycia.Extensions.Nats Lycia.Extensions.Kafka Lycia.Extensions.OpenTelemetry Lycia.Persistence.InMemory Lycia.Persistence.Redis Lycia.Persistence.SqlServer Lycia.Persistence.PostgreSql"
+          PACKAGES="Lycia Lycia.Extensions Lycia.Extensions.RabbitMq Lycia.Extensions.Scheduling Lycia.Extensions.Nats Lycia.Extensions.Kafka Lycia.Extensions.OpenTelemetry Lycia.Extensions.AspNetCore Lycia.Persistence.InMemory Lycia.Persistence.Redis Lycia.Persistence.SqlServer Lycia.Persistence.PostgreSql"
           COUNT=$(find artifacts/nupkgs -maxdepth 1 -name '*.nupkg' | wc -l)
           echo "nupkg count: $COUNT"
-          if [ "$COUNT" -ne 11 ]; then
-            echo "ERROR: expected exactly 11 public packages, found $COUNT:"; ls artifacts/nupkgs; exit 1
+          if [ "$COUNT" -ne 12 ]; then
+            echo "ERROR: expected exactly 12 public packages, found $COUNT:"; ls artifacts/nupkgs; exit 1
           fi
           for PROJECT in $PACKAGES; do
             PKG="artifacts/nupkgs/$PROJECT.$VER.nupkg"
@@ -453,7 +465,7 @@ jobs:
           NUGET_TRUSTED_PUBLISHING_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
         run: |
           VER='${{ steps.package-version.outputs.version }}'
-          for PROJECT in Lycia Lycia.Extensions Lycia.Extensions.RabbitMq Lycia.Extensions.Scheduling Lycia.Extensions.Nats Lycia.Extensions.Kafka Lycia.Extensions.OpenTelemetry Lycia.Persistence.InMemory Lycia.Persistence.Redis Lycia.Persistence.SqlServer Lycia.Persistence.PostgreSql; do
+          for PROJECT in Lycia Lycia.Extensions Lycia.Extensions.RabbitMq Lycia.Extensions.Scheduling Lycia.Extensions.Nats Lycia.Extensions.Kafka Lycia.Extensions.OpenTelemetry Lycia.Extensions.AspNetCore Lycia.Persistence.InMemory Lycia.Persistence.Redis Lycia.Persistence.SqlServer Lycia.Persistence.PostgreSql; do
             dotnet nuget push "artifacts/nupkgs/$PROJECT.$VER.nupkg" \
               --source https://api.nuget.org/v3/index.json \
               --api-key "$NUGET_TRUSTED_PUBLISHING_KEY" \

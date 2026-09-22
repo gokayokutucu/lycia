@@ -56,13 +56,15 @@ paths into understandable routes.
 | `Lycia.Extensions.Kafka` | Kafka transport |
 | `Lycia.Extensions.Scheduling` | Durable, transport-independent scheduling: dispatch worker, Redis and in-memory schedule stores, leases and fencing, vacuum |
 | `Lycia.Extensions.OpenTelemetry` | OpenTelemetry tracing and W3C trace-context propagation |
+| `Lycia.Extensions.AspNetCore` | Opt-in `app.MapLyciaDiagnostics()` Minimal API endpoint exposing the reliability/persistence topology snapshot as JSON |
 | `Lycia.Persistence.InMemory` | In-memory SagaStore, Inbox, Outbox and journal registration. Tests and local development only — not durable |
 | `Lycia.Persistence.Redis` | Redis SagaStore, Inbox and Outbox, and the Split Store operational projection |
 | `Lycia.Persistence.SqlServer` | SQL Server SagaStore, Inbox, Outbox, reconciliation and journal stores with embedded schema migration |
 | `Lycia.Persistence.PostgreSql` | PostgreSQL SagaStore, Inbox, Outbox, reconciliation and journal stores with embedded schema migration |
 
 Every package targets `netstandard2.0`, `net8.0`, `net9.0` and `net10.0`, except
-`Lycia.Persistence.PostgreSql`, which targets `net8.0`, `net9.0` and `net10.0`.
+`Lycia.Persistence.PostgreSql` (`net8.0`, `net9.0`, `net10.0`) and `Lycia.Extensions.AspNetCore`
+(`net8.0`, `net9.0`, `net10.0` only - Minimal API routing does not exist for `netstandard2.0`/net48).
 
 `Lycia.Extensions` never depends on a transport, scheduling or persistence-provider package. Each of
 those packages contributes its own methods to the shared DSL builders (for example
@@ -651,13 +653,69 @@ var snapshot = serviceProvider
     .GetRequiredService<ILyciaReliabilityDiagnostics>()
     .GetSnapshot();
 
-// snapshot.Mode, snapshot.CanonicalStore, snapshot.OperationalStore, snapshot.ResolvedStrategy,
-// snapshot.ReconciliationEnabled, snapshot.JournalEnabled, snapshot.JournalRebuildAvailable,
-// snapshot.InboxEnabled, snapshot.OutboxEnabled, snapshot.DeliveryGuarantee ("AtLeastOnce")
+// snapshot.Mode, snapshot.SagaStoreProvider, snapshot.CanonicalStore, snapshot.OperationalStore,
+// snapshot.ResolvedStrategy, snapshot.ReconciliationEnabled, snapshot.JournalEnabled,
+// snapshot.JournalRebuildAvailable, snapshot.InboxEnabled, snapshot.OutboxEnabled,
+// snapshot.DeliveryGuarantee ("AtLeastOnce")
 ```
 
-It never contains connection strings, credentials or payloads. Use it for a startup log line or a
-diagnostics endpoint.
+It never contains connection strings, credentials or payloads. Use it for a startup log line, custom
+tooling, or the HTTP diagnostics endpoint below.
+
+### HTTP diagnostics endpoint
+
+`Lycia.Extensions.AspNetCore` adds an **opt-in** Minimal API endpoint that serves the same snapshot as JSON:
+
+```csharp
+dotnet add package Lycia.Extensions.AspNetCore
+```
+
+```csharp
+app.MapLyciaDiagnostics();
+```
+
+Default route: `GET /diagnostics/lycia`. Custom route:
+
+```csharp
+app.MapLyciaDiagnostics("/internal/lycia");
+```
+
+The returned builder is a standard `IEndpointConventionBuilder`, so it composes with ordinary ASP.NET Core
+conventions - Lycia implements no authentication or authorization of its own:
+
+```csharp
+app.MapLyciaDiagnostics()
+    .RequireAuthorization("Operations");
+```
+
+Calling `AddLycia(...)` never maps this route; an application that does not call `MapLyciaDiagnostics()`
+exposes no Lycia diagnostics endpoint. A response looks like:
+
+```json
+{
+  "deliveryGuarantee": "AtLeastOnce",
+  "persistence": {
+    "mode": "SplitStore",
+    "provider": null,
+    "resolvedStrategy": "LocalAtomic",
+    "canonicalStore": "PostgreSql",
+    "operationalStore": "Redis"
+  },
+  "capabilities": {
+    "inbox": true,
+    "outbox": true,
+    "journal": true,
+    "journalRebuild": true,
+    "reconciliation": true
+  }
+}
+```
+
+This is a **configuration/topology endpoint, not a health check**: it answers "how is Lycia configured and
+what did it resolve?", not "is RabbitMQ/Redis/PostgreSQL/SQL Server/Kafka/NATS reachable right now?". It
+performs no network calls and probes no configured infrastructure, and it normally returns `200 OK`. Only
+`Lycia.Extensions.AspNetCore` depends on ASP.NET Core - no other Lycia package does, so a plain
+worker/console consumer never acquires that dependency.
 
 ---
 
