@@ -46,6 +46,12 @@ handlers or creates broker messages.
 Inspect canonical state with `docker compose exec postgres psql -U lycia -d checkout_db` and operational
 state with `docker compose exec checkout-redis redis-cli GET saga:data:<saga-id>`.
 
+Each service also maps `GET /diagnostics/lycia` (Lycia's opt-in configuration/topology endpoint, distinct
+from `/health` above it): `curl http://localhost:8080/diagnostics/lycia` reports the resolved Split Store
+topology - `canonicalStore: "PostgreSql"`, `operationalStore: "Redis"`, `resolvedStrategy: "LocalAtomic"`
+- and the active Inbox/Outbox/journal/reconciliation capabilities. It is not a health check: it keeps
+reporting the same resolved configuration even while RabbitMQ or Redis is stopped.
+
 ## Distributed tracing (Jaeger)
 
 The stack includes Jaeger, receiving OTLP spans from all five services (each reporting a distinct

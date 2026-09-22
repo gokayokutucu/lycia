@@ -1,0 +1,92 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <!--
+        Minimal API endpoint routing (IEndpointRouteBuilder, IEndpointConventionBuilder) lives only in the
+        ASP.NET Core shared framework, reached through FrameworkReference on net8.0+. It does not exist for
+        netstandard2.0 or net48 at all, and every other Lycia package targets those TFMs so that a plain
+        worker/console consumer never acquires an ASP.NET Core runtime dependency. This package exists
+        specifically so that requirement stays confined to applications that opt into it.
+        -->
+        <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+        <LangVersion>preview</LangVersion>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <RepositoryUrl>https://github.com/gokayokutucu/lycia</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+
+        <!-- Prevent writing project references as dependencies in nuspec -->
+        <SuppressProjectReferenceDependenciesWhenPacking>true</SuppressProjectReferenceDependenciesWhenPacking>
+
+        <!-- During pack, we will use package reference for Lycia -->
+        <UsePackageRefForLyciaOnPack>false</UsePackageRefForLyciaOnPack>
+
+        <!-- For XMLs (optional) -->
+        <AllowedOutputExtensionsInPackageBuildOutputFolder>
+            $(AllowedOutputExtensionsInPackageBuildOutputFolder);.xml
+        </AllowedOutputExtensionsInPackageBuildOutputFolder>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <Authors>M. Gokay Okutucu</Authors>
+        <Description>Lycia.Extensions.AspNetCore adds an opt-in ASP.NET Core Minimal API endpoint
+            (app.MapLyciaDiagnostics()) that exposes Lycia's resolved reliability/persistence topology -
+            delivery guarantee, persistence mode and provider, Split Store canonical/operational stores,
+            and Inbox/Outbox/journal/reconciliation capability flags - as a secret-free JSON diagnostics
+            projection over the existing ILyciaReliabilityDiagnostics snapshot. This is a configuration
+            endpoint, not a health check: it never probes RabbitMQ, Redis, PostgreSQL, SQL Server, Kafka or
+            NATS, and it maps no route unless the application explicitly calls MapLyciaDiagnostics().</Description>
+        <Copyright>Copyright (c) 2025 M. Gokay Okutucu</Copyright>
+        <PackageProjectUrl>https://github.com/gokayokutucu/lycia</PackageProjectUrl>
+        <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+        <PackageTags>saga distributed-transaction workflow orchestration choreography idempotency retry timeout compensation middleware rabbitmq redis microservices event-driven aspnetcore diagnostics minimal-api endpoint reliability topology</PackageTags>
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Remove="README.md" />
+        <None Include="README.md" Pack="true" PackagePath="/" />
+        <PackageReference Include="Nerdbank.GitVersioning" Version="3.*" PrivateAssets="all" />
+    </ItemGroup>
+
+    <!-- Every net8.0+ TFM this package targets ships the ASP.NET Core shared framework; opting in here,
+         rather than on Lycia.Extensions, is the entire reason this package exists (see the TargetFrameworks
+         comment above). -->
+    <ItemGroup>
+        <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    </ItemGroup>
+
+    <!-- Local development: project-to-project. Lycia.Saga.Abstractions (where ILyciaReliabilityDiagnostics
+         and LyciaReliabilitySnapshot live) is referenced directly because Lycia.csproj/Lycia.Extensions.csproj
+         mark their own reference to it PrivateAssets="All", which does not flow transitively to a third
+         project - the same reason every other package needing these types (for example
+         Lycia.Persistence.Redis) references it directly too. -->
+    <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' != 'true'">
+        <ProjectReference Include="..\Lycia\Lycia.csproj" PrivateAssets="All"/>
+        <ProjectReference Include="..\Lycia.Saga\Lycia.Saga.csproj" PrivateAssets="All" />
+        <ProjectReference Include="..\Lycia.Saga.Abstractions\Lycia.Saga.Abstractions.csproj" PrivateAssets="All" />
+        <ProjectReference Include="..\Lycia.Common\Lycia.Common.csproj" PrivateAssets="All" />
+        <ProjectReference Include="..\Lycia.Extensions\Lycia.Extensions.csproj" PrivateAssets="All" />
+    </ItemGroup>
+
+    <!-- Pack/CI: depend only on the Lycia package. Lycia.Saga.Abstractions/.Saga/.Common are embedded inside
+         the packed Lycia package's lib/<tfm> folder (never published on their own), so the Lycia
+         PackageReference alone is sufficient here. -->
+    <ItemGroup Condition="'$(UsePackageRefForLyciaOnPack)' == 'true'">
+        <PackageReference Include="Lycia" Version="[$(LyciaPackageVersion)]"/>
+        <ProjectReference Remove="..\Lycia\Lycia.csproj"/>
+        <ProjectReference Remove="..\Lycia.Saga\Lycia.Saga.csproj" />
+        <ProjectReference Remove="..\Lycia.Saga.Abstractions\Lycia.Saga.Abstractions.csproj" />
+        <ProjectReference Remove="..\Lycia.Common\Lycia.Common.csproj" />
+
+        <PackageReference Include="Lycia.Extensions" Version="[$(LyciaPackageVersion)]"/>
+        <ProjectReference Remove="..\Lycia.Extensions\Lycia.Extensions.csproj" />
+    </ItemGroup>
+
+    <Target Name="ValidateLyciaPackageVersion" BeforeTargets="CollectPackageReferences"
+            Condition="'$(UsePackageRefForLyciaOnPack)' == 'true' and '$(LyciaPackageVersion)' == ''">
+        <Error Text="LyciaPackageVersion must be the exact version produced for Lycia when pack mode is enabled." />
+    </Target>
+
+</Project>

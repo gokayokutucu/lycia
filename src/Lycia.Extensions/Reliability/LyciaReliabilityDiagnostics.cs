@@ -22,17 +22,37 @@ public sealed class LyciaReliabilityDiagnostics(
         // IPersistenceTopology is only registered once an application calls UsePersistence(); resolve it
         // optionally so this diagnostics service itself never becomes a hard dependency on that path.
         var current = serviceProvider.GetService<IPersistenceTopology>()?.Current;
+        var mode = current?.Mode ?? PersistenceMode.Standard;
+        // Outside Split Store, name the registered SagaStore's provider directly (provider name only -
+        // never PersistenceStoreDescriptor.ConnectionIdentity, which carries the host/database and is not
+        // safe for this secret-free snapshot). In Split Store, CanonicalStore already names it, since the
+        // canonical provider always owns the SagaStore (enforced by PersistenceTopologyConfiguration).
+        var sagaStoreProvider = mode == PersistenceMode.Standard
+            ? current?.Stores.FirstOrDefault(s => s.Capability == PersistenceCapabilityKind.SagaStore)?.ProviderName
+            : null;
         return new LyciaReliabilitySnapshot
         {
-            Mode = current?.Mode ?? PersistenceMode.Standard,
+            Mode = mode,
+            SagaStoreProvider = sagaStoreProvider,
             CanonicalStore = current?.CanonicalStore,
             OperationalStore = current?.OperationalStore,
             ResolvedStrategy = current?.ResolvedStrategy ?? PersistenceExecutionStrategy.Independent,
             ReconciliationEnabled = current?.ReconciliationEnabled ?? false,
-            JournalEnabled = serviceProvider.GetService<ISagaJournalStore>() != null,
-            JournalRebuildAvailable = serviceProvider.GetService<ISagaRebuildService>() != null,
-            InboxEnabled = serviceProvider.GetService<IInboxStore>() != null,
-            OutboxEnabled = serviceProvider.GetService<IOutboxStore>() != null
+            JournalEnabled = IsRegistered<ISagaJournalStore>(),
+            JournalRebuildAvailable = IsRegistered<ISagaRebuildService>(),
+            InboxEnabled = IsRegistered<IInboxStore>(),
+            OutboxEnabled = IsRegistered<IOutboxStore>()
         };
     }
+
+    // Some store factories (for example the Redis Inbox/Outbox registrations) eagerly open a real
+    // connection the first time the type is resolved. GetSnapshot() must stay a pure configuration read -
+    // never a probe of the infrastructure it describes - so registration presence is checked through
+    // IServiceProviderIsService, which inspects the DI registration table without invoking any factory
+    // delegate or constructing an instance. The default Microsoft.Extensions.DependencyInjection container
+    // (used by AddLycia's own BuildServiceProvider() and by the ASP.NET Core/generic host) always provides
+    // one; GetService<T>() is only a fallback for a container that genuinely does not.
+    private bool IsRegistered<T>() where T : class =>
+        serviceProvider.GetService<IServiceProviderIsService>()?.IsService(typeof(T))
+        ?? serviceProvider.GetService<T>() != null;
 }
