@@ -26,6 +26,17 @@ Git rules. Agents must update this file as phases move through the milestone.
 - In Split Store mode, relational persistence is canonical and Redis is rebuildable operational state;
   reconciliation never turns Redis into request-path authority.
 - Replay/rebuild must be deterministic and must not invoke business handlers.
+- In a deferred/composite fluent chain (`SendWithTracking`/`PublishWithTracking`/`RespondWithTracking`/
+  `ScheduleWithTracking` → `ISagaStepFluent.Then...`; `ContinueCompensation()` →
+  `ICompensationContinuation`/`ICompensatedContinuation`), the entry method never accepts a
+  `CancellationToken` and only the terminal method does; that one token governs the whole deferred
+  operation. Do not reintroduce a captured/fallback token at the entry method.
+- Coordinated compensation continuation is `Context.ContinueCompensation().ThenMarkAsCompensated<TStep>()`
+  (defers) `.ThenBubbleUp(cancellationToken)` (terminal; propagates to the logical parent) — or the
+  two-stage `.ThenMarkAsCompensated<TStep>(cancellationToken)` (terminal; does not propagate). Do not have
+  `ThenBubbleUp` also call `MarkAsCompensated`: `CompensateAndBubbleUp` already logs the step Compensated
+  as part of walking the parent lineage, and a second `MarkAsCompensated` call first would make
+  `CompensateParentAsync`'s own idempotency guard skip propagation entirely.
 
 # ACTIVE
 
@@ -38,6 +49,23 @@ final validation are complete; see `FINALIZATION`.)
 
 # HOLD / BACKLOG
 
+- **Durable, crash-safe coordinated compensation propagation (bubble-up):** `SagaCompensationCoordinator
+  .CompensateParentAsync` persists the current step as `Compensated` and then, in the same call and with
+  no durable intermediate record, invokes the parent's compensation handler in-process. If the process
+  crashes (or the handler throws) between those two things, the child already reads `Compensated`, so a
+  retry's `IsStepAlreadyInStatus` guard skips the parent forever — the same guard that correctly makes
+  ordinary message redelivery idempotent. `Context.ContinueCompensation().ThenMarkAsCompensated<T>()
+  .ThenBubbleUp(ct)` (and the `CompensateAndBubbleUp<T>(ct)` it wraps) is documented as not crash-safe;
+  `tests/Lycia.Tests/CompensationContinuationTests.cs` (`KnownGap_...`) reproduces the gap directly. A real
+  fix needs a durable "propagation pending" record kept apart from the child's own terminal status (so
+  recovery can distinguish "compensated, not yet propagated" from "compensated, already propagated"),
+  provider schema for it (not just relational providers), a claim/lease mechanism so concurrent replicas
+  cannot invoke the same parent handler twice, and a dedicated recovery worker — explicitly not the Outbox
+  worker (drives transport delivery, not in-process handler invocation) and not the Split Store
+  `ReconciliationWorker` (repairs the Redis projection from canonical state; no compensation-propagation
+  concept). Sized like a dedicated phase (comparable to the Outbox or Split Store subsystems), not
+  attempted as part of the fluent-API/CancellationToken cleanup that added `ContinueCompensation()`. See
+  DEVELOPERS.md, "Coordinated compensation continuation".
 - **PostgreSQL WAL / logical decoding CDC projection feed (future evaluation, not a current-release change or committed roadmap item):** In a PostgreSQL deployment, canonical state changes could be exposed through WAL (*Write-Ahead Log*) logical decoding and CDC (*Change Data Capture*) and consumed to update the Redis operational projection. This would provide a durable feed of **committed** PostgreSQL changes; it would not make PostgreSQL and Redis atomic or eliminate normal replication lag. Redis remains a rebuildable, eventually consistent projection, and its writer must retain version fencing/CAS so delayed or redelivered records cannot overwrite a newer projection. This is distinct from the Journal: `Journal != WAL`; the Journal remains Lycia's framework-level canonical transition history and deterministic rebuild source, while WAL/CDC is only a database change-propagation mechanism. The current provider-neutral `ReconciliationIntent + ReconciliationWorker` remains the default. A possible later boundary is `IProjectionChangeFeed`, with `ReconciliationIntentFeed` and an opt-in PostgreSQL-only `PostgreSqlLogicalReplicationFeed`; only one feed may write a deployment's projection. Candidate consumers include Debezium and a custom logical-replication consumer. Any evaluation must explicitly own replication-slot lag, retained-WAL/disk-pressure, consumer health, LSN progress, recovery, and monitoring. CDC could also be evaluated as an Outbox relay transport (WAL/CDC to broker) while retaining the transactional Outbox record itself and its at-least-once/confirmation semantics. Because Lycia is provider-neutral, this must remain an optional PostgreSQL strategy, never a core requirement.
 - Redis Cluster hash-slot-safe multi-key atomicity: inventoried during Phase 7 (Redis Inbox/Outbox
   Lua scripts touch multiple keys — `outbox:msg:{id}`, `outbox:pending` — without hash-tag key naming,
@@ -232,6 +260,33 @@ final validation are complete; see `FINALIZATION`.)
   Store, secret sentinel values never present in the response, `RequireAuthorization` enforced by standard
   ASP.NET Core authorization, and a timing-based proof no connection is attempted against an unroutable
   Redis address). Feature commit `90ed223`; merged into `dev` as `348288e`. Not released.
+- **Post-1.18.0 patch — deferred-fluent CancellationToken ownership and coordinated compensation
+  continuation:** `SendWithTracking`/`PublishWithTracking`/`RespondWithTracking`/`ScheduleWithTracking`
+  no longer accept a `CancellationToken`; only the terminal `ISagaStepFluent.Then...` call does, and that
+  one token now governs the whole deferred operation. The captured/fallback-token machinery
+  (`SagaStepFluentToken`) is removed. New API: `Context.ContinueCompensation()` →
+  `ICompensationContinuation`/`ICompensatedContinuation`, giving
+  `.ThenMarkAsCompensated<TStep>(ct)` (terminal, no propagation) and
+  `.ThenMarkAsCompensated<TStep>().ThenBubbleUp(ct)` (terminal, propagates to the logical parent);
+  `ContinueCompensation()` never accepts a token and performs no business rollback.
+  `ISagaStepFluent.ThenMarkAsCompensated` on the tracked-messaging chain now always calls only
+  `MarkAsCompensated` (never auto-bubbles), for consistent naming across both APIs — previously it
+  bubbled for coordinated contexts and silently no-opped for reactive ones. Two real bugs fixed: reactive
+  `CompensateAndBubbleUp` was a no-op stub (`Task.CompletedTask`) on both the reactive `SagaContext<T>` and
+  its step adapter, so every reactive saga's bubble-up silently did nothing; and every handler base
+  class's `MarkAsComplete(ct)`/`MarkAsCompensationFailed(ct)` convenience wrapper accepted but discarded
+  its token. `ISagaStore.LogStepAsync`/`SaveSagaDataAsync` and `IVersionedSagaStore`'s two methods gained
+  an optional `CancellationToken` (previously absent from the interface), threaded through all five
+  providers and every context/adapter/coordinator call site. **Known, deliberately unclosed gap** (see
+  `HOLD / BACKLOG`): `CompensateParentAsync` persists the child step `Compensated` and then invokes the
+  parent handler in-process with no durable "propagation pending" record between the two steps; a crash in
+  that window strands propagation, and the same guard that correctly makes ordinary redelivery idempotent
+  makes a retry silently skip the parent. `CompensationContinuationTests` reproduces this directly. A real
+  fix needs a dedicated durable capability and recovery worker, sized like Outbox/Split Store, not
+  attempted here. Full regression green on every provider/TFM including net48; the diagnostics, publisher-
+  confirm and Outbox-recovery suites above remain intact (nothing in this change touched transport,
+  persistence-provider, Outbox, or Split Store internals — only the saga-context/handler/fluent layer
+  above them). Feature commit `5ba04e5`; merged into `dev` as `f67e958`. Not released.
 
 # FINALIZATION
 
