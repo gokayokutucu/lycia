@@ -140,7 +140,13 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
             throw new InvalidOperationException("Replica B response consumer completed early.");
         }, timeout.Token);
 
-        await Task.Delay(300, timeout.Token);
+        // Deterministic readiness: wait for replica B's queue/exchange/binding to be declared and its
+        // consumer registered (RabbitMqEventBus.ConsumerReady) instead of guessing with a fixed delay. A
+        // fixed delay races the background Task.Run above - if the thread pool is slow to pick it up, or
+        // the declare/bind/BasicConsume sequence inside ConsumeWithAckAsync takes longer than the delay,
+        // this publish (mandatory + publisher confirms) correctly gets returned as unroutable because the
+        // queue genuinely isn't bound yet. See RabbitMqEventBusIntegrationTests for the same idiom.
+        await EventBusReadiness.WaitForConsumersAsync(consumerBus, timeout.Token);
         await producerBus.Respond(
             request,
             new ReplicaResponse { Message = "continued-by-replica-b" },
@@ -729,9 +735,10 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
             }
         });
 
-        // Wait for consumer infrastructure to be ready
-        // ConsumeAsync sets up exchanges/queues lazily on first iteration
-        await Task.Delay(3000);
+        // Deterministic readiness: ConsumeAsync declares exchanges/queues/bindings lazily on first
+        // iteration of the background consumerTask above, not during CreateAsync - wait for
+        // RabbitMqEventBus.ConsumerReady instead of a fixed delay that could race it.
+        await EventBusReadiness.WaitForConsumersAsync(eventBus, cts.Token);
 
         await eventBus.Send(testCommand);
 

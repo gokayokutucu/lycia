@@ -97,15 +97,27 @@ jobs:
       # The suite starts its own RabbitMQ, Redis, NATS and Kafka containers (Testcontainers) from the images
       # pinned in infrastructure-versions.json - the "current" track. No service containers are declared here:
       # they were never used by the tests and would only hide which versions actually run.
-      - name: Run integration tests (current infrastructure versions)
-        run: dotnet test tests/Lycia.IntegrationTests/Lycia.IntegrationTests.csproj -c Release --no-build --logger "trx;LogFileName=integration.trx"
+      # Run per target framework with a distinct trx file name: a single multi-TFM invocation runs each
+      # framework's test host sequentially but writes them all to the same default trx path, so the first
+      # framework's result file is silently overwritten by the next one's - a real failure in an earlier
+      # framework can vanish from the uploaded artifact even though the step's own exit code still reports
+      # it. This is what hid the net10.0-only RabbitMqSagaCompensationIntegrationTests failure from the
+      # integration-test-results artifact.
+      - name: Run integration tests (current infrastructure versions, net9.0)
+        run: dotnet test tests/Lycia.IntegrationTests/Lycia.IntegrationTests.csproj -c Release --no-build -f net9.0 --logger "trx;LogFileName=integration-net9.0.trx"
+
+      # if: always() so a net9.0 failure (which would otherwise skip subsequent steps) never hides
+      # net10.0's result too - the job still fails overall if either step fails.
+      - name: Run integration tests (current infrastructure versions, net10.0)
+        if: always()
+        run: dotnet test tests/Lycia.IntegrationTests/Lycia.IntegrationTests.csproj -c Release --no-build -f net10.0 --logger "trx;LogFileName=integration-net10.0.trx"
 
       - name: Publish test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-results
-          path: '**/integration.trx'
+          path: '**/integration-net*.trx'
 
   provider-tests:
     name: Persistence provider tests (current infrastructure versions)

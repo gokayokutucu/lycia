@@ -74,8 +74,8 @@ public class CompensationContinuationTests
         using var cts = new CancellationTokenSource();
         await continuation.ThenBubbleUp(cts.Token);
 
-        // ThenBubbleUp delegates to Context.BubbleUpCompensationAsync<TStep>, which itself both persists
-        // the current step as Compensated and walks the parent lineage - see CompensateParentAsync.
+        // ThenBubbleUp delegates to the internal bubble-up primitive, which itself both persists the
+        // current step as Compensated and walks the parent lineage - see CompensateParentAsync.
         coordinator.Verify(c => c.CompensateParentAsync(It.IsAny<Guid>(), typeof(DummyEvent), It.IsAny<Type>(),
             It.IsAny<Lycia.Saga.Abstractions.Messaging.IMessage>(), cts.Token), Times.Once);
     }
@@ -124,8 +124,8 @@ public class CompensationContinuationTests
 
     // End-to-end through the real coordinator + a real InMemorySagaStore (no mocks on the compensation
     // path): ThenBubbleUp on a REACTIVE context actually invokes the parent's compensation handler. This
-    // is the fix for the previous no-op StepSpecificSagaContextAdapter<T>.BubbleUpCompensationAsync stub -
-    // before the fix, this exact call silently did nothing for every reactive saga.
+    // is the fix for the previous no-op StepSpecificSagaContextAdapter<T> bubble-up stub - before the fix,
+    // this exact call silently did nothing for every reactive saga.
     [Fact]
     public async Task ThenBubbleUp_On_A_Reactive_Context_Invokes_The_Parent_Compensation_Handler()
     {

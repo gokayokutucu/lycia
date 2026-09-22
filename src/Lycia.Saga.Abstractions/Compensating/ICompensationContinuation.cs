@@ -43,11 +43,11 @@ public interface ICompensatedContinuation
 {
     /// <summary>
     /// Terminal: continues compensation through the logical parent lineage (via <c>ParentMessageId</c>),
-    /// invoking the parent's compensation handler. Equivalent to
-    /// <c>Context.BubbleUpCompensationAsync&lt;TStep&gt;(cancellationToken)</c> for the step named by the
-    /// preceding <c>ThenMarkAsCompensated&lt;TStep&gt;()</c> call. <paramref name="cancellationToken"/> is
-    /// the single token governing the whole three-stage operation, from the initial mark through parent
-    /// propagation.
+    /// invoking the parent's compensation handler, for the step named by the preceding
+    /// <c>ThenMarkAsCompensated&lt;TStep&gt;()</c> call. This is the only application-reachable entry
+    /// point to that propagation - there is no equivalent method directly on <c>ISagaContext</c>.
+    /// <paramref name="cancellationToken"/> is the single token governing the whole three-stage operation,
+    /// from the initial mark through parent propagation.
     /// </summary>
     Task ThenBubbleUp(CancellationToken cancellationToken);
 }

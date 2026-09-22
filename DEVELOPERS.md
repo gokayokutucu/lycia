@@ -697,7 +697,7 @@ eager-connection risk is also covered directly against `LyciaReliabilityDiagnost
 | Pattern | State | Handlers |
 | --- | --- | --- |
 | Choreography (reactive) | Stateless, no `TSagaData`; compensation through `ISagaCompensationHandler<T>` | `StartReactiveSagaHandler<TStart>`, `ReactiveSagaHandler<TMessage>` |
-| Sequential orchestration (coordinated) | `TSagaData`; failures compensate through `Context.ContinueCompensation().ThenMarkAsCompensated<T>().ThenBubbleUp(ct)` (or the lower-level `Context.BubbleUpCompensationAsync<T>(ct)` it wraps) | `StartCoordinatedSagaHandler<TStart, TSagaData>`, `CoordinatedSagaHandler<TMessage, TSagaData>` |
+| Sequential orchestration (coordinated) | `TSagaData`; failures compensate through `Context.ContinueCompensation().ThenMarkAsCompensated<T>().ThenBubbleUp(ct)` (the only public entry point to parent propagation) | `StartCoordinatedSagaHandler<TStart, TSagaData>`, `CoordinatedSagaHandler<TMessage, TSagaData>` |
 | Request-response orchestration | `TSagaData`; each step sends a command and continues on the response | `StartCoordinatedResponsiveSagaHandler<TStart, TResponse, TSagaData>`, `CoordinatedResponsiveSagaHandler<TMessage, TResponse, TSagaData>`, `IResponseSagaHandler<TResponse>` |
 
 `Sample.Order.Orchestration.Consumer` and the Microservices sample use request-response orchestration.
@@ -763,18 +763,43 @@ public interface ICompensatedContinuation
 is the only one that returns `ICompensatedContinuation`, so the compiler only exposes `ThenBubbleUp` after
 that specific call. `ContinueCompensation()` itself, and the no-token `ThenMarkAsCompensated<TStep>()`,
 touch neither the SagaStore nor the compensation coordinator - `SagaCompensationContinuation` holds only a
-context reference, and `SagaCompensatedContinuation` holds only a closed-over `Func<CancellationToken, Task>`
-(`context.BubbleUpCompensationAsync<TStep>`, a method-group conversion - no reflection needed, unlike the
-tracked-messaging fluent classes, because `ContinueCompensation()` is an ordinary instance method on an
-already strongly-typed `ISagaContext<TInitialMessage>`, not something reached through a non-generic factory).
+context reference, and `SagaCompensatedContinuation` holds only a closed-over `Func<CancellationToken, Task>`.
 
 - **Two-stage terminal**: `ThenMarkAsCompensated<TStep>(ct)` calls only `context.MarkAsCompensated<TStep>(ct)`
   - the same call `Context.MarkAsCompensated<TStep>(ct)` makes directly. No propagation. Use this for a
   root step, or for an intermediate step where you deliberately do not want to continue the chain.
-- **Three-stage**: `ThenMarkAsCompensated<TStep>()` (no token) defers; `ThenBubbleUp(ct)` calls only
-  `context.BubbleUpCompensationAsync<TStep>(ct)`, which both marks the step compensated *and* durably
-  requires - then immediately attempts - propagation to the logical parent. It does **not** also call
+- **Three-stage**: `ThenMarkAsCompensated<TStep>()` (no token) defers; `ThenBubbleUp(ct)` calls only the
+  internal bubble-up primitive (below), which both marks the step compensated *and* durably requires -
+  then immediately attempts - propagation to the logical parent. It does **not** also call
   `MarkAsCompensated` first; the two are one call into the coordinator, not two.
+
+#### The staged-fluent encapsulation invariant
+
+An intermediate stage of a staged fluent chain must never be an independently callable application
+operation - only the type system's own shape should decide what is reachable, with a runtime check
+reserved for the one case that genuinely cannot be expressed at compile time. Compensation is the clearest
+example: the execution primitive behind `ThenBubbleUp` is `IBubbleUpCompensationPrimitive.BubbleUpCompensationAsync<TStep>`
+(`Lycia.Saga.Abstractions.Compensating`) - an **internal** interface, not a member of `ISagaContext<TInitialMessage>`.
+Every built-in saga context (`SagaContext<TInitialMessage>` and its `TSagaData` override, both
+`StepSpecificSagaContextAdapter` variants) implements it as an *explicit* interface implementation, so it
+is invisible even on the concrete, public `SagaContext<T>` type - `Context.BubbleUpCompensationAsync<T>(ct)`
+does not compile, and never did as a matter of the type system rather than convention.
+`SagaCompensationContinuation` (the only intended caller, in the same assembly via `InternalsVisibleTo`)
+reaches it with `context is IBubbleUpCompensationPrimitive primitive`; a custom `ISagaContext<T>`
+implementation that doesn't implement it gets a clear `InvalidOperationException` from `ThenMarkAsCompensated<TStep>()`
+instead of continuing silently or throwing an opaque `InvalidCastException` - this is the one place the
+invariant is a runtime check, because "does this arbitrary external context support bubble-up" cannot be
+expressed in the public type system without exposing the primitive itself. `SagaContext<TInitialMessage>`'s
+own core implementation is `protected virtual BubbleUpCompensationCoreAsync<TStep>`, so
+`SagaContext<TInitialMessage, TSagaData>` can still override the behavior without either level exposing a
+public or even internally-callable-by-name method. `FluentApiEncapsulationTests.cs` (`Lycia.Tests`) proves
+the absence by reflecting over the actual compiled public surface, not by code review.
+
+The same shape applies to `SendWithTracking`/`PublishWithTracking`/`RespondWithTracking`/`ScheduleWithTracking`:
+the entry method returns only `ISagaStepFluent`, a flat interface of terminal `Then...` methods that all
+return `Task` - there is no member that returns another fluent/continuation type, and no generic `Execute()`
+escape hatch. The deferred operation and transition delegates the entry method closes over are run by a
+`private` `RunAsync` on the concrete `ReactiveSagaStepFluent`/`CoordinatedSagaStepFluent`, never public.
 
 ### `SagaCompensationCoordinator.CompensateParentAsync` - the durable model
 

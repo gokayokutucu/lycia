@@ -124,8 +124,9 @@ public class SagaCompensationCoordinator(
 
     /// <summary>
     /// Marks the current step compensated and, if it has a logical parent, durably requires and
-    /// immediately attempts propagating compensation to that parent. This is the primitive behind
-    /// <c>Context.BubbleUpCompensationAsync</c> / <c>ContinueCompensation().ThenBubbleUp(ct)</c>.
+    /// immediately attempts propagating compensation to that parent. This is what
+    /// <c>ContinueCompensation().ThenMarkAsCompensated&lt;TStep&gt;().ThenBubbleUp(ct)</c> ultimately calls,
+    /// through the internal <c>IBubbleUpCompensationPrimitive</c> execution primitive on the saga context.
     /// </summary>
     /// <remarks>
     /// Marking the current step compensated and requiring parent propagation are two independently
