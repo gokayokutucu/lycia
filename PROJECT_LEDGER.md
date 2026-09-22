@@ -34,8 +34,11 @@ Git rules. Agents must update this file as phases move through the milestone.
 - Coordinated compensation continuation is `Context.ContinueCompensation().ThenMarkAsCompensated<TStep>()`
   (defers) `.ThenBubbleUp(cancellationToken)` (terminal; propagates to the logical parent) — or the
   two-stage `.ThenMarkAsCompensated<TStep>(cancellationToken)` (terminal; does not propagate). Do not have
-  `ThenBubbleUp` also call `MarkAsCompensated` first: `Context.BubbleUpCompensationAsync<TStep>` (what
-  `ThenBubbleUp` calls) already logs the step Compensated as one step of its own durable propagation walk.
+  `ThenBubbleUp` also call `MarkAsCompensated` first: the internal bubble-up primitive it calls already
+  logs the step Compensated as one step of its own durable propagation walk. That primitive
+  (`IBubbleUpCompensationPrimitive`, `Lycia.Saga.Abstractions.Compensating`) is deliberately internal, not
+  a member of `ISagaContext` — never re-add a public `Context.BubbleUpCompensationAsync<TStep>(...)` or any
+  equivalent direct-call escape hatch; `ThenBubbleUp` must remain its only application-facing entry point.
 - Compensation propagation durability is part of `ISagaStore` correctness, not an optional add-on: the
   current step's `Compensated` status is never treated as proof that propagation to its logical parent
   completed, started, or is even required — those are separate durable facts
@@ -333,6 +336,46 @@ final validation are complete; see `FINALIZATION`.)
   solution build, `git diff --check`. See DEVELOPERS.md, "Coordinated compensation continuation", for the
   full state machine, persistence authority, worker behavior, and crash-boundary-to-test mapping.
   Feature commit `5a7badb`; merged into `dev` as `30654a6`. Not released.
+- **Post-1.18.0 patch — RabbitMQ consumer-readiness CI fix and compensation fluent-API encapsulation:**
+  Closes a real GitHub Actions failure introduced by the durable-compensation-propagation merge above:
+  `RabbitMqSagaCompensationIntegrationTests.ResponseProducedByOneReplica_IsContinuedByAnotherReplica_FromSharedRedisState`
+  failed on net10.0 only (`RabbitMqUnroutableMessageException`, exchange `response.ReplicaResponse`). Root
+  cause: `RabbitMqEventBus` declares a response queue/exchange/binding lazily, only when consumption starts
+  (`ConsumeWithAckAsync`/`ConsumeAsync`), not during `CreateAsync`; the test started its consumer in an
+  unawaited background `Task.Run` and used a fixed `Task.Delay` before publishing, racing that lazy
+  declaration under CI's tighter scheduling. This was a test-harness bug, not a production lifecycle bug —
+  `RabbitMqEventBus.ConsumerReady` (backed by a `TaskCompletionSource`, already used correctly by
+  `RabbitMqEventBusIntegrationTests` via the existing `EventBusReadiness.WaitForConsumersAsync` helper) was
+  the deterministic readiness signal the test should have awaited. Both racing call sites in
+  `RabbitMqSagaCompensationIntegrationTests.cs` now await it instead. Publisher confirms and
+  mandatory/routability checking were not touched or weakened. `.github/workflows/dotnet.yml`'s integration
+  job also had its `dotnet test` step split per target framework with distinct trx file names (previously
+  net9.0's and net10.0's results shared one file, so the first was silently overwritten — exactly what hid
+  the net10.0 failure detail from the uploaded artifact even though the job's own exit code still failed
+  correctly); the net10.0 step is guarded with `if: always()` so a net9.0 failure can never suppress it.
+  Also closes a real public-API gap the previous phase's final report had flagged:
+  `ISagaContext<TInitialMessage>.BubbleUpCompensationAsync<TStep>` was still public and directly callable
+  (`Context.BubbleUpCompensationAsync<T>(ct)`), bypassing the intended
+  `ContinueCompensation().ThenMarkAsCompensated<T>().ThenBubbleUp(ct)` staged grammar entirely. Removed from
+  the public interface; the execution primitive now lives on a new internal `IBubbleUpCompensationPrimitive`
+  (`Lycia.Saga.Abstractions.Compensating`) that every built-in saga context implements as an *explicit*
+  interface implementation, invisible even on the concrete public `SagaContext<T>` type — this is a
+  compile-time impossibility, not a convention. `SagaCompensationContinuation` (the sole intended caller)
+  reaches it via a runtime cast that throws a clear `InvalidOperationException` for a hand-written
+  `ISagaContext<T>` that doesn't implement it (the one place this invariant is necessarily a runtime check,
+  since the public type system cannot express "does this arbitrary external context support bubble-up"
+  without exposing the primitive itself). `CoordinatedSagaHandler`/`CoordinatedResponsiveSagaHandler`'s
+  default `CompensateAsync` now goes through the same public staged grammar instead of touching the
+  primitive. `SendWithTracking`/`PublishWithTracking`/`RespondWithTracking`/`ScheduleWithTracking` and the
+  `Then*` fluent surface were audited and found already compliant (no production changes needed there).
+  New `FluentApiEncapsulationTests.cs` proves the compiled public surface by reflection. Full regression
+  green: `Lycia.Tests` (net9.0/net10.0, 231/231) and `Lycia.Tests.NetFramework` (net48, 46/46),
+  `Lycia.Extensions.AspNetCore.Tests`, InMemory/Redis/SQL Server/PostgreSQL provider suites (real
+  containers), full solution Debug/Release build, `git diff --check`. `Lycia.IntegrationTests` run six times
+  total across both TFMs after the fix (46/46 every time) with no recurrence of the race, plus 8 additional
+  isolated net10.0-only runs of the previously-failing test. See DEVELOPERS.md, "The staged-fluent
+  encapsulation invariant" (under "Coordinated compensation continuation"). Feature commit `29efc4c`; merged
+  into `dev` as `0c07fe0`. Not released.
 
 # FINALIZATION
 
