@@ -25,6 +25,9 @@ public class InventorySagaHandler :
     public override Task CompensateAsync(ReserveInventoryCommand message, CancellationToken cancellationToken = default)
     {
         Context.Data.InventoryCompensated = true;
-        return Context.CompensateAndBubbleUp<ReserveInventoryCommand>(cancellationToken);
+        return Context
+            .ContinueCompensation()
+            .ThenMarkAsCompensated<ReserveInventoryCommand>()
+            .ThenBubbleUp(cancellationToken);
     }
 }

@@ -284,6 +284,17 @@ Several distinct things are all called "compensation," and Lycia keeps them sepa
   (via `ParentMessageId`), invoking the parent's compensation handler. This is what "bubble up" means in
   Lycia: parent-lineage propagation, never a global broadcast.
 
+**Bubble-up is recoverable after process failure.** Marking a step compensated and requiring that its
+parent also be compensated are two separately durable facts — the framework never treats "this step is
+Compensated" as proof that its parent's compensation happened, or even started. If the process crashes
+after `ThenBubbleUp` durably records that requirement but before the parent's handler finishes, a hosted
+recovery worker resumes it automatically; you don't call anything extra to opt into this; it is part of
+what makes a `SagaStore` a `SagaStore`. Like every other handler invocation in Lycia, this recovery is
+**at-least-once, not exactly-once** — a parent's compensation handler can run more than once for the same
+logical propagation. Write it the way you'd write any Lycia handler: make the external side effect it
+performs (refunding a payment, releasing inventory, cancelling a shipment) idempotent, so running it twice
+is harmless.
+
 **Root vs. intermediate.** A root/final step has no logical parent, so it only ever marks itself
 compensated:
 

@@ -113,7 +113,57 @@ public interface ISagaStore
     /// <summary>
     /// Loads the full saga context (including metadata and tracking state) for the given saga identifier.
     /// </summary>
-    Task<ISagaContext<TMessage, TSagaData>> LoadContextAsync<TMessage, TSagaData>(Guid sagaId, TMessage message, Type handlerType) 
+    Task<ISagaContext<TMessage, TSagaData>> LoadContextAsync<TMessage, TSagaData>(Guid sagaId, TMessage message, Type handlerType)
         where TSagaData : SagaData
         where TMessage : IMessage;
+
+    /// <summary>
+    /// Idempotently ensures a durable compensation propagation edge exists for
+    /// (<paramref name="sagaId"/>, <paramref name="childMessageId"/>) → <paramref name="parentMessageId"/>,
+    /// creating it as <see cref="CompensationPropagationStatus.Pending"/> if absent, and atomically claims
+    /// it for an immediate attempt if it is currently claimable. Re-adding an already-known edge is a safe
+    /// no-op; it is never duplicated. Implementations must make the claim step (not the create step) the
+    /// sole point of mutual exclusion: concurrent callers may all reach the create step, but at most one
+    /// receives <see cref="CompensationPropagationClaimOutcome.Claimed"/> for a given edge at a time.
+    /// </summary>
+    /// <param name="sagaId">The saga the edge belongs to.</param>
+    /// <param name="childMessageId">The compensated child step's message id.</param>
+    /// <param name="parentMessageId">The child's parent message id (denormalized for visibility only).</param>
+    /// <param name="owner">An identity for the caller, recorded on a successful claim.</param>
+    /// <param name="leaseDuration">How long the claim is considered live before another owner may reclaim it.</param>
+    /// <param name="maxAttempts">The maximum number of attempts permitted before the edge is marked <see cref="CompensationPropagationStatus.Failed"/>.</param>
+    /// <param name="cancellationToken">A token observed only before the edge is durably created; once created, the edge is never erased by cancellation.</param>
+    Task<CompensationPropagationClaim> EnsureAndClaimCompensationPropagationAsync(Guid sagaId, Guid childMessageId,
+        Guid parentMessageId, string owner, TimeSpan leaseDuration, int maxAttempts,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Atomically claims up to <paramref name="maxCount"/> propagation edges for <c>CompensationWorker</c>
+    /// recovery: edges that are <see cref="CompensationPropagationStatus.Pending"/>, plus
+    /// <see cref="CompensationPropagationStatus.Claimed"/> ones whose last update is older than
+    /// <paramref name="recoveryTimeout"/> (an owner that died mid-attempt). An edge whose
+    /// <see cref="CompensationPropagationIntent.AttemptCount"/> has already reached
+    /// <paramref name="maxAttempts"/> is moved to <see cref="CompensationPropagationStatus.Failed"/> instead
+    /// of being returned. Implementations must claim atomically, so that two workers never both take
+    /// ownership of the same edge.
+    /// </summary>
+    Task<IReadOnlyList<CompensationPropagationIntent>> ClaimDueCompensationPropagationsAsync(int maxCount,
+        string owner, TimeSpan leaseDuration, TimeSpan recoveryTimeout, int maxAttempts,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Marks a propagation edge completed. Idempotent: completing an already-completed edge is a safe no-op.</summary>
+    Task MarkCompensationPropagationCompletedAsync(Guid sagaId, Guid childMessageId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Marks a propagation edge <see cref="CompensationPropagationStatus.Failed"/> after its attempts are
+    /// exhausted, recording <paramref name="failureInfo"/> for operator visibility. Terminal: a failed edge
+    /// is never returned by <see cref="ClaimDueCompensationPropagationsAsync"/> again.
+    /// </summary>
+    Task MarkCompensationPropagationFailedAsync(Guid sagaId, Guid childMessageId,
+        SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default);
+
+    /// <summary>Gets a propagation edge's current record, or <c>null</c> if none has been created for that child.</summary>
+    Task<CompensationPropagationIntent?> GetCompensationPropagationIntentAsync(Guid sagaId, Guid childMessageId,
+        CancellationToken cancellationToken = default);
 }

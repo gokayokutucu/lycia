@@ -166,12 +166,12 @@ public class SagaContext<TInitialMessage>(
             StepStatus.Compensated, HandlerTypeOfCurrentStep, CurrentStep, (Exception?)null, cancellationToken);
     }
 
-    public virtual Task CompensateAndBubbleUp<TStep>(CancellationToken cancellationToken = default)
+    public virtual Task BubbleUpCompensationAsync<TStep>(CancellationToken cancellationToken = default)
         where TStep : IMessage
     {
         // No SagaData exists at this (reactive, non-generic-data) level, so there is nothing to save here -
-        // only the compensation coordinator's parent-lineage walk, which itself logs the current step
-        // Compensated before locating and invoking the parent's compensation handler.
+        // only the compensation coordinator's durable propagation flow, which itself logs the current step
+        // Compensated, durably requires parent propagation, and immediately attempts it.
         return compensationCoordinator.CompensateParentAsync(SagaId, CurrentStep.GetType(), HandlerTypeOfCurrentStep,
             CurrentStep, cancellationToken);
     }
@@ -401,7 +401,7 @@ public class SagaContext<TInitialMessage, TSagaData> : SagaContext<TInitialMessa
             StepStatus.CompensationFailed, HandlerTypeOfCurrentStep, CurrentStep, ex, cancellationToken);
     }
 
-    public override async Task CompensateAndBubbleUp<TStep>(CancellationToken cancellationToken = default)
+    public override async Task BubbleUpCompensationAsync<TStep>(CancellationToken cancellationToken = default)
     {
         await _sagaStore.SaveSagaDataAsync(SagaId, Data, cancellationToken);
         await _compensationCoordinator.CompensateParentAsync(SagaId, CurrentStep.GetType(), HandlerTypeOfCurrentStep,
@@ -611,12 +611,12 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
             StepStatus.Compensated, HandlerTypeOfCurrentStep, CurrentStep, (SagaStepFailureInfo?)null, cancellationToken);
     }
 
-    public Task CompensateAndBubbleUp<TAdapterStep>(CancellationToken cancellationToken = default)
+    public Task BubbleUpCompensationAsync<TAdapterStep>(CancellationToken cancellationToken = default)
         where TAdapterStep : IMessage
     {
         // No SagaData exists at this (reactive, non-generic-data) level, so there is nothing to save here -
-        // only the compensation coordinator's parent-lineage walk, which itself logs the current step
-        // Compensated before locating and invoking the parent's compensation handler.
+        // only the compensation coordinator's durable propagation flow, which itself logs the current step
+        // Compensated, durably requires parent propagation, and immediately attempts it.
         return compensationCoordinator.CompensateParentAsync(SagaId, CurrentStep.GetType(), HandlerTypeOfCurrentStep,
             CurrentStep, cancellationToken);
     }
@@ -936,11 +936,12 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
             StepStatus.Compensated, HandlerTypeOfCurrentStep, StepAdapter, (Exception?)null, cancellationToken);
     }
 
-    public async Task CompensateAndBubbleUp<TMarkStep>(CancellationToken cancellationToken = default)
+    public async Task BubbleUpCompensationAsync<TMarkStep>(CancellationToken cancellationToken = default)
         where TMarkStep : IMessage
     {
         await sagaStore.SaveSagaDataAsync(SagaId, Data, cancellationToken);
-        // Step log should be in the compensation coordinator
+        // The compensation coordinator logs the current step Compensated, durably requires parent
+        // propagation, and immediately attempts it.
         await compensationCoordinator.CompensateParentAsync(SagaId, StepAdapter.GetType(), HandlerTypeOfCurrentStep,
             StepAdapter, cancellationToken);
     }

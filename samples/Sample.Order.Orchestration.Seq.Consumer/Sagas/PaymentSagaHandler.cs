@@ -41,6 +41,9 @@ public class PaymentSagaHandler :
     {
         // No business compensation required, but need to bubble up
         Context.Data.PaymentCompensated = true;
-        await Context.CompensateAndBubbleUp<ProcessPaymentCommand>(cancellationToken);
+        await Context
+            .ContinueCompensation()
+            .ThenMarkAsCompensated<ProcessPaymentCommand>()
+            .ThenBubbleUp(cancellationToken);
     }
 }

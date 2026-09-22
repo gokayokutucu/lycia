@@ -15,6 +15,7 @@ using Lycia.Messaging;
 using Lycia.Observability;
 using Lycia.Retry;
 using Lycia.Saga.Abstractions;
+using Lycia.Saga.Abstractions.Compensating;
 using Lycia.Saga.Abstractions.Handlers;
 using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Abstractions.Middlewares;
@@ -107,7 +108,14 @@ namespace Lycia.Extensions
                 .Bind(configuration.GetSection(OutboxOptions.SectionName));
             services.AddOptions<OutboxWorkerOptions>()
                 .Bind(configuration.GetSection(OutboxOptions.SectionName).GetSection("Worker"));
-            
+
+            // Compensation propagation durability is part of SagaStore correctness, not an optional
+            // add-on - unlike Inbox/Outbox above, CompensationWorker is registered unconditionally
+            // regardless of persistence provider. Use LyciaPersistenceBuilder.WithCompensationWorker(...)
+            // to tune these defaults.
+            services.AddOptions<CompensationWorkerOptions>()
+                .Bind(configuration.GetSection("Lycia:CompensationWorker"));
+
             services
                 .AddOptions<LoggingOptions>()
                 .Bind(configuration.GetSection("Lycia:Logging"))
@@ -120,6 +128,7 @@ namespace Lycia.Extensions
             services.TryAddScoped<ISagaIdGenerator, DefaultSagaIdGenerator>();
             services.TryAddScoped<ISagaDispatcher, SagaDispatcher>();
             services.TryAddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
+            services.TryAddEnumerable(ServiceDescriptor.Singleton<Microsoft.Extensions.Hosting.IHostedService, CompensationWorker>());
             services.TryAddScoped<ISagaContextAccessor, SagaContextAccessor>();
             services.TryAddScoped<ISagaJournalContextAccessor, SagaJournalContextAccessor>();
             services.TryAddScoped<ILyciaReliabilityDiagnostics, LyciaReliabilityDiagnostics>();
@@ -291,7 +300,9 @@ namespace Lycia.Extensions
             services.TryAddScoped<ILyciaReliabilityDiagnostics, LyciaReliabilityDiagnostics>();
             services.TryAddScoped<ISagaDispatcher, SagaDispatcher>();
             services.TryAddScoped<ISagaCompensationCoordinator, SagaCompensationCoordinator>();
-            
+            services.AddOptions<CompensationWorkerOptions>();
+            services.TryAddEnumerable(ServiceDescriptor.Singleton<Microsoft.Extensions.Hosting.IHostedService, CompensationWorker>());
+
             // For observability primitives (vendor-agnostic)
             services.TryAddSingleton<LyciaActivitySourceHolder>();
 

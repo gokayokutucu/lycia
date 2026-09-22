@@ -60,7 +60,7 @@ public abstract class CoordinatedResponsiveSagaHandler<TMessage, TResponse, TSag
     public abstract Task HandleAsync(TMessage message, CancellationToken cancellationToken = default);
     
     public virtual Task CompensateAsync(TMessage message, CancellationToken cancellationToken = default) => 
-        Context.CompensateAndBubbleUp<TMessage>(cancellationToken);
+        Context.BubbleUpCompensationAsync<TMessage>(cancellationToken);
     
     protected Task MarkAsComplete(CancellationToken cancellationToken = default) => Context.MarkAsComplete<TMessage>(cancellationToken);
     protected Task MarkAsFailed(CancellationToken cancellationToken = default) => Context.MarkAsFailed<TMessage>(cancellationToken);

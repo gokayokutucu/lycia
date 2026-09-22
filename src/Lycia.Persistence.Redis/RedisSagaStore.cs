@@ -37,6 +37,128 @@ public class RedisSagaStore(
 
     private static string SagaDataKey(Guid sagaId) => $"saga:data:{sagaId}";
     private static string StepLogKey(Guid sagaId) => $"saga:steps:{sagaId}";
+    private const string CompensationPendingKey = "saga:compensation:pending";
+    private static string CompensationEdgeKey(Guid sagaId, Guid childMessageId) => $"saga:compensation:{sagaId}:{childMessageId}";
+    private static string CompensationMember(Guid sagaId, Guid childMessageId) => $"{sagaId}|{childMessageId}";
+
+    // The Lua scripts above write/compare CompensationPropagationStatus as a string (e.g. 'Completed'),
+    // matching cjson's Lua-table representation. Newtonsoft's default enum serialization writes an int, so
+    // any C#-side rewrite of an edge (MarkCompensationPropagationCompletedAsync/FailedAsync) must use this
+    // converter too, or a later Lua read of that edge silently fails every string status comparison.
+    private static readonly JsonSerializerSettings CompensationIntentJsonSettings = new()
+    {
+        Converters = { new Newtonsoft.Json.Converters.StringEnumConverter() }
+    };
+
+    // Idempotently creates the edge as Pending (immediately due) if absent, then attempts to claim it in
+    // the same atomic script: mutual exclusion is entirely in the claim half, so two callers racing the
+    // same edge can both reach the create half safely but at most one receives status "claimed".
+    private const string EnsureAndClaimCompensationScript = @"
+local edgeKey = KEYS[1]
+local pendingKey = KEYS[2]
+local sagaId = ARGV[1]
+local childId = ARGV[2]
+local parentId = ARGV[3]
+local owner = ARGV[4]
+local leaseMs = tonumber(ARGV[5])
+local maxAttempts = tonumber(ARGV[6])
+local nowMs = tonumber(ARGV[7])
+local nowIso = ARGV[8]
+local member = ARGV[9]
+
+local json = redis.call('get', edgeKey)
+local edge
+if json then
+  edge = cjson.decode(json)
+else
+  edge = { SagaId = sagaId, ChildMessageId = childId, ParentMessageId = parentId, Status = 'Pending',
+           AttemptCount = 0, Owner = cjson.null, CreatedAtUtc = nowIso, UpdatedAtUtc = nowIso, FailureInfo = cjson.null }
+  redis.call('set', edgeKey, cjson.encode(edge))
+  redis.call('zadd', pendingKey, nowMs, member)
+end
+
+if edge.Status == 'Completed' then
+  return {'AlreadyCompleted', cjson.encode(edge)}
+end
+if edge.Status == 'Failed' then
+  return {'AttemptsExhausted', cjson.encode(edge)}
+end
+if edge.Status == 'Claimed' then
+  -- Staleness is judged by the pending set's own due-score, which every successful claim (re)schedules
+  -- to now+lease: a live claim's member score is still in the future, a stale one's is not (or the
+  -- member is absent, e.g. already picked up by a batch claim pass).
+  local dueScore = redis.call('zscore', pendingKey, member)
+  if dueScore and tonumber(dueScore) > nowMs then
+    return {'ClaimedByAnother', cjson.encode(edge)}
+  end
+end
+if tonumber(edge.AttemptCount) >= maxAttempts then
+  edge.Status = 'Failed'
+  edge.UpdatedAtUtc = nowIso
+  if edge.FailureInfo == cjson.null then
+    edge.FailureInfo = { Reason = 'Compensation propagation attempts exhausted', ExceptionType = cjson.null, ExceptionDetail = cjson.null }
+  end
+  redis.call('set', edgeKey, cjson.encode(edge))
+  redis.call('zrem', pendingKey, member)
+  return {'AttemptsExhausted', cjson.encode(edge)}
+end
+
+edge.Status = 'Claimed'
+edge.Owner = owner
+edge.AttemptCount = tonumber(edge.AttemptCount) + 1
+edge.UpdatedAtUtc = nowIso
+redis.call('set', edgeKey, cjson.encode(edge))
+redis.call('zadd', pendingKey, nowMs + leaseMs, member)
+return {'Claimed', cjson.encode(edge)}";
+
+    // Claims up to maxCount due edges (Pending, or Claimed whose lease/schedule has passed) exactly like
+    // ClaimPendingBatchAsync does for the Outbox: pop the oldest-due members, re-check eligibility against
+    // the edge's own record (never trust the queue alone), and reschedule the ones claimed to now+lease.
+    private const string ClaimDueCompensationScript = @"
+local pendingKey = KEYS[1]
+local maxCount = tonumber(ARGV[1])
+local owner = ARGV[2]
+local leaseMs = tonumber(ARGV[3])
+local maxAttempts = tonumber(ARGV[4])
+local nowMs = tonumber(ARGV[5])
+local nowIso = ARGV[6]
+local edgePrefix = ARGV[7]
+local results = {}
+if maxCount <= 0 then return results end
+local members = redis.call('zrangebyscore', pendingKey, '-inf', nowMs, 'LIMIT', 0, maxCount)
+for i = 1, #members do
+  local member = members[i]
+  -- member is ""sagaId|childMessageId"" (CompensationMember); the real edge key is
+  -- ""<edgePrefix>sagaId:childMessageId"" (CompensationEdgeKey) - translate the separator, don't
+  -- concatenate the member as-is, or this never finds the edge and silently drops every entry.
+  local edgeKey = edgePrefix .. string.gsub(member, '|', ':')
+  local json = redis.call('get', edgeKey)
+  if json then
+    local edge = cjson.decode(json)
+    if edge.Status == 'Pending' or edge.Status == 'Claimed' then
+      if tonumber(edge.AttemptCount) >= maxAttempts then
+        edge.Status = 'Failed'
+        edge.UpdatedAtUtc = nowIso
+        if edge.FailureInfo == cjson.null then
+          edge.FailureInfo = { Reason = 'Compensation propagation attempts exhausted', ExceptionType = cjson.null, ExceptionDetail = cjson.null }
+        end
+        redis.call('set', edgeKey, cjson.encode(edge))
+        redis.call('zrem', pendingKey, member)
+      else
+        edge.Status = 'Claimed'
+        edge.Owner = owner
+        edge.AttemptCount = tonumber(edge.AttemptCount) + 1
+        edge.UpdatedAtUtc = nowIso
+        redis.call('set', edgeKey, cjson.encode(edge))
+        redis.call('zadd', pendingKey, nowMs + leaseMs, member)
+        table.insert(results, cjson.encode(edge))
+      end
+    end
+  else
+    redis.call('zrem', pendingKey, member)
+  end
+end
+return results";
 
     // Atomically saves the saga-data blob only if the currently stored Version equals expectedVersion.
     // Returns the new version on success, or -1 (with the actual stored version) on mismatch.
@@ -421,5 +543,84 @@ return {1, tonumber(ARGV[1]) + 1}";
         {
             return false;
         }
+    }
+
+    /// <inheritdoc />
+    public async Task<CompensationPropagationClaim> EnsureAndClaimCompensationPropagationAsync(Guid sagaId,
+        Guid childMessageId, Guid parentMessageId, string owner, TimeSpan leaseDuration, int maxAttempts,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var now = DateTime.UtcNow;
+        var result = (RedisResult[])(await redisDb.ScriptEvaluateAsync(
+            EnsureAndClaimCompensationScript,
+            [CompensationEdgeKey(sagaId, childMessageId), CompensationPendingKey],
+            [sagaId.ToString(), childMessageId.ToString(), parentMessageId.ToString(), owner,
+                (long)leaseDuration.TotalMilliseconds, maxAttempts, new DateTimeOffset(now).ToUnixTimeMilliseconds(),
+                now.ToString("O"), CompensationMember(sagaId, childMessageId)]))!;
+
+        return ToClaim(result);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<CompensationPropagationIntent>> ClaimDueCompensationPropagationsAsync(
+        int maxCount, string owner, TimeSpan leaseDuration, TimeSpan recoveryTimeout, int maxAttempts,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var now = DateTime.UtcNow;
+        var result = (RedisResult[])(await redisDb.ScriptEvaluateAsync(
+            ClaimDueCompensationScript,
+            [CompensationPendingKey],
+            [maxCount, owner, (long)leaseDuration.TotalMilliseconds, maxAttempts,
+                new DateTimeOffset(now).ToUnixTimeMilliseconds(), now.ToString("O"), "saga:compensation:"]))!;
+
+        return result.Select(r => JsonConvert.DeserializeObject<CompensationPropagationIntent>((string)r!)!).ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task MarkCompensationPropagationCompletedAsync(Guid sagaId, Guid childMessageId,
+        CancellationToken cancellationToken = default)
+    {
+        var key = CompensationEdgeKey(sagaId, childMessageId);
+        var json = await redisDb.StringGetAsync(key);
+        if (!json.HasValue) return;
+
+        var intent = JsonConvert.DeserializeObject<CompensationPropagationIntent>(json!)!;
+        intent.Status = CompensationPropagationStatus.Completed;
+        intent.UpdatedAtUtc = DateTime.UtcNow;
+        await redisDb.StringSetAsync(key, JsonConvert.SerializeObject(intent, CompensationIntentJsonSettings));
+        await redisDb.SortedSetRemoveAsync(CompensationPendingKey, CompensationMember(sagaId, childMessageId));
+    }
+
+    /// <inheritdoc />
+    public async Task MarkCompensationPropagationFailedAsync(Guid sagaId, Guid childMessageId,
+        SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default)
+    {
+        var key = CompensationEdgeKey(sagaId, childMessageId);
+        var json = await redisDb.StringGetAsync(key);
+        if (!json.HasValue) return;
+
+        var intent = JsonConvert.DeserializeObject<CompensationPropagationIntent>(json!)!;
+        intent.Status = CompensationPropagationStatus.Failed;
+        intent.FailureInfo = failureInfo;
+        intent.UpdatedAtUtc = DateTime.UtcNow;
+        await redisDb.StringSetAsync(key, JsonConvert.SerializeObject(intent, CompensationIntentJsonSettings));
+        await redisDb.SortedSetRemoveAsync(CompensationPendingKey, CompensationMember(sagaId, childMessageId));
+    }
+
+    /// <inheritdoc />
+    public async Task<CompensationPropagationIntent?> GetCompensationPropagationIntentAsync(Guid sagaId,
+        Guid childMessageId, CancellationToken cancellationToken = default)
+    {
+        var json = await redisDb.StringGetAsync(CompensationEdgeKey(sagaId, childMessageId));
+        return json.HasValue ? JsonConvert.DeserializeObject<CompensationPropagationIntent>(json!) : null;
+    }
+
+    private static CompensationPropagationClaim ToClaim(RedisResult[] result)
+    {
+        var outcome = (CompensationPropagationClaimOutcome)Enum.Parse(typeof(CompensationPropagationClaimOutcome), (string)result[0]!);
+        var intent = JsonConvert.DeserializeObject<CompensationPropagationIntent>((string)result[1]!);
+        return new CompensationPropagationClaim(outcome, intent);
     }
 }

@@ -697,7 +697,7 @@ eager-connection risk is also covered directly against `LyciaReliabilityDiagnost
 | Pattern | State | Handlers |
 | --- | --- | --- |
 | Choreography (reactive) | Stateless, no `TSagaData`; compensation through `ISagaCompensationHandler<T>` | `StartReactiveSagaHandler<TStart>`, `ReactiveSagaHandler<TMessage>` |
-| Sequential orchestration (coordinated) | `TSagaData`; failures compensate through `Context.ContinueCompensation().ThenMarkAsCompensated<T>().ThenBubbleUp(ct)` (or the lower-level `CompensateAndBubbleUp<T>(ct)` it wraps) | `StartCoordinatedSagaHandler<TStart, TSagaData>`, `CoordinatedSagaHandler<TMessage, TSagaData>` |
+| Sequential orchestration (coordinated) | `TSagaData`; failures compensate through `Context.ContinueCompensation().ThenMarkAsCompensated<T>().ThenBubbleUp(ct)` (or the lower-level `Context.BubbleUpCompensationAsync<T>(ct)` it wraps) | `StartCoordinatedSagaHandler<TStart, TSagaData>`, `CoordinatedSagaHandler<TMessage, TSagaData>` |
 | Request-response orchestration | `TSagaData`; each step sends a command and continues on the response | `StartCoordinatedResponsiveSagaHandler<TStart, TResponse, TSagaData>`, `CoordinatedResponsiveSagaHandler<TMessage, TResponse, TSagaData>`, `IResponseSagaHandler<TResponse>` |
 
 `Sample.Order.Orchestration.Consumer` and the Microservices sample use request-response orchestration.
@@ -764,67 +764,291 @@ is the only one that returns `ICompensatedContinuation`, so the compiler only ex
 that specific call. `ContinueCompensation()` itself, and the no-token `ThenMarkAsCompensated<TStep>()`,
 touch neither the SagaStore nor the compensation coordinator - `SagaCompensationContinuation` holds only a
 context reference, and `SagaCompensatedContinuation` holds only a closed-over `Func<CancellationToken, Task>`
-(`context.CompensateAndBubbleUp<TStep>`, a method-group conversion - no reflection needed, unlike the
+(`context.BubbleUpCompensationAsync<TStep>`, a method-group conversion - no reflection needed, unlike the
 tracked-messaging fluent classes, because `ContinueCompensation()` is an ordinary instance method on an
 already strongly-typed `ISagaContext<TInitialMessage>`, not something reached through a non-generic factory).
 
 - **Two-stage terminal**: `ThenMarkAsCompensated<TStep>(ct)` calls only `context.MarkAsCompensated<TStep>(ct)`
-  - the same call `Context.MarkAsCompensated<TStep>(ct)` makes directly. No propagation.
+  - the same call `Context.MarkAsCompensated<TStep>(ct)` makes directly. No propagation. Use this for a
+  root step, or for an intermediate step where you deliberately do not want to continue the chain.
 - **Three-stage**: `ThenMarkAsCompensated<TStep>()` (no token) defers; `ThenBubbleUp(ct)` calls only
-  `context.CompensateAndBubbleUp<TStep>(ct)`. It does **not** also call `MarkAsCompensated` first - doing
-  both would double-log the step, and `CompensateParentAsync`'s own idempotency guard (below) would then
-  see the step already `Compensated` and skip propagation entirely. `CompensateAndBubbleUp` already logs
-  `Compensated` as part of its own walk.
+  `context.BubbleUpCompensationAsync<TStep>(ct)`, which both marks the step compensated *and* durably
+  requires - then immediately attempts - propagation to the logical parent. It does **not** also call
+  `MarkAsCompensated` first; the two are one call into the coordinator, not two.
 
-### `SagaCompensationCoordinator.CompensateParentAsync`
+### `SagaCompensationCoordinator.CompensateParentAsync` - the durable model
 
-1. Reads the current step's recorded status; returns immediately if it is already `Compensated` or
-   `CompensationFailed` (redelivery/idempotency guard).
-2. Logs the current step `Compensated`.
-3. Reads the current step's `ParentMessageId` and looks up that step in the saga's step snapshot,
-   skipping one orchestrator response hop if the immediate parent is a `Start...Responsive...` handler's
-   response record (`FindLogicalParentFromSnapshot`). A root step (`ParentMessageId == Guid.Empty`, or no
-   resolvable parent) returns after step 2 - root steps have no propagation requirement.
-4. Deserializes the parent's original message and resolves its compensation handler
-   (`ISagaCompensationHandler<T>` or the parent's own generated `CompensateAsyncInternal`), then invokes it
-   **synchronously, in-process**.
+The former single in-process call (mark compensated, then synchronously invoke the parent) is now two
+independently durable facts, matching the reliability invariant this section exists to explain: **persisting
+"current step Compensated" is never treated as proof that parent propagation completed, started, or is even
+required.** `CompensateParentAsync` now does:
 
-### Crash safety: what is and is not closed
+1. Reads the current step's recorded status. If it is already `CompensationFailed` - a genuine terminal
+   business failure, not a retry of a success - it returns immediately: a failed compensation must never be
+   silently overwritten as `Compensated` and must never propagate as if it had succeeded. This is the only
+   status check left; unlike the old guard, it does **not** also block a step already `Compensated` - that
+   was the exact mechanism behind the crash window this design closes (see "Root cause" below).
+2. Logs the current step `Compensated`. Re-logging the same status for the same message is a safe,
+   idempotent no-op via the store's own step-transition validation (`SagaStepHelper.ValidateSagaStepTransition`)
+   - no separate guard is needed here either.
+3. If `message.ParentMessageId == Guid.Empty` (a root step), returns. **No propagation intent is created for
+   a root step** - see "Root behavior" below.
+4. Otherwise, calls `ISagaStore.EnsureAndClaimCompensationPropagationAsync(sagaId, childMessageId,
+   parentMessageId, owner, leaseDuration, maxAttempts, ct)`. This is the durable handoff: it durably
+   *requires* propagation for this exact edge (`SagaId` + `ChildMessageId` - idempotent identity, so a
+   redelivered call never creates a second logical intent for the same edge) and, in the same call, attempts
+   to *claim* it for the immediate in-process attempt that follows. See "Propagation state machine" below
+   for the claim outcomes.
+5. Only on a `Claimed` outcome does it call `AttemptPropagationAsync` (below) to actually invoke the parent's
+   compensation handler, right now, in-process. Every other outcome (`AlreadyCompleted`, `ClaimedByAnother`,
+   `AttemptsExhausted`) means there is nothing more to do on this call - the durable state already reflects
+   the correct next action (nothing, or "another owner/worker is already on it").
 
-**Not closed.** Steps 2 and 4 are not one atomic unit, and there is no durable record of "propagation to
-the parent is still pending" independent of the child's own `Compensated` status. If the process
-crashes, or the parent handler throws, after step 2 commits but before step 4 finishes, nothing retries
-step 4: the child already reads as `Compensated`, so the guard in step 1 makes any later
-`CompensateParentAsync` call for that same child return immediately without invoking the parent, even
-though the parent's own compensation never ran. `CompensationContinuationTests.KnownGap_...` proves this
-concretely (a real, provider-free reproduction, not a description): pre-seed the child at `Compensated`
-with no record of the parent, call `ThenBubbleUp` again, and no handler runs.
+`AttemptPropagationAsync(sagaId, childMessageId, eventBus, sagaStore, ct)` is the shared implementation
+behind both the immediate in-request attempt above and `CompensationWorker`'s recovery passes (below) -
+resolving the logical parent from the current step snapshot (skipping one orchestrator response hop where
+applicable, exactly as before), deserializing its original message, resolving its compensation handler, and
+invoking it. A structurally unresolvable edge (missing parent step record, unresolvable type, undeserializable
+payload) is marked `Failed` immediately via `MarkCompensationPropagationFailedAsync` - retrying cannot fix a
+lineage/serialization problem, and silently returning would hide a real defect from operators. A handler
+invocation that throws is left alone: the edge stays `Claimed`, and becomes reclaimable once its lease goes
+stale - the bounded-retry path. On success, `MarkCompensationPropagationCompletedAsync` records completion.
+It is intentionally `internal`, not part of `ISagaCompensationCoordinator` - both callers live in the same
+assembly (`Lycia`), and this keeps storage-adjacent propagation mechanics off the public coordinator
+interface (tests reach it via `InternalsVisibleTo`).
 
-**Closed as part of this change.** Before, `StepSpecificSagaContextAdapter<TCurrentStepAdapter>` (the
-reactive fluent's context adapter) and the base, non-generic-data `SagaContext<TInitialMessage>` both
-implemented `CompensateAndBubbleUp<TStep>` as `return Task.CompletedTask;` - a silent no-op. Every
-reactive saga's bubble-up call did nothing at all, with no exception and no log line. Both now delegate to
-`compensationCoordinator.CompensateParentAsync(...)`, the same call the coordinated contexts already made
-(`CompensationContinuationTests.ThenBubbleUp_On_A_Reactive_Context_...` proves this against a real
-`InMemorySagaStore`, not a mock).
+### Propagation state machine
 
-**Idempotent against ordinary redelivery**, which is different from the crash window above: calling
-`ContinueCompensation()...ThenBubbleUp(ct)` twice for the *same already-fully-completed* propagation (the
-parent's handler already ran and the child is `Compensated`) invokes the parent's handler only once - the
-guard in step 1 is correct and load-bearing for this case (`CompensationContinuationTests.ThenBubbleUp_Is_Idempotent_On_Retry_...`).
-It only becomes a problem when it fires between steps 2 and 4 of the *same* attempt.
+`CompensationPropagationIntent` (`Lycia.Common.SagaSteps`) is a small, deliberately minimal durable record -
+it does **not** duplicate the child's message payload or type (both are already durable in the step log's
+`SagaStepMetadata`); it only tracks the propagation edge's own lifecycle:
 
-**What a real fix needs**, if undertaken as a separate change: a durable "propagation pending for child
-X → parent Y" record independent of the child's terminal status, so a recovery pass can tell "child
-Compensated, propagation not yet done" apart from "child Compensated, propagation already done." That
-implies its own persistence capability (schema in every provider, not just relational ones), a claim/lease
-mechanism so concurrent replicas do not invoke the same parent handler twice, and a dedicated recovery
-worker - **not** the Outbox worker (it drives transport delivery, not in-process handler invocation) and
-**not** the Split Store `ReconciliationWorker` (it repairs the Redis projection from canonical state; it
-has no concept of pending compensation propagation). This was scoped out of the current change: it is
-sized like the Outbox or Split Store subsystems themselves, each a dedicated milestone phase in this
-repository's history, not a corollary of a fluent-API/CancellationToken cleanup. See `PROJECT_LEDGER.md`
-for the current backlog entry.
+```csharp
+public enum CompensationPropagationStatus { Pending, Claimed, Completed, Failed }
+
+public sealed class CompensationPropagationIntent
+{
+    public Guid SagaId { get; set; }
+    public Guid ChildMessageId { get; set; }       // identity is SagaId + ChildMessageId
+    public Guid ParentMessageId { get; set; }       // denormalized, for cheap operator visibility only
+    public CompensationPropagationStatus Status { get; set; }
+    public int AttemptCount { get; set; }
+    public string? Owner { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
+    public DateTime UpdatedAtUtc { get; set; }
+    public SagaStepFailureInfo? FailureInfo { get; set; }
+}
+```
+
+Four states, no decorative ones: `Pending` (durably required, unowned) → `Claimed` (owned by an in-request
+attempt or a `CompensationWorker`, for up to its lease/recovery window) → `Completed` or `Failed` (both
+terminal). `CompensationPropagationClaimOutcome` (`Claimed`, `AlreadyCompleted`, `ClaimedByAnother`,
+`AttemptsExhausted`) is what `EnsureAndClaimCompensationPropagationAsync` returns for a single edge.
+
+### Persistence authority: `ISagaStore`, not a second store
+
+Five methods live directly on `ISagaStore` (not a separate, optional interface):
+`EnsureAndClaimCompensationPropagationAsync`, `ClaimDueCompensationPropagationsAsync`,
+`MarkCompensationPropagationCompletedAsync`, `MarkCompensationPropagationFailedAsync`,
+`GetCompensationPropagationIntentAsync`. This is deliberate: compensation propagation durability is part of
+SagaStore correctness, not an optional add-on a provider or an application can forget to configure - the
+same reasoning that put step logging and saga-data persistence on `ISagaStore` in the first place. Every
+built-in provider implements all five:
+
+- **InMemory** (`Lycia.Stores.InMemorySagaStore`): a `ConcurrentDictionary<(SagaId, ChildMessageId),
+  CompensationPropagationIntent>` guarded by one `_propagationLock` (mirrors the existing `_sagaVersions`
+  lock's role) - `TryClaimLocked` is the single mutual-exclusion point both `EnsureAndClaim` and
+  `ClaimDue` share, parameterized by the staleness threshold to apply (see the note in its own doc comment:
+  the single-edge path uses its own `leaseDuration` as that threshold; the batch path uses `recoveryTimeout`
+  - passing the wrong one for the batch path was a real bug this design's own conformance tests caught and
+  fixed).
+- **SQL Server / PostgreSQL** (`SqlServerSagaStore`, `PostgreSqlSagaStore`): a dedicated
+  `LyciaCompensationPropagation` / `lycia_compensation_propagation` table (schema `005_CompensationPropagation`,
+  applied unconditionally alongside the core `001` schema - not opt-in like Inbox/Outbox's `002`), with
+  `PRIMARY KEY (SagaId, ChildMessageId)` giving the idempotent-identity guarantee at the database level, plus
+  an index on `(Status, UpdatedAtUtc)` for the batch claim scan. The batch claim is the same
+  "queue dequeue" pattern already used for Outbox: SQL Server `UPDATE ... WITH (ROWLOCK, READPAST) OUTPUT
+  INSERTED.* FROM (SELECT TOP ...)`; PostgreSQL `UPDATE ... WHERE (...) IN (SELECT ... FOR UPDATE SKIP LOCKED
+  LIMIT n) RETURNING ...`. No fencing token - the same time-window stale-claim-reclaiming plus atomic
+  conditional write Outbox uses, which is why `CompensationWorker` follows Outbox's pattern rather than
+  Scheduling's fencing-token model (see "Why not Outbox/Reconciliation" below for the reasoning, reused
+  here). Both providers use `RelationalConnectionLease<TConnection,TTransaction>.OpenAsync(...)` exactly as
+  `LogStepAsync`/`SaveSagaDataAsync` do, which is what gives this atomicity with other same-request writes
+  *for free* when a LocalAtomic session is ambient (see "Transaction boundary" below) - no new transaction
+  plumbing was invented.
+- **Redis** (`RedisSagaStore`): a JSON blob per edge at `saga:compensation:{sagaId}:{childMessageId}`, plus a
+  single `saga:compensation:pending` ZSET scored by each edge's due time (its member is
+  `"{sagaId}|{childMessageId}"` - note the different separator from the edge key; a Lua script reconstructing
+  the edge key from a ZSET member must translate `|` to `:`, not concatenate the member as-is, or it silently
+  finds nothing - a real bug this design's conformance tests caught). `EnsureAndClaimCompensationScript` and
+  `ClaimDueCompensationScript` are single atomic `EVAL`s, matching Outbox's Lua-script approach. Because the
+  scripts compare `edge.Status` as a Lua *string* (`'Claimed'`, `'Completed'`, ...), any C#-side rewrite of an
+  edge (`MarkCompensationPropagationCompletedAsync`/`FailedAsync`) must serialize the status enum as a string
+  too (`Newtonsoft.Json.Converters.StringEnumConverter`), not Newtonsoft's default integer - another real bug
+  this design's conformance tests caught, since a plain `JsonConvert.SerializeObject(intent)` there would
+  silently break every later Lua string comparison against that edge.
+- **Split Store** (`SplitStoreSagaStore`): all five methods are pure pass-throughs to the wrapped canonical
+  relational store. This is the whole mechanism by which "the canonical store owns compensation propagation
+  durability, never the Redis operational projection" holds - there is no propagation-specific code in Split
+  Store at all; it inherits the canonical provider's correctness (and conformance-test coverage) automatically.
+
+### Transaction boundary
+
+Where a provider has a real local transaction available - a same-request `LocalAtomic` session for SQL
+Server/PostgreSQL via `ILyciaPersistenceSessionAccessor` - `RelationalConnectionLease.OpenAsync` picks it up
+transparently, so "log the child Compensated" and "durably claim the propagation edge" commit atomically
+with each other (and with anything else the same dispatched-message handler wrote) *as a consequence of*
+reusing the exact same connection-lease pattern every other SagaStore write already uses, not because of any
+propagation-specific transaction code. Independent-mode relational writes, Redis, and InMemory have no such
+shared-transaction guarantee - each write commits on its own - which is exactly why atomicity is not the
+thing this design depends on for correctness. **The two facts do not need to commit together**: it is the
+state machine and the recovery worker's own idempotent completion (never destructive) that makes the crash
+window closed even when they commit separately.
+
+### Claim/lease/stale-claim recovery
+
+Same established pattern as `IOutboxStore.ClaimPendingBatchAsync`, deliberately chosen over Scheduling's
+fencing-token model: a leased claim recorded as `(Status=Claimed, Owner, UpdatedAtUtc)`, reclaimable once
+`now - UpdatedAtUtc >= recoveryTimeout`, no fencing token. This was a considered choice, not an oversight:
+compensation propagation is a single durable work item advanced through a small state machine (claim →
+attempt → mark outcome → time-based stale recovery), the same shape as one Outbox message - not
+Scheduling's due-time-batch-with-renewable-lease shape, which is what actually needs a fencing token. Two
+concurrent claimants for the same edge are mutually exclusive by construction (an atomic conditional write:
+`AttemptCount < @maxAttempts AND (Status=Pending OR (Status=Claimed AND stale))`, `WITH (ROWLOCK, READPAST)` /
+`FOR UPDATE SKIP LOCKED` / a Lua `EVAL` / one `lock` statement, per provider) - a worker crash after claiming
+never permanently strands the edge, because the claim itself is time-bounded, not held by any live process
+state.
+
+### `CompensationWorker` - recovery-only safety net
+
+`Lycia.Compensating.CompensationWorker` (a `BackgroundService`, mirroring `OutboxWorker`'s
+`ExecuteAsync`/`RunOnceAsync`/exponential-backoff-with-jitter shape) is **not** the mandatory happy-path
+executor. On the healthy path, the durable handoff and the immediate attempt happen in the same
+`CompensateParentAsync` call (step 4-5 above); the worker never even sees that edge. It exists purely to
+resume what the immediate path could not finish: `ClaimDueCompensationPropagationsAsync` claims a batch of
+due edges (`Pending`, or `Claimed` past its stale window) each pass, and `AttemptPropagationAsync` is called
+per claimed edge, with each attempt individually try/caught so one failing edge never stops the worker loop
+from processing the rest of the batch or from running its next pass. `CompensationWorkerOptions`
+(`BatchSize`, `MaxAttempts`, `RecoveryTimeout`, `PollInterval`, `RetryBackoff`/`MaxRetryBackoff`/`MaxJitter`,
+plus `Enabled` as a pure operational kill switch for the recovery loop only) is registered unconditionally by
+both `AddLycia` and `AddLyciaInMemory` - `services.AddOptions<CompensationWorkerOptions>()` plus
+`services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, CompensationWorker>())`, the exact
+precedent `LyciaPersistenceBuilder.UseSplitStore()` set for `ReconciliationWorker`. `WithCompensationWorker(configure)`
+on `LyciaPersistenceBuilder` only tunes the options (`Services.Configure(configure)`); there is no
+`UseCompensationWorker()` enable call, because there is nothing to opt into - the worker is core.
+
+### Why not `OutboxWorker` or `ReconciliationWorker`
+
+Both were considered and rejected as the recovery mechanism, not merely unused by omission:
+
+- **`OutboxWorker`** drives durable *outgoing transport messages* (`IOutboxStore`) - it dispatches things
+  onto the event bus. Compensation propagation is an *in-process handler invocation*
+  (`SagaCompensationCoordinator` calling a compensation handler directly, the same as the immediate path
+  does), not an outgoing message. Reusing Outbox would mean redesigning propagation as an actual message on
+  the bus, which was explicitly not undertaken here - the default, smallest-correct direction is a dedicated
+  worker that shares Outbox's *pattern* (claim/lease/backoff), not its *queue*.
+- **`ReconciliationWorker`** repairs the Redis operational projection from Split Store's canonical state -
+  it has no concept of compensation, propagation, or handler invocation at all; it is a projection-repair
+  loop for a completely different subsystem.
+
+### Cancellation boundary
+
+The durable handoff (`EnsureAndClaimCompensationPropagationAsync`'s atomic claim) is the dividing line.
+Before it: `CompensateParentAsync` calls `cancellationToken.ThrowIfCancellationRequested()` up front, so a
+pre-cancelled token prevents any mutation, including the durable claim itself, from happening at all. After
+it: the durable `Claimed` record has already committed, so a cancellation (or any exception) from the
+immediate `AttemptPropagationAsync` call propagates to the caller exactly as before, but it never erases or
+un-claims the durable requirement - `CompensationWorker` recovers it once the lease goes stale, exactly as if
+the process had crashed instead of the caller cancelling. Caller cancellation only ever stops *this specific
+attempt*; it can never make the requirement to propagate disappear.
+
+### Retry, exhaustion, and idempotency semantics
+
+- **Retry**: a `Claimed` edge whose parent-handler invocation throws is left `Claimed` - the next pass (the
+  worker, or another concurrent immediate attempt) reclaims it once `recoveryTimeout` has elapsed, up to
+  `MaxAttempts` total attempts (the immediate in-request attempt, if it ran, counts as one).
+- **Exhaustion**: once `AttemptCount >= MaxAttempts`, the edge is moved to the terminal `Failed` state with a
+  recorded `FailureInfo` - both the relational batch-claim query and the InMemory/Redis equivalents do this
+  as part of the same claim pass that discovers the exhaustion, so an exhausted edge stops being
+  rediscovered by every future pass instead of silently spinning forever. It is never silently discarded:
+  `GetCompensationPropagationIntentAsync(sagaId, childMessageId)` is how an operator (or a health check, or a
+  future admin surface) finds it - `Status == Failed` with a non-null `FailureInfo.Reason`.
+  `MarkCompensationPropagationFailedAsync` is also called directly, bypassing retry entirely, for a
+  structurally unresolvable edge (see step 4-5 above) - retrying a missing/undeserializable parent record
+  cannot succeed, so treating it the same as a slow-but-recoverable handler failure would just waste
+  `MaxAttempts` passes before reaching the same terminal state.
+- **Idempotency, and the at-least-once boundary**: framework-level state transitions are idempotent by
+  construction (`MarkCompensationPropagationCompletedAsync`/`FailedAsync` are safe to call more than once;
+  the store's own step-transition validation makes re-logging the same `Compensated` status a no-op) and the
+  propagation intent's identity (`SagaId` + `ChildMessageId`) prevents a redelivered call from ever creating
+  a second logical intent for the same edge. **Lycia does not claim exactly-once here, and never has** - if
+  a worker invokes the parent's handler (the business undo runs), then crashes before
+  `MarkCompensationPropagationCompletedAsync` records that fact, the next recovery pass invokes the parent's
+  handler again. The framework-level bookkeeping stays consistent either way; it is the compensation
+  handler's own responsibility to make its external side effects (the actual business undo - refunding a
+  payment, releasing inventory, cancelling a shipment) idempotent, exactly as Lycia already expects of every
+  ordinary at-least-once handler invocation. This is documented, not incidental.
+
+### Root behavior
+
+A root step - one with no logical parent (`ParentMessageId == Guid.Empty`) - only ever gets `MarkAsCompensated`/
+`LogStepAsync(..., Compensated, ...)`. `CompensateParentAsync` returns immediately after that check, before
+ever calling `EnsureAndClaimCompensationPropagationAsync`: **no propagation intent is created for a root
+step**, matching `Root_Step_Compensation_Creates_No_Propagation_Intent` in
+`CompensationCrashInjectionTests.cs`. `Context.MarkAsCompensated<T>(ct)` and the two-stage
+`ContinueCompensation().ThenMarkAsCompensated<T>(ct)` form remain the recommended way to write a root
+compensation handler precisely because they never touch propagation machinery at all.
+
+### Branching and `ParentMessageId` lineage
+
+Propagation follows `ParentMessageId` for the *specific edge being compensated* only - never "compensate
+every other step in the saga," never a global reverse-ordered scan of all recorded steps. If step A has
+children B and C, and B has child D, compensating D creates and drives exactly one edge: D → B. It has no
+effect on B's *other* child C, or on C's own child E, unless and until something separately compensates C.
+`Compensating_One_Child_Does_Not_Propagate_To_Or_Touch_A_Sibling` in `CompensationCrashInjectionTests.cs`
+proves this directly: compensating sibling B with sibling C healthy and `Completed` leaves C's status and
+propagation intent (there is none) untouched, and invokes the parent's handler exactly once - for B, never on
+C's behalf.
+
+### Crash-window boundaries this design closes
+
+`CompensationCrashInjectionTests.cs` names each boundary directly against the state machine above (a fact is
+pre-seeded exactly as a real crash would leave it, never simulated by throwing mid-call):
+
+- **Before any compensation transition (A/B)**: nothing durable exists yet; ordinary at-least-once handler
+  retry is entirely the compensation handler's own business-idempotency responsibility, as always.
+- **After business compensation, before the framework's own state is durable (B)**: same as above - the
+  coordinator has not run yet, so there is nothing for it to have lost.
+- **After the current step's `Compensated` status is durable, before the propagation intent exists (C)** -
+  the original, documented crash window: `CompensationContinuationTests.Crash_Simulated_Between_Persisting_Compensated_And_Invoking_The_Parent_No_Longer_Strands_Propagation`
+  proves that a retry from exactly this pre-seeded state now invokes the parent, because propagation is
+  decided by the durable intent's claim outcome, never by the child step's own status.
+- **Durable intent exists, before the immediate attempt runs (D)**, and **after a claim whose owner died
+  before invoking the parent (E)**: `CompensationWorker` resumes both identically, via stale-claim
+  reclaiming - `Boundary_DE_CompensationWorker_Recovers_A_Stale_Claim_And_Completes_Propagation`.
+- **During the parent's own business compensation (F)**: bounded, at-least-once retry -
+  `Boundary_F_CompensationWorker_Retries_Until_The_Parent_Handler_Eventually_Succeeds` and
+  `Boundary_F_CompensationWorker_Marks_Edge_Failed_After_MaxAttempts_Exhausted`.
+- **After the parent's business undo, before the framework records completion (G)**, and **retrying an
+  already-attempted edge after a simulated completion-recording crash (I)**: the parent's handler may run
+  again (documented at-least-once), but the framework-level record stays a single, consistent edge -
+  `Boundary_GI_Retrying_A_Claimed_Edge_After_A_Simulated_Completion_Crash_Is_Idempotent`.
+- **After the parent is marked compensated, before its own further propagation completes (H)**: the *next*
+  edge in the chain (parent → grandparent) is itself durable and independently recoverable, not lost just
+  for being a second hop - `Boundary_H_The_Next_Propagation_Edge_In_A_Chain_Remains_Durable_And_Recoverable`.
+
+Provider-level correctness for the state machine itself (intent creation and its idempotent identity, claim,
+concurrent claim with exactly one winner, stale-claim recovery, completion, retry, attempts exhaustion) is
+covered once in `Lycia.Persistence.TestKit.SagaStoreConformanceTests` and run against every provider
+(InMemory, Redis, SQL Server, PostgreSQL) via each provider's own conformance-test subclass - the same
+pattern already used for step-log and versioned-save conformance. `SplitStoreSagaStoreCompensationPropagationTests`
+(`Lycia.Tests`) separately proves the five methods are pure delegations to the canonical store.
+
+**Do not call this design crash-safe from its architecture description alone** - it is the crash-injection
+tests and the provider conformance tests above, together, that establish it; several real bugs (the InMemory
+batch-claim staleness parameter, the Redis Lua key-reconstruction separator, and the Redis enum
+serialization mismatch, all noted above) were only caught by actually running these tests against real
+behavior, not by reasoning about the design on paper.
 
 ---
 

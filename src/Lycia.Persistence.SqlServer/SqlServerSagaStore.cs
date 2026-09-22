@@ -593,4 +593,210 @@ public class SqlServerSagaStore(
             return false;
         }
     }
+
+    private string CompensationTable => options.CompensationPropagationTable;
+
+    /// <inheritdoc />
+    public async Task<CompensationPropagationClaim> EnsureAndClaimCompensationPropagationAsync(Guid sagaId,
+        Guid childMessageId, Guid parentMessageId, string owner, TimeSpan leaseDuration, int maxAttempts,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        await using var lease = await RelationalConnectionLease<SqlConnection, SqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
+        using var ownedTransaction = lease.OwnsConnection ? lease.Connection.BeginTransaction() : null;
+        var transaction = lease.Transaction ?? ownedTransaction
+            ?? throw new InvalidOperationException("A relational saga operation requires a transaction.");
+
+        try
+        {
+            using (var insert = CreateCommand(lease.Connection, $"""
+                IF NOT EXISTS (SELECT 1 FROM {CompensationTable} WHERE SagaId = @sagaId AND ChildMessageId = @childId)
+                    INSERT INTO {CompensationTable} (SagaId, ChildMessageId, ParentMessageId, Status, AttemptCount, CreatedAtUtc, UpdatedAtUtc)
+                    VALUES (@sagaId, @childId, @parentId, 0, 0, SYSUTCDATETIME(), SYSUTCDATETIME());
+                """, transaction))
+            {
+                insert.Parameters.AddWithValue("@sagaId", sagaId);
+                insert.Parameters.AddWithValue("@childId", childMessageId);
+                insert.Parameters.AddWithValue("@parentId", parentMessageId);
+                await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            var claim = await ClaimEdgeAsync(lease.Connection, transaction, sagaId, childMessageId, owner,
+                leaseDuration, maxAttempts, cancellationToken).ConfigureAwait(false);
+            if (ownedTransaction != null) ownedTransaction.Commit();
+            return claim;
+        }
+        catch
+        {
+            if (ownedTransaction != null) ownedTransaction.Rollback();
+            throw;
+        }
+    }
+
+    // Single point of mutual exclusion for one edge: an UPDATE...OUTPUT that only matches a claimable row
+    // (Pending, or Claimed past its lease) and reports back a row only when it actually claimed one.
+    private async Task<CompensationPropagationClaim> ClaimEdgeAsync(SqlConnection connection, SqlTransaction transaction,
+        Guid sagaId, Guid childMessageId, string owner, TimeSpan leaseDuration, int maxAttempts,
+        CancellationToken cancellationToken)
+    {
+        var staleBefore = DateTime.UtcNow - leaseDuration;
+
+        using (var claim = CreateCommand(connection, $"""
+            UPDATE {CompensationTable} WITH (ROWLOCK)
+            SET Status = 1, [Owner] = @owner, AttemptCount = AttemptCount + 1, UpdatedAtUtc = SYSUTCDATETIME()
+            OUTPUT INSERTED.SagaId, INSERTED.ChildMessageId, INSERTED.ParentMessageId, INSERTED.Status,
+                   INSERTED.AttemptCount, INSERTED.[Owner], INSERTED.CreatedAtUtc, INSERTED.UpdatedAtUtc, INSERTED.FailureInfoJson
+            WHERE SagaId = @sagaId AND ChildMessageId = @childId AND AttemptCount < @maxAttempts
+              AND (Status = 0 OR (Status = 1 AND UpdatedAtUtc <= @staleBefore));
+            """, transaction))
+        {
+            claim.Parameters.AddWithValue("@sagaId", sagaId);
+            claim.Parameters.AddWithValue("@childId", childMessageId);
+            claim.Parameters.AddWithValue("@owner", owner);
+            claim.Parameters.AddWithValue("@maxAttempts", maxAttempts);
+            claim.Parameters.AddWithValue("@staleBefore", staleBefore);
+            using var reader = await claim.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                return new CompensationPropagationClaim(CompensationPropagationClaimOutcome.Claimed, ReadIntent(reader));
+        }
+
+        // Not claimable: read the current row to decide why, and auto-fail an edge whose attempts are
+        // already exhausted (the WHERE clause above deliberately excludes it from ever being claimed).
+        CompensationPropagationIntent? current;
+        using (var select = CreateCommand(connection,
+            $"SELECT SagaId, ChildMessageId, ParentMessageId, Status, AttemptCount, [Owner], CreatedAtUtc, UpdatedAtUtc, FailureInfoJson " +
+            $"FROM {CompensationTable} WHERE SagaId = @sagaId AND ChildMessageId = @childId;", transaction))
+        {
+            select.Parameters.AddWithValue("@sagaId", sagaId);
+            select.Parameters.AddWithValue("@childId", childMessageId);
+            using var reader = await select.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            current = await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ReadIntent(reader) : null;
+        }
+
+        if (current == null)
+            throw new InvalidOperationException("The compensation propagation edge was not found immediately after being created.");
+        if (current.Status == CompensationPropagationStatus.Completed)
+            return new CompensationPropagationClaim(CompensationPropagationClaimOutcome.AlreadyCompleted, current);
+        if (current.Status == CompensationPropagationStatus.Failed)
+            return new CompensationPropagationClaim(CompensationPropagationClaimOutcome.AttemptsExhausted, current);
+        if (current.AttemptCount >= maxAttempts)
+        {
+            await MarkCompensationPropagationFailedAsync(sagaId, childMessageId,
+                new SagaStepFailureInfo("Compensation propagation attempts exhausted", null, null),
+                cancellationToken).ConfigureAwait(false);
+            current.Status = CompensationPropagationStatus.Failed;
+            return new CompensationPropagationClaim(CompensationPropagationClaimOutcome.AttemptsExhausted, current);
+        }
+
+        return new CompensationPropagationClaim(CompensationPropagationClaimOutcome.ClaimedByAnother, current);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<CompensationPropagationIntent>> ClaimDueCompensationPropagationsAsync(int maxCount,
+        string owner, TimeSpan leaseDuration, TimeSpan recoveryTimeout, int maxAttempts,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        await using var lease = await RelationalConnectionLease<SqlConnection, SqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
+        var staleBefore = DateTime.UtcNow - recoveryTimeout;
+        var claimed = new List<CompensationPropagationIntent>();
+
+        using (var claim = CreateCommand(lease.Connection, $"""
+            UPDATE claimed
+            SET Status = 1, [Owner] = @owner, AttemptCount = AttemptCount + 1, UpdatedAtUtc = SYSUTCDATETIME()
+            OUTPUT INSERTED.SagaId, INSERTED.ChildMessageId, INSERTED.ParentMessageId, INSERTED.Status,
+                   INSERTED.AttemptCount, INSERTED.[Owner], INSERTED.CreatedAtUtc, INSERTED.UpdatedAtUtc, INSERTED.FailureInfoJson
+            FROM (
+                SELECT TOP (@maxCount) *
+                FROM {CompensationTable} WITH (ROWLOCK, READPAST)
+                WHERE AttemptCount < @maxAttempts
+                  AND (Status = 0 OR (Status = 1 AND UpdatedAtUtc <= @staleBefore))
+                ORDER BY CreatedAtUtc
+            ) AS claimed;
+            """, lease.Transaction))
+        {
+            claim.Parameters.AddWithValue("@maxCount", maxCount);
+            claim.Parameters.AddWithValue("@owner", owner);
+            claim.Parameters.AddWithValue("@maxAttempts", maxAttempts);
+            claim.Parameters.AddWithValue("@staleBefore", staleBefore);
+            using var reader = await claim.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                claimed.Add(ReadIntent(reader));
+        }
+
+        // Separately move any edge whose attempts are already exhausted to Failed, so it stops being
+        // rediscovered by every future pass. Excluded from the claim above by its own AttemptCount filter.
+        using (var exhaust = CreateCommand(lease.Connection, $"""
+            UPDATE {CompensationTable}
+            SET Status = 3, UpdatedAtUtc = SYSUTCDATETIME(),
+                FailureInfoJson = COALESCE(FailureInfoJson, @failureInfo)
+            WHERE Status IN (0, 1) AND AttemptCount >= @maxAttempts;
+            """, lease.Transaction))
+        {
+            exhaust.Parameters.AddWithValue("@maxAttempts", maxAttempts);
+            exhaust.Parameters.AddWithValue("@failureInfo",
+                JsonHelper.SerializeSafe(new SagaStepFailureInfo("Compensation propagation attempts exhausted", null, null)));
+            await exhaust.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return claimed;
+    }
+
+    /// <inheritdoc />
+    public Task MarkCompensationPropagationCompletedAsync(Guid sagaId, Guid childMessageId,
+        CancellationToken cancellationToken = default) =>
+        UpdateCompensationStatusAsync(sagaId, childMessageId, CompensationPropagationStatus.Completed, null, cancellationToken);
+
+    /// <inheritdoc />
+    public Task MarkCompensationPropagationFailedAsync(Guid sagaId, Guid childMessageId,
+        SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default) =>
+        UpdateCompensationStatusAsync(sagaId, childMessageId, CompensationPropagationStatus.Failed, failureInfo, cancellationToken);
+
+    private async Task UpdateCompensationStatusAsync(Guid sagaId, Guid childMessageId,
+        CompensationPropagationStatus status, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken)
+    {
+        await using var lease = await RelationalConnectionLease<SqlConnection, SqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
+        using var command = CreateCommand(lease.Connection, $"""
+            UPDATE {CompensationTable}
+            SET Status = @status, UpdatedAtUtc = SYSUTCDATETIME(), FailureInfoJson = @failureInfo
+            WHERE SagaId = @sagaId AND ChildMessageId = @childId;
+            """, lease.Transaction);
+        command.Parameters.AddWithValue("@status", (int)status);
+        command.Parameters.AddWithValue("@sagaId", sagaId);
+        command.Parameters.AddWithValue("@childId", childMessageId);
+        command.Parameters.AddWithValue("@failureInfo",
+            (object?)(failureInfo != null ? JsonHelper.SerializeSafe(failureInfo) : null) ?? DBNull.Value);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<CompensationPropagationIntent?> GetCompensationPropagationIntentAsync(Guid sagaId,
+        Guid childMessageId, CancellationToken cancellationToken = default)
+    {
+        await using var lease = await RelationalConnectionLease<SqlConnection, SqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
+        using var command = CreateCommand(lease.Connection,
+            $"SELECT SagaId, ChildMessageId, ParentMessageId, Status, AttemptCount, [Owner], CreatedAtUtc, UpdatedAtUtc, FailureInfoJson " +
+            $"FROM {CompensationTable} WHERE SagaId = @sagaId AND ChildMessageId = @childId;", lease.Transaction);
+        command.Parameters.AddWithValue("@sagaId", sagaId);
+        command.Parameters.AddWithValue("@childId", childMessageId);
+        using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ReadIntent(reader) : null;
+    }
+
+    private static CompensationPropagationIntent ReadIntent(SqlDataReader reader) => new()
+    {
+        SagaId = reader.GetGuid(0),
+        ChildMessageId = reader.GetGuid(1),
+        ParentMessageId = reader.GetGuid(2),
+        Status = (CompensationPropagationStatus)reader.GetInt32(3),
+        AttemptCount = reader.GetInt32(4),
+        Owner = reader.IsDBNull(5) ? null : reader.GetString(5),
+        CreatedAtUtc = reader.GetDateTime(6),
+        UpdatedAtUtc = reader.GetDateTime(7),
+        FailureInfo = reader.IsDBNull(8) ? null : JsonConvert.DeserializeObject<SagaStepFailureInfo>(reader.GetString(8))
+    };
 }

@@ -70,12 +70,16 @@ public interface ISagaContext<TInitialMessage> : ISagaContext
     Task MarkAsCompensated<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage;
 
     /// <summary>
-    /// Marks the current saga step compensated and continues compensation through the logical parent
-    /// lineage (via <c>ParentMessageId</c>), invoking the parent's compensation handler. This is the
-    /// primitive behind <see cref="ContinueCompensation"/><c>().ThenMarkAsCompensated&lt;TStep&gt;().ThenBubbleUp(...)</c>;
-    /// prefer that staged form in new code for its more explicit two-step naming.
+    /// Marks the current saga step compensated and durably requires - then immediately attempts -
+    /// compensation propagation to the logical parent (via <c>ParentMessageId</c>). This is the primitive
+    /// behind <see cref="ContinueCompensation"/><c>().ThenMarkAsCompensated&lt;TStep&gt;().ThenBubbleUp(cancellationToken)</c>;
+    /// prefer that staged fluent form in application code. A step with no logical parent (a root step)
+    /// only marks itself compensated; no propagation requirement is created. Once the propagation
+    /// requirement is durably recorded, a crash or cancellation during the immediate attempt never erases
+    /// it - a <c>CompensationWorker</c> recovers it. See <c>DEVELOPERS.md</c>, "Coordinated compensation
+    /// continuation", for the durable propagation model.
     /// </summary>
-    Task CompensateAndBubbleUp<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage;
+    Task BubbleUpCompensationAsync<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage;
 
     Task MarkAsCompensationFailed<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage;
     Task MarkAsCompensationFailed<TStep>(Exception? ex, CancellationToken cancellationToken = default) where TStep : IMessage;
