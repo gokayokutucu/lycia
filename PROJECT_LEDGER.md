@@ -427,6 +427,49 @@ final validation are complete; see `FINALIZATION`.)
   TFMs, real containers, twice), full solution Debug/Release build, `git diff --check`. See
   `docs/MIGRATION-2.0.md` for the consumer-facing 1.18.x → 2.0.0 migration guide, and `FINALIZATION (Lycia
   2.0.0)` below for the release gate. Finalization commit `09568e0`; merged into `dev` as `1a60ec6`.
+- **Lycia 2.0.1 — compensation API simplification and dispatch fix (immediate correction release):**
+  Collapses the `2.0.0` three-stage `ContinueCompensation().ThenMarkAsCompensated<T>().ThenBubbleUp(ct)`
+  compensation grammar into a two-stage `Context.MarkAsCompensated<T>().ThenBubbleUp(ct)`; removes
+  `Context.Compensate(...)` and the public imperative `Context.BubbleUpCompensation(...)` entirely (not
+  `[Obsolete]` - removed). The token-bearing `MarkAsCompensated<TStep>(ct)` is unchanged as the root/final
+  terminal call; the new no-token `MarkAsCompensated<TStep>()` overload is pure staging (no side effects
+  until `ThenBubbleUp` executes) and both forms route through the same unmodified
+  `SagaCompensationCoordinator.CompensateParentAsync`/`EnsureClaimAndAttemptPropagationAsync` - no second
+  propagation implementation. Removed as no longer required by the simplified grammar:
+  `ICompensationContinuation`, `SagaCompensationContinuation` (files renamed to
+  `ICompensatedContinuation.cs`/`SagaCompensatedContinuation.cs` to match their sole surviving type),
+  `ISagaCompensationCoordinator.BubbleUpCompensationAsync`, and a now-unused `InternalsVisibleTo` grant
+  from `Lycia.Saga` to `Lycia.Tests` (confirmed unused by disabling it and rebuilding before removal).
+  Fixed a genuine, source-verified dispatch inconsistency the user flagged for investigation:
+  `SagaDispatcher.FindMethodName` routed failed events to `CompensateAsync` by checking the concrete
+  `Lycia.Saga.Messaging.FailedEventBase` class, while the now-removed `Context.Compensate<T>` was
+  constrained by the `IFailedEventBase` *interface* - an event implementing `IFailedEventBase` directly
+  (never deriving from `FailedEventBase`) would have silently fallen through to `HandleAsyncInternal`.
+  Widened the check to the interface (a strict superset of the old class check, so every
+  `FailedEventBase`-derived event keeps dispatching exactly as before); reactive/choreography compensation
+  is now documented as plain `Context.Publish(failedEvent, ct)`, proved by
+  `SagaDispatcherTests.DispatchAsync_Routes_A_Bare_IFailedEventBase_Implementer_To_CompensateAsync`.
+  Independently confirmed (not from the user's report alone) two more stale-documentation instances beyond
+  the `README.md`/`DEVELOPERS.md` `ReplyTo`/`WithWorker` claims the user found:
+  `Lycia.Extensions.OpenTelemetry/README.md` and `Lycia.Extensions.Scheduling/README.md` carried the same
+  stale "still obsolete" claims for APIs fully removed in `2.0.0`; all four corrected. Deleted
+  `ImperativeCompensationTests.cs` (existed solely for the removed imperative API); its valuable
+  reliability assertions (exact current-step identity, sibling isolation, no ambiguous same-type lookup,
+  durable intent before the immediate attempt) ported into `CompensationContinuationTests.cs` against the
+  new grammar. `FluentApiEncapsulationTests.cs` updated for the new public-surface shape.
+  `docs/MIGRATION-2.0.md` keeps its accurate `1.18.x → 2.0.0` historical content unaltered and gains a
+  `2.0.1` addendum section describing the further simplification for a reader migrating today.
+  `version.json` bumped `2.0.0` → `2.0.1` (verified via local `dotnet pack` producing
+  `Lycia.2.0.1-g<height>.nupkg`). Full regression green: `Lycia.Tests` (net9.0/net10.0, 232/232 each),
+  `Lycia.Tests.NetFramework` (net48, 46/46), `Lycia.Extensions.AspNetCore.Tests` (net9.0, 27/27),
+  InMemory/Redis/SQL Server/PostgreSQL provider suites (real containers, 95/61/81/81),
+  `Lycia.IntegrationTests` (net9.0/net10.0, 46/46 each, real containers) and
+  `Lycia.IntegrationTests.NetFramework` (net48, 26/26, real containers), full solution Debug/Release
+  build, `git diff --check`. All 12 public packages packed locally at `2.0.1` and inspected: correct
+  IDs/versions, internal `Lycia`/`Lycia.Extensions` dependencies pinned to the exact packed version, both
+  relational providers embed `Lycia.Persistence.Relational.Internal.dll`, every package ships its README,
+  no secrets/local paths/AI attribution found. Correction commit `778120f`; merged into `dev` as
+  `1412e7b`. Not released.
 
 # FINALIZATION
 
@@ -635,3 +678,57 @@ Gate checklist (all satisfied before `dev` -> `main`, and before the `v2.0.0` ta
 
 `main` HEAD (`0e80283`) is the exact `v2.0.0` release commit; this ledger update is recorded on `dev`, not
 `main`, precisely so `main` continues to represent exactly the tagged tree with no trailing commit.
+
+# FINALIZATION (Lycia 2.0.1)
+
+Milestone: **Lycia 2.0.1 — immediate compensation-API correction release**
+
+Status: NOT YET RELEASED
+
+This section is the finalization gate for the `2.0.1` correction release, distinct from the `2.0.0`
+`FINALIZATION (Lycia 2.0.0)` section above (which remains the unaltered historical record of that
+release - its `Status: RELEASED (2.0.0)` line is a permanent fact, not superseded by this one). `2.0.1`
+is a same-major-version correction, not a new breaking release: see the `COMPLETED` entry above for the
+full scope (compensation API simplification, `IFailedEventBase` dispatch fix, stale-documentation
+corrections).
+
+Release target: **2.0.1**, tagged `v2.0.1` on the validated `main` merge commit. `v1.17.0`, `v1.18.0` and
+`v2.0.0` are left untouched - `v2.0.0` is immutable; its packages are unlisted from NuGet.org only after
+`2.0.1` is independently confirmed live for all 12 packages (never a window with no version available).
+
+Gate checklist (all satisfied before `dev` -> `main`, and before the `v2.0.1` tag):
+
+- Compensation API simplification — COMPLETE. See the `COMPLETED` entry above.
+- `IFailedEventBase` dispatch fix — COMPLETE. Source-verified inconsistency, fixed, proven by a new
+  focused test; no broader failed-event hierarchy redesign attempted (none was warranted).
+- Stale-documentation correction — COMPLETE. `README.md`/`DEVELOPERS.md` `ReplyTo`/`WithWorker` claims
+  fixed (independently re-verified against source, not taken on faith); the same stale claims also found
+  and fixed in two package READMEs the user had not flagged.
+- Versioning — COMPLETE. `version.json` bumped to `2.0.1` through the canonical Nerdbank.GitVersioning
+  mechanism; verified with a local `dotnet pack` producing `Lycia.2.0.1-g<height>.nupkg`.
+- Package surface — VERIFIED unchanged at 12 packable projects (no package added or removed by this
+  correction).
+- Local regression — PASS: full solution Debug and Release builds (0 errors), `git diff --check` clean,
+  `Lycia.Tests` net9.0/net10.0 (232/232 each), `Lycia.Tests.NetFramework` net48 (46/46),
+  `Lycia.Extensions.AspNetCore.Tests` net9.0 (27/27), `Lycia.Persistence.InMemory.Tests` net9.0 (95/95),
+  `Lycia.Persistence.Redis.Tests` net9.0 (61/61, real container), `Lycia.Persistence.SqlServer.Tests`
+  net9.0 (81/81, real container), `Lycia.Persistence.PostgreSql.Tests` net9.0 (81/81, real container),
+  `Lycia.IntegrationTests` net9.0 and net10.0 (46/46 each, real containers),
+  `Lycia.IntegrationTests.NetFramework` net48 (26/26, real container).
+- Package-content validation — COMPLETE. All 12 packages packed and inspected locally before tagging:
+  correct IDs, consistent version, correctly pinned internal `Lycia`/`Lycia.Extensions` dependencies, no
+  dependency on any internal-only project, both relational providers embed
+  `Lycia.Persistence.Relational.Internal.dll`, every package ships its README, no secrets/local
+  paths/AI attribution found.
+- Remote `dev` CI — PENDING.
+- `main` CI — PENDING.
+- `compatibility-minimum` against the exact `main` commit — PENDING.
+- **Tag `v2.0.1`** — PENDING (not created until every item above is genuinely green).
+- Tag-driven release workflow / NuGet Trusted Publishing — PENDING.
+- **NuGet publication independently verified** for all 12 packages at `2.0.1` — PENDING.
+- **2.0.0 unlisting** — PENDING, and only attempted after `2.0.1` is independently confirmed live; see the
+  `HOLD / BACKLOG` note this phase adds if the existing Trusted Publishing setup cannot safely automate it.
+
+Do not call Lycia 2.0.1 released until the remote `v2.0.1` tag exists, the tag workflow is green,
+publishing succeeded, and all 12 expected `2.0.1` packages are independently confirmed live on
+NuGet.org.
