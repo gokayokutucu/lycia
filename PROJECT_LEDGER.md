@@ -541,23 +541,19 @@ Required before `dev` -> `main`:
 
 Milestone: **Lycia 2.0.0 — public API finalization**
 
-Status: READY FOR FINAL INTEGRATION
+Status: RELEASED (2.0.0)
 
 This section is the finalization gate for the `2.0.0` major release, distinct from the `1.18.0`
 `FINALIZATION` section above (which remains the unaltered historical record of that release - its
-`Status: RELEASED (1.18.0)` line is a permanent fact, not superseded by this one). Do not merge `dev` into
-`main` for this release until this section says so, and do not describe `2.0.0` as released anywhere in
-this file until the tag-driven publish workflow has actually succeeded and every expected package has been
-independently verified on nuget.org - a green local build, a successful `dev`/`main` push, or a pushed tag
-are each necessary but not sufficient on their own.
+`Status: RELEASED (1.18.0)` line is a permanent fact, not superseded by this one).
 
 Release target: **2.0.0**, an intentional source-breaking major version over the `1.18.0` baseline (11
 packages, released). `2.0.0` adds `Lycia.Extensions.AspNetCore` as a 12th public package (already present,
 unreleased, on `dev` since the diagnostics-endpoint phase) and finalizes the compensation API, obsolete-API
-surface, and CI hygiene described in the `COMPLETED` entry immediately above. Tag `v2.0.0` on the validated
-`main` merge commit. `v1.17.0` and `v1.18.0` are left untouched.
+surface, and CI hygiene described in the `COMPLETED` entry immediately above. Tagged `v2.0.0` on the
+validated `main` merge commit. `v1.17.0` and `v1.18.0` are left untouched.
 
-Required before `dev` -> `main`:
+Gate checklist (all satisfied before `dev` -> `main`, and before the `v2.0.0` tag):
 
 - Public API audit — COMPLETE. See the `COMPLETED` entry above for the obsolete-API inventory and the two
   genuine removals (`IRequestRoutingMetadata.ReplyTo`, `LyciaSchedulingBuilder.WithWorker`).
@@ -596,15 +592,40 @@ Required before `dev` -> `main`:
   net9.0 (81/81, real container), `Lycia.Persistence.PostgreSql.Tests` net9.0 (81/81, real container),
   `Lycia.IntegrationTests` net9.0 and net10.0 (46/46 each, real containers, run twice with distinct trx
   output confirming the CI hygiene fix).
-- Remote `dev` CI — PENDING this phase's push (see below for the result once available).
-- `main` CI and `compatibility-minimum` (mandatory for the release tag) — PENDING remote execution; not
-  bypassed.
-- Package-content validation (local pack + inspect all 12 `.nupkg`s) — PENDING, performed as part of this
-  finalization before tagging.
-- Red-team pass — see the questions enumerated in this phase's instructions; the compensation-identity
-  ambiguity questions are answered by the same-type-message and sibling-branch tests above, and the
-  cancellation/idempotency questions by the crash-recovery and repeated-call tests above. No open finding
-  required a design change beyond what is already reflected in this entry.
+- Remote `dev` CI — PASS. Push `5064d10..34df586`; run `35837874949` green (all required jobs; the
+  `compatibility-minimum`/`Pack & Publish` jobs correctly did not run on a plain `dev` push).
+- `main` CI — PASS. Push `80ebaa4..0e80283` (merge commit `0e80283`); run `35838826665` green. A separate
+  manual `workflow_dispatch` run (`35839645492`) additionally exercised `compatibility-minimum` against
+  this exact `main` commit before tagging - PASS in 11m39s - so the release-mandatory gate was proven green
+  ahead of the tag push, not discovered for the first time inside it.
+- Package-content validation — COMPLETE. All 12 packages packed and inspected locally before tagging:
+  correct IDs, consistent version, correctly pinned internal `Lycia`/`Lycia.Extensions` dependencies, no
+  dependency on any internal-only project, both relational providers embed
+  `Lycia.Persistence.Relational.Internal.dll`, every package ships its README, no secrets/local
+  paths/AI attribution found.
+- Red-team pass — COMPLETE. The compensation-identity ambiguity questions are answered by the
+  same-type-message and sibling-branch tests; the cancellation/idempotency questions by the
+  crash-recovery and repeated-call tests; the CI/package-count/publish-scope questions by the workflow
+  gating verified below. No open finding required a design change beyond what is already reflected in this
+  entry.
+- **Tag `v2.0.0`** — created on `main` at `0e80283` (the exact commit both `main` CI and the manual
+  `compatibility-minimum` dispatch validated), pushed. Tag-driven release run `35840833989` - PASS: all six
+  test/validation jobs green including `compatibility-minimum` run a second time (mandatory for the tag
+  itself, not skipped), then `Pack & Publish` - PASS. The "packed version must equal the tag" guard passed
+  (`2.0.0` exactly, no prerelease suffix - confirming a tag build, not a branch build). NuGet Trusted
+  Publishing (GitHub OIDC -> short-lived key, no static API key) succeeded; all 12 `dotnet nuget push`
+  calls returned `Created`/"Your package was pushed" from nuget.org's own push API.
+- **NuGet publication independently verified** (not from the workflow's own exit status alone): a direct
+  `HEAD`-equivalent fetch of `https://api.nuget.org/v3-flatcontainer/<id>/2.0.0/<id>.2.0.0.nupkg` returned
+  `200` for all 12 packages - `Lycia`, `Lycia.Extensions`, `Lycia.Extensions.RabbitMq`,
+  `Lycia.Extensions.Scheduling`, `Lycia.Extensions.Nats`, `Lycia.Extensions.Kafka`,
+  `Lycia.Extensions.OpenTelemetry`, `Lycia.Extensions.AspNetCore`, `Lycia.Persistence.InMemory`,
+  `Lycia.Persistence.Redis`, `Lycia.Persistence.SqlServer`, `Lycia.Persistence.PostgreSql` - after a short
+  nuget.org indexing delay following the push (the push itself succeeded synchronously; flatcontainer
+  listing lagged a few minutes behind it, which is ordinary nuget.org indexing latency, not a publish
+  failure).
+- No GitHub Release object was created (`gh release list` on this repository returns empty) - a Git tag is
+  the complete release artifact here, matching the established process.
 
-Do not set this section's `Status` to a release-complete state until the tag-driven workflow has published
-all 12 packages and they have been independently verified on nuget.org.
+`main` HEAD (`0e80283`) is the exact `v2.0.0` release commit; this ledger update is recorded on `dev`, not
+`main`, precisely so `main` continues to represent exactly the tagged tree with no trailing commit.
