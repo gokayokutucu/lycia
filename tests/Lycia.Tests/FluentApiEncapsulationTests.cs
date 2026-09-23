@@ -6,10 +6,8 @@ using Lycia.Saga;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Compensating;
 using Lycia.Saga.Abstractions.Contexts;
-using Lycia.Saga.Compensating;
 using Lycia.Saga.Contexts;
 using Lycia.Tests.Messages;
-using Moq;
 
 namespace Lycia.Tests;
 
@@ -23,8 +21,8 @@ namespace Lycia.Tests;
 /// </summary>
 public class FluentApiEncapsulationTests
 {
-    // --- Compensation grammar: ContinueCompensation() -> ICompensationContinuation ->
-    //     ThenMarkAsCompensated<T>() -> ICompensatedContinuation -> ThenBubbleUp(ct) ---
+    // --- Compensation grammar: MarkAsCompensated<T>(ct) -> Task (root/final terminal), or
+    //     MarkAsCompensated<T>() -> ICompensatedContinuation -> ThenBubbleUp(ct) (staged intermediate) ---
 
     [Fact]
     public void ISagaContext_Does_Not_Expose_ThenBubbleUp()
@@ -37,8 +35,8 @@ public class FluentApiEncapsulationTests
     [Fact]
     public void ISagaContext_Does_Not_Expose_BubbleUpCompensationAsync()
     {
-        // This is the primitive ContinueCompensation()...ThenBubbleUp(ct) uses internally. It must never be
-        // directly callable on the context - Context.BubbleUpCompensationAsync<T>(ct) must not compile.
+        // This is the primitive MarkAsCompensated<T>()...ThenBubbleUp(ct) uses internally. It must never
+        // be directly callable on the context - Context.BubbleUpCompensationAsync<T>(ct) must not compile.
         var members = typeof(ISagaContext<>).GetMethods(BindingFlags.Public | BindingFlags.Instance)
             .Select(m => m.Name);
         Assert.DoesNotContain("BubbleUpCompensationAsync", members);
@@ -54,12 +52,16 @@ public class FluentApiEncapsulationTests
     }
 
     [Fact]
-    public void ICompensationContinuation_Does_Not_Expose_ThenBubbleUp()
+    public void ISagaContext_Does_Not_Expose_ContinueCompensation_Or_Removed_Imperative_Compensation_Members()
     {
-        // ContinueCompensation().ThenBubbleUp(ct) must not compile - ThenBubbleUp only exists on the
-        // continuation returned by the no-token ThenMarkAsCompensated<T>() call.
-        var members = typeof(ICompensationContinuation).GetMethods().Select(m => m.Name);
-        Assert.DoesNotContain("ThenBubbleUp", members);
+        // ContinueCompensation(), Context.Compensate(...) and the public imperative Context.BubbleUpCompensation(...)
+        // were all removed in 2.0.1 - the entire compensation surface is now just the two MarkAsCompensated
+        // overloads plus ThenBubbleUp on the continuation the no-token overload returns.
+        var members = typeof(ISagaContext<>).GetMethods(BindingFlags.Public | BindingFlags.Instance)
+            .Select(m => m.Name).ToList();
+        Assert.DoesNotContain("ContinueCompensation", members);
+        Assert.DoesNotContain("Compensate", members);
+        Assert.DoesNotContain("BubbleUpCompensation", members);
     }
 
     [Fact]
@@ -71,30 +73,22 @@ public class FluentApiEncapsulationTests
     }
 
     [Fact]
-    public void ContinueCompensation_Returns_ICompensationContinuation()
-    {
-        var method = typeof(ISagaContext<>).GetMethod(nameof(ISagaContext<Lycia.Saga.Abstractions.Messaging.IMessage>.ContinueCompensation));
-        Assert.NotNull(method);
-        Assert.Equal(typeof(ICompensationContinuation), method!.ReturnType);
-    }
-
-    [Fact]
-    public void NoToken_ThenMarkAsCompensated_Returns_ICompensatedContinuation()
+    public void NoToken_MarkAsCompensated_Returns_ICompensatedContinuation()
     {
         // This is the type-system mechanism that makes ThenBubbleUp reachable only after this specific
         // call: only this overload returns a type exposing ThenBubbleUp at all.
-        var method = typeof(ICompensationContinuation).GetMethods()
-            .Single(m => m.Name == nameof(ICompensationContinuation.ThenMarkAsCompensated) && m.GetParameters().Length == 0);
+        var method = typeof(ISagaContext<>).GetMethods()
+            .Single(m => m.Name == nameof(ISagaContext<Lycia.Saga.Abstractions.Messaging.IMessage>.MarkAsCompensated) && m.GetParameters().Length == 0);
         Assert.Equal(typeof(ICompensatedContinuation), method.ReturnType);
     }
 
     [Fact]
-    public void TwoStage_ThenMarkAsCompensated_With_Token_Returns_Task_Not_A_Continuation()
+    public void Token_MarkAsCompensated_Returns_Task_Not_A_Continuation()
     {
-        // The two-stage terminal overload must return Task (it is terminal, no further staging) - it must
-        // not itself return something exposing ThenBubbleUp.
-        var method = typeof(ICompensationContinuation).GetMethods()
-            .Single(m => m.Name == nameof(ICompensationContinuation.ThenMarkAsCompensated) && m.GetParameters().Length == 1);
+        // The token-bearing root/final terminal overload must return Task (it is terminal, no further
+        // staging) - it must not itself return something exposing ThenBubbleUp.
+        var method = typeof(ISagaContext<>).GetMethods()
+            .Single(m => m.Name == nameof(ISagaContext<Lycia.Saga.Abstractions.Messaging.IMessage>.MarkAsCompensated) && m.GetParameters().Length == 1);
         Assert.Equal(typeof(Task), method.ReturnType);
     }
 
@@ -119,22 +113,6 @@ public class FluentApiEncapsulationTests
         var publicMethodNames = typeof(SagaContext<DummyEvent>).GetMethods(BindingFlags.Public | BindingFlags.Instance)
             .Select(m => m.Name);
         Assert.DoesNotContain("BubbleUpCompensationAsync", publicMethodNames);
-    }
-
-    [Fact]
-    public async Task ThenMarkAsCompensated_NoToken_On_A_Custom_ISagaContext_Without_The_Primitive_Fails_Clearly()
-    {
-        // A hand-written ISagaContext<T> implementation (not one of Lycia's own context types) cannot
-        // implement the internal IBubbleUpCompensationPrimitive from outside Lycia.Saga - this is the one
-        // place that invariant is enforced at runtime instead of compile time, because "does this custom
-        // context support bubble-up" cannot be expressed in the public type system without exposing the
-        // primitive itself. The failure must be a clear, diagnosable exception, not a bare InvalidCastException.
-        var mockContext = new Mock<ISagaContext<DummyEvent>>();
-        var continuation = new SagaCompensationContinuation<DummyEvent>(mockContext.Object);
-
-        var ex = Assert.Throws<InvalidOperationException>(() => continuation.ThenMarkAsCompensated<DummyEvent>());
-        Assert.Contains("IBubbleUpCompensationPrimitive", ex.Message);
-        await Task.CompletedTask;
     }
 
     // --- WithTracking grammar: entry methods only defer; terminal Then* methods execute exactly once ---

@@ -125,8 +125,8 @@ public class SagaCompensationCoordinator(
     /// <summary>
     /// Marks the current step compensated and, if it has a logical parent, durably requires and
     /// immediately attempts propagating compensation to that parent. This is what
-    /// <c>ContinueCompensation().ThenMarkAsCompensated&lt;TStep&gt;().ThenBubbleUp(ct)</c> ultimately calls,
-    /// through the internal <c>IBubbleUpCompensationPrimitive</c> execution primitive on the saga context.
+    /// <c>MarkAsCompensated&lt;TStep&gt;().ThenBubbleUp(ct)</c> ultimately calls, through the internal
+    /// <c>IBubbleUpCompensationPrimitive</c> execution primitive on the saga context.
     /// </summary>
     /// <remarks>
     /// Marking the current step compensated and requiring parent propagation are two independently
@@ -175,81 +175,10 @@ public class SagaCompensationCoordinator(
     }
 
     /// <summary>
-    /// Advanced imperative counterpart to <c>ContinueCompensation().ThenMarkAsCompensated&lt;TStep&gt;().ThenBubbleUp(ct)</c> -
-    /// the primitive behind the public <c>Context.BubbleUpCompensation(failedEvent, cancellationToken)</c>.
-    /// Unlike <see cref="CompensateParentAsync"/> (which marks the step Compensated and propagates as one
-    /// atomic composite operation), this method does <b>not</b> mark anything compensated itself: it
-    /// requires the caller to have already done so - normally via <c>Context.MarkAsCompensated&lt;TStep&gt;(ct)</c> -
-    /// and durably requires/attempts propagation only if that precondition genuinely holds. This is what
-    /// makes the imperative API's runtime ordering check possible in the first place: the fluent form
-    /// never needs it because marking and propagating are one call there, never two.
-    /// </summary>
-    /// <remarks>
-    /// Two checks happen before anything durable is touched, both raising <see cref="InvalidOperationException"/>:
-    /// <list type="number">
-    /// <item><paramref name="failedEvent"/>.<c>MessageId</c> must equal <paramref name="currentStep"/>.<c>MessageId</c> -
-    /// the identity the calling <c>ISagaContext</c> was actually constructed for. This is what makes the
-    /// exact edge deterministic: an unrelated message, a sibling branch, or another step that merely
-    /// shares the same message type and handler can never be mistaken for the current one, regardless of
-    /// what it happens to be persisted as.</item>
-    /// <item>The current step's own persisted status must already be <see cref="StepStatus.Compensated"/>.
-    /// If the application never called <c>MarkAsCompensated</c> first, this is an application programming
-    /// error - not something a crash-recovery worker can infer or repair, since <c>MarkAsCompensated</c>
-    /// alone is also a fully valid, terminal root/final compensation call on its own. See DEVELOPERS.md,
-    /// "Forgotten bubble-up vs. crash recovery".</item>
-    /// </list>
-    /// Once both checks pass, this shares the exact same durable claim-and-attempt implementation
-    /// <see cref="CompensateParentAsync"/> uses (<see cref="EnsureClaimAndAttemptPropagationAsync"/>) - the
-    /// fluent and imperative forms are two call shapes over one propagation implementation, never two.
-    /// </remarks>
-    /// <param name="sagaId">The identifier of the saga.</param>
-    /// <param name="stepType">The type of the step being compensated.</param>
-    /// <param name="handlerType">The handler type that owns this step.</param>
-    /// <param name="currentStep">The message identity the calling <c>ISagaContext</c> was constructed for.</param>
-    /// <param name="failedEvent">The message the caller supplied to <c>Context.BubbleUpCompensation</c>; validated against <paramref name="currentStep"/>.</param>
-    /// <param name="cancellationToken">Observed before the propagation requirement is durably created; never used to erase it afterward.</param>
-    /// <exception cref="InvalidOperationException">
-    /// Thrown when <paramref name="failedEvent"/> does not identify <paramref name="currentStep"/>, or when
-    /// the current step is not already durably <see cref="StepStatus.Compensated"/>.
-    /// </exception>
-    public async Task BubbleUpCompensationAsync(Guid sagaId, Type stepType, Type handlerType, IMessage currentStep,
-        IMessage failedEvent, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (failedEvent.MessageId != currentStep.MessageId)
-            throw new InvalidOperationException(
-                $"Context.BubbleUpCompensation was called with a message (MessageId={failedEvent.MessageId}) " +
-                $"that does not identify the current compensation step (MessageId={currentStep.MessageId}, " +
-                $"type '{stepType.FullName}'). Pass the exact message this handler's CompensateAsync received - " +
-                "never a sibling step, an unrelated message, or a different message of the same type.");
-
-        if (serviceProvider.GetService(typeof(IEventBus)) is not IEventBus eventBus)
-            throw new InvalidOperationException("IEventBus not resolved.");
-
-        if (serviceProvider.GetService(typeof(ISagaStore)) is not ISagaStore sagaStore)
-            throw new InvalidOperationException("ISagaStore not resolved.");
-
-        var currentStatus = await sagaStore.GetStepStatusAsync(sagaId, currentStep.MessageId, stepType, handlerType)
-            .ConfigureAwait(false);
-        if (currentStatus != StepStatus.Compensated)
-            throw new InvalidOperationException(
-                $"Context.BubbleUpCompensation was called for step '{stepType.FullName}' (MessageId={currentStep.MessageId}), " +
-                $"but its current durable status is '{currentStatus}', not Compensated. Call " +
-                "Context.MarkAsCompensated<TStep>(cancellationToken) first, or use the recommended " +
-                "Context.ContinueCompensation().ThenMarkAsCompensated<TStep>().ThenBubbleUp(cancellationToken) " +
-                "form instead, which cannot be called out of order.");
-
-        await EnsureClaimAndAttemptPropagationAsync(sagaId, currentStep.MessageId, currentStep.ParentMessageId,
-            eventBus, sagaStore, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// The one durable propagation implementation shared by <see cref="CompensateParentAsync"/> (fluent)
-    /// and <see cref="BubbleUpCompensationAsync"/> (imperative): durably ensures-and-claims the propagation
-    /// edge for <paramref name="childMessageId"/>, then immediately attempts it on a <see cref="CompensationPropagationClaimOutcome.Claimed"/>
-    /// outcome. A root step (<paramref name="parentMessageId"/> == <see cref="Guid.Empty"/>) creates no
-    /// propagation requirement.
+    /// The one durable propagation implementation <see cref="CompensateParentAsync"/> uses: durably
+    /// ensures-and-claims the propagation edge for <paramref name="childMessageId"/>, then immediately
+    /// attempts it on a <see cref="CompensationPropagationClaimOutcome.Claimed"/> outcome. A root step
+    /// (<paramref name="parentMessageId"/> == <see cref="Guid.Empty"/>) creates no propagation requirement.
     /// </summary>
     private async Task EnsureClaimAndAttemptPropagationAsync(Guid sagaId, Guid childMessageId, Guid parentMessageId,
         IEventBus eventBus, ISagaStore sagaStore, CancellationToken cancellationToken)

@@ -65,7 +65,8 @@ public class ReactiveSagaStepFluent<TInitialMessage>(
 
     /// <summary>
     /// Transitions the step the context was constructed for to compensated. This does not bubble
-    /// compensation up to the logical parent; use <c>Context.ContinueCompensation()</c> for that.
+    /// compensation up to the logical parent; use <c>Context.MarkAsCompensated&lt;TStep&gt;()</c> (the
+    /// no-token overload) followed by <c>.ThenBubbleUp(ct)</c> for that.
     /// </summary>
     public Task ThenMarkAsCompensated(CancellationToken cancellationToken = default) =>
         RunAsync(cancellationToken, token => context.MarkAsCompensated<TInitialMessage>(token));

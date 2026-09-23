@@ -32,8 +32,7 @@ public class ShippingSagaHandler :
         // Compensation logic: recall shipment, notify customer, etc.
         Context.Data.ShippingReversed = true;
         await Context
-            .ContinueCompensation()
-            .ThenMarkAsCompensated<PaymentProcessedEvent>()
+            .MarkAsCompensated<PaymentProcessedEvent>()
             .ThenBubbleUp(cancellationToken);
     }
 }
