@@ -69,6 +69,18 @@ final validation are complete; see `FINALIZATION`.)
 
 # HOLD / BACKLOG
 
+- **Manual action required: unlist the 12 `2.0.0` packages from NuGet.org.** `2.0.1` is confirmed live for
+  all 12 packages (see `FINALIZATION (Lycia 2.0.1)`), so this is now safe to do (never attempted while a
+  version gap would exist). Not automated this phase - see that section for why. Package IDs: `Lycia`,
+  `Lycia.Extensions`, `Lycia.Extensions.RabbitMq`, `Lycia.Extensions.Scheduling`, `Lycia.Extensions.Nats`,
+  `Lycia.Extensions.Kafka`, `Lycia.Extensions.OpenTelemetry`, `Lycia.Extensions.AspNetCore`,
+  `Lycia.Persistence.InMemory`, `Lycia.Persistence.Redis`, `Lycia.Persistence.SqlServer`,
+  `Lycia.Persistence.PostgreSql`. Minimal action per package (no new API key needed): sign in to
+  nuget.org as the package owner, open `https://www.nuget.org/packages/<PackageId>/2.0.0/Manage`, and
+  clear "List in search results" (equivalently, the same authenticated account can run
+  `dotnet nuget delete <PackageId> 2.0.0 --source https://api.nuget.org/v3/index.json --api-key <key>`
+  locally, which nuget.org treats as unlist, not a hard delete, for an already-indexed package). Never
+  delete/rewrite the `v2.0.0` git tag or its release commit - only the NuGet listing changes.
 - ~~Durable, crash-safe coordinated compensation propagation (bubble-up)~~ — **CLOSED**, see `COMPLETED`
   ("Durable compensation propagation" entry) and DEVELOPERS.md, "Coordinated compensation continuation".
   `CompensateParentAsync` no longer treats the child step's own `Compensated` status as proof that parent
@@ -683,7 +695,7 @@ Gate checklist (all satisfied before `dev` -> `main`, and before the `v2.0.0` ta
 
 Milestone: **Lycia 2.0.1 — immediate compensation-API correction release**
 
-Status: NOT YET RELEASED
+Status: RELEASED (2.0.1)
 
 This section is the finalization gate for the `2.0.1` correction release, distinct from the `2.0.0`
 `FINALIZATION (Lycia 2.0.0)` section above (which remains the unaltered historical record of that
@@ -720,15 +732,37 @@ Gate checklist (all satisfied before `dev` -> `main`, and before the `v2.0.1` ta
   dependency on any internal-only project, both relational providers embed
   `Lycia.Persistence.Relational.Internal.dll`, every package ships its README, no secrets/local
   paths/AI attribution found.
-- Remote `dev` CI — PENDING.
-- `main` CI — PENDING.
-- `compatibility-minimum` against the exact `main` commit — PENDING.
-- **Tag `v2.0.1`** — PENDING (not created until every item above is genuinely green).
-- Tag-driven release workflow / NuGet Trusted Publishing — PENDING.
-- **NuGet publication independently verified** for all 12 packages at `2.0.1` — PENDING.
-- **2.0.0 unlisting** — PENDING, and only attempted after `2.0.1` is independently confirmed live; see the
-  `HOLD / BACKLOG` note this phase adds if the existing Trusted Publishing setup cannot safely automate it.
+- Remote `dev` CI — PASS. Push `5253fe2..054f64d`; run `35867019868` green (all required jobs;
+  `compatibility-minimum`/`Pack & Publish` correctly did not run on a plain `dev` push).
+- `main` CI — PASS. Push `0e80283..15781f9` (merge commit `15781f9`); run `35868047611` green. A separate
+  manual `workflow_dispatch` run (`35869096881`) additionally exercised `compatibility-minimum` against
+  this exact `main` commit before tagging - PASS - so the release-mandatory gate was proven green ahead of
+  the tag push, not discovered for the first time inside it.
+- `compatibility-minimum` against the exact `main` commit — PASS, both as part of the manual dispatch
+  above and again inside the tag-driven run below (mandatory for the tag itself, not skipped).
+- **Tag `v2.0.1`** — created on `main` at `15781f9` (the exact commit both `main` CI and the manual
+  `compatibility-minimum` dispatch validated), pushed.
+- Tag-driven release workflow — PASS. Run `35870626831`: all six test/validation jobs green including
+  `compatibility-minimum`, then `Pack & Publish` - PASS. The "packed version must equal the tag" guard
+  passed (`2.0.1` exactly, no prerelease suffix - confirming a tag build, not a branch build). NuGet
+  Trusted Publishing (GitHub OIDC -> short-lived key, no static API key) succeeded; all 12
+  `dotnet nuget push` calls returned `Created`/"Your package was pushed" from nuget.org's own push API.
+- **NuGet publication independently verified** (not from the workflow's own exit status alone): a direct
+  `HEAD`-equivalent fetch of `https://api.nuget.org/v3-flatcontainer/<id>/2.0.1/<id>.2.0.1.nupkg` returned
+  `200` for all 12 packages after roughly 14 minutes of nuget.org post-push indexing delay (longer than
+  2.0.0's few-minute lag, still ordinary indexing latency, not a publish failure - the push itself had
+  already succeeded synchronously per the workflow log).
+- No GitHub Release object was created (`gh release list` on this repository returns empty) - a Git tag is
+  the complete release artifact here, matching the established process.
+- **2.0.0 unlisting** — NOT PERFORMED. Investigated the existing NuGet Trusted Publishing setup
+  (`NuGet/login@v1` in the `Pack & Publish` job, `id-token: write` scoped to that job only, policy name
+  `lycia-release`) and found no way to determine from this environment whether that trusted-publishing
+  policy's generated key is scoped to permit `unlist` in addition to `push`, without either modifying
+  `dotnet.yml` to test it (a permanent, un-requested CI capability - explicitly out of scope) or reading
+  nuget.org's own policy configuration page (requires the repository owner's authenticated nuget.org
+  session, which this environment does not have and should not attempt to obtain). No long-lived NuGet API
+  key was introduced for this task, and no CI capability to unlist an arbitrary version was added. See
+  `HOLD / BACKLOG` for the exact manual action still required for all 12 `2.0.0` package IDs.
 
-Do not call Lycia 2.0.1 released until the remote `v2.0.1` tag exists, the tag workflow is green,
-publishing succeeded, and all 12 expected `2.0.1` packages are independently confirmed live on
-NuGet.org.
+`main` HEAD (`15781f9`) is the exact `v2.0.1` release commit; this ledger update is recorded on `dev`, not
+`main`, precisely so `main` continues to represent exactly the tagged tree with no trailing commit.
