@@ -376,6 +376,51 @@ final validation are complete; see `FINALIZATION`.)
   isolated net10.0-only runs of the previously-failing test. See DEVELOPERS.md, "The staged-fluent
   encapsulation invariant" (under "Coordinated compensation continuation"). Feature commit `29efc4c`; merged
   into `dev` as `0c07fe0`. Not released.
+- **Lycia 2.0.0 finalization — public API cleanup, advanced imperative compensation API, CI hygiene:**
+  `version.json` bumped `1.18.0` → `2.0.0` (the canonical Nerdbank.GitVersioning mechanism; verified by a
+  local `dotnet pack` computing `Lycia.2.0.0-g<height>.nupkg` before any tag exists). Public API audit:
+  removed `IRequestRoutingMetadata.ReplyTo` (and its `ResponseBase`/`CommandBase` forwarding
+  implementations) and `LyciaSchedulingBuilder.WithWorker(...)` - both `[Obsolete]` since before this
+  release with an explicit "will be removed" promise, both trivial forwarding wrappers with no unique
+  logic, both now genuinely removed at this major-version boundary rather than carried forward. The other
+  ten `[Obsolete]` members inventoried (the flat `AddLyciaRabbitMq`/`AddLyciaNats`/`AddLyciaKafka`/
+  scheduling registration wrappers, `MessageExtensions`' response-routing compatibility helper, and
+  `MessagingNamingHelper`'s two legacy topic-wildcard aliases) carry no removal promise and remain
+  documented migration aids - retained, not gratuitously removed. New advanced imperative compensation
+  API: `ISagaContext<TInitialMessage>.BubbleUpCompensation<TStep>(TStep failedEvent, CancellationToken ct)`,
+  paired with the existing `MarkAsCompensated<TStep>(ct)`, as the explicit alternative to the recommended
+  staged `ContinueCompensation()...ThenBubbleUp(ct)` grammar - never a resurrection of the removed
+  `CompensateAndBubbleUp<TStep>` or the previously-removed public `BubbleUpCompensationAsync` escape hatch.
+  Converges on the exact same durable propagation implementation
+  (`SagaCompensationCoordinator.EnsureClaimAndAttemptPropagationAsync`, shared with the fluent form's
+  `CompensateParentAsync`) via a new `ISagaCompensationCoordinator.BubbleUpCompensationAsync` method.
+  Validates, before touching anything durable: `failedEvent.MessageId` must identify the exact step the
+  calling context was constructed for (never a sibling, an unrelated message, or another step sharing the
+  same message type), and the step must already be durably `Compensated` - both throw
+  `InvalidOperationException` naming the problem, never silently guessing, propagating the wrong edge, or
+  marking anything compensated itself. `MarkAsCompensated` alone remains fully valid on its own (root/final
+  compensation) precisely because that ambiguity - "was propagation intended and forgotten, or genuinely
+  not needed" - cannot be resolved by the framework; this is documented explicitly (DEVELOPERS.md, "Advanced
+  imperative compensation API") as an application programming error distinct from a recoverable crash.
+  Twelve new `ImperativeCompensationTests.cs` tests prove: `Compensate`'s real trigger semantics and token
+  propagation; root compensation stopping at `MarkAsCompensated` alone; the ordering-violation and
+  unrelated-message exceptions with no durable mutation; exact `MessageId`-based identity across two steps
+  of the same message type; sibling-branch isolation; durable-intent establishment and idempotent repeat
+  calls; `CompensationWorker` recovery of an imperative crash; cancellation before and after the durable
+  handoff; and fluent/imperative convergence on one propagation artifact shape in a single test exercising
+  both call paths against the same store. Remaining CI TRX-artifact-overwrite hygiene (flagged but not
+  fully fixed in the previous phase) closed in the unit-tests, provider-tests, and compatibility-minimum
+  jobs: every project+TFM combination that can independently fail now writes its own uniquely-named trx
+  file (a bare multi-TFM `dotnet test` without `-f` silently overwrote an earlier framework's result with
+  the next one's, which is exactly what had hidden the net10.0-only RabbitMQ failure from the previous
+  phase's uploaded artifact); `set +e` plus explicit failure tracking ensures one failing combination never
+  skips the rest while the step still fails overall if any combination did. Full regression green:
+  `Lycia.Tests` (net9.0/net10.0, 242/242 - +12 imperative-compensation tests, -1 removed obsolete-wrapper
+  test), `Lycia.Tests.NetFramework` (net48, 46/46), `Lycia.Extensions.AspNetCore.Tests` (27/27),
+  InMemory/Redis/SQL Server/PostgreSQL provider suites (real containers), `Lycia.IntegrationTests` (both
+  TFMs, real containers, twice), full solution Debug/Release build, `git diff --check`. See
+  `docs/MIGRATION-2.0.md` for the consumer-facing 1.18.x → 2.0.0 migration guide, and `FINALIZATION (Lycia
+  2.0.0)` below for the release gate. Finalization commit `09568e0`; merged into `dev` as `1a60ec6`.
 
 # FINALIZATION
 
@@ -491,3 +536,75 @@ Required before `dev` -> `main`:
 - **Accepted tradeoffs / deferred (not release blockers):** see HOLD/BACKLOG — RabbitMQ publish
   confirmation, the final-attempt crash window, dependency weight, symbol packages, the test-only NU1903
   advisory, and Redis Cluster hash-slot safety.
+
+# FINALIZATION (Lycia 2.0.0)
+
+Milestone: **Lycia 2.0.0 — public API finalization**
+
+Status: READY FOR FINAL INTEGRATION
+
+This section is the finalization gate for the `2.0.0` major release, distinct from the `1.18.0`
+`FINALIZATION` section above (which remains the unaltered historical record of that release - its
+`Status: RELEASED (1.18.0)` line is a permanent fact, not superseded by this one). Do not merge `dev` into
+`main` for this release until this section says so, and do not describe `2.0.0` as released anywhere in
+this file until the tag-driven publish workflow has actually succeeded and every expected package has been
+independently verified on nuget.org - a green local build, a successful `dev`/`main` push, or a pushed tag
+are each necessary but not sufficient on their own.
+
+Release target: **2.0.0**, an intentional source-breaking major version over the `1.18.0` baseline (11
+packages, released). `2.0.0` adds `Lycia.Extensions.AspNetCore` as a 12th public package (already present,
+unreleased, on `dev` since the diagnostics-endpoint phase) and finalizes the compensation API, obsolete-API
+surface, and CI hygiene described in the `COMPLETED` entry immediately above. Tag `v2.0.0` on the validated
+`main` merge commit. `v1.17.0` and `v1.18.0` are left untouched.
+
+Required before `dev` -> `main`:
+
+- Public API audit — COMPLETE. See the `COMPLETED` entry above for the obsolete-API inventory and the two
+  genuine removals (`IRequestRoutingMetadata.ReplyTo`, `LyciaSchedulingBuilder.WithWorker`).
+- Advanced imperative compensation API — COMPLETE. `BubbleUpCompensation(failedEvent, ct)` implemented,
+  converges on the one durable propagation implementation, validated by 12 new tests including exact
+  same-type-message identity, sibling-branch isolation, ordering-violation and unrelated-message rejection,
+  and fluent/imperative convergence.
+- Fluent API invariants — CONFIRMED still hold (staged compensation grammar, `WithTracking` deferred
+  execution) via `FluentApiEncapsulationTests.cs`, unchanged by this phase's additions.
+- CancellationToken audit — COMPLETE for the surfaces this phase touched (`Compensate`, the new
+  `BubbleUpCompensation`); no dropped tokens found or introduced.
+- CI TRX hygiene — COMPLETE. Every multi-TFM `dotnet test` invocation across `unit-tests`,
+  `integration-tests` (closed in the previous phase), `provider-tests`, and `compatibility-minimum` now
+  writes a uniquely-named trx per project+TFM combination; no combination can be hidden by another
+  overwriting its result file.
+- Versioning — COMPLETE. `version.json` bumped to `2.0.0` through the canonical Nerdbank.GitVersioning
+  mechanism; verified with a local `dotnet pack` producing `Lycia.2.0.0-g<height>.nupkg` before any tag
+  exists (the bare `2.0.0` is what a build of the `v2.0.0` tag itself will compute).
+- Package surface — VERIFIED. Exactly 12 packable projects confirmed by inspecting every `src/*/*.csproj`'s
+  `IsPackable`; matches the release workflow's `PACKAGES` list and its `COUNT -ne 12` guard exactly. No
+  `Lycia.Persistence.Relational` public package exists (the internal relational implementation stays
+  `Lycia.Persistence.Relational.Internal`, non-packable, embedded in the two relational providers).
+- Documentation — README.md (Compensation section restructured into Recommended/Advanced with the
+  forgotten-bubble-up warning, package table already at 12, Project History links the migration guide),
+  DEVELOPERS.md (new "Advanced imperative compensation API" subsection, stale `1.18.0`-as-current version
+  reference corrected), `docs/MIGRATION-2.0.md` (new), this ledger — all reviewed against the actual 2.0.0
+  source, not rewritten wholesale. `PROJECT_LEDGER.md`'s `1.18.0` historical facts (11 packages, its own
+  `RELEASED` status) are left unaltered.
+- Infrastructure compatibility contract — VERIFIED unchanged and already correct
+  (`infrastructure-versions.json` matches the documented minimum/current versions for RabbitMQ, Redis,
+  PostgreSQL, SQL Server, Kafka, NATS exactly); not a release blocker, not re-litigated in this phase.
+- Local regression — PASS: full solution Debug and Release builds (0 errors), `git diff --check` clean,
+  `Lycia.Tests` net9.0/net10.0 (242/242 each), `Lycia.Tests.NetFramework` net48 (46/46),
+  `Lycia.Extensions.AspNetCore.Tests` net9.0 (27/27), `Lycia.Persistence.InMemory.Tests` net9.0 (95/95),
+  `Lycia.Persistence.Redis.Tests` net9.0 (61/61, real container), `Lycia.Persistence.SqlServer.Tests`
+  net9.0 (81/81, real container), `Lycia.Persistence.PostgreSql.Tests` net9.0 (81/81, real container),
+  `Lycia.IntegrationTests` net9.0 and net10.0 (46/46 each, real containers, run twice with distinct trx
+  output confirming the CI hygiene fix).
+- Remote `dev` CI — PENDING this phase's push (see below for the result once available).
+- `main` CI and `compatibility-minimum` (mandatory for the release tag) — PENDING remote execution; not
+  bypassed.
+- Package-content validation (local pack + inspect all 12 `.nupkg`s) — PENDING, performed as part of this
+  finalization before tagging.
+- Red-team pass — see the questions enumerated in this phase's instructions; the compensation-identity
+  ambiguity questions are answered by the same-type-message and sibling-branch tests above, and the
+  cancellation/idempotency questions by the crash-recovery and repeated-call tests above. No open finding
+  required a design change beyond what is already reflected in this entry.
+
+Do not set this section's `Status` to a release-complete state until the tag-driven workflow has published
+all 12 packages and they have been independently verified on nuget.org.
