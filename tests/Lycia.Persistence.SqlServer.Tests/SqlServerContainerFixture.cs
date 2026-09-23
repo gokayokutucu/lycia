@@ -13,7 +13,7 @@ namespace Lycia.Persistence.SqlServer.Tests;
 public class SqlServerContainerFixture : IAsyncLifetime
 {
     private readonly MsSqlContainer _container = new MsSqlBuilder()
-        .WithImage("mcr.microsoft.com/mssql/server:2022-latest")
+        .WithImage(Lycia.Tests.Infrastructure.InfrastructureVersions.Image("sqlserver"))
         .Build();
 
     public string ConnectionString => _container.GetConnectionString();

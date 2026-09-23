@@ -56,7 +56,10 @@ public class ShipOrderForCompensationSagaHandler :
                 throw new InvalidOperationException("Total price must be greater than zero for compensation.");
             }
             
-            await Context.CompensateAndBubbleUp<OrderCreatedEvent>(cancellationToken);
+            await Context
+                .ContinueCompensation()
+                .ThenMarkAsCompensated<OrderCreatedEvent>()
+                .ThenBubbleUp(cancellationToken);
         }
         catch (Exception ex)
         {

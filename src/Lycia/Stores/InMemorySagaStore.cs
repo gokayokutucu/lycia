@@ -40,18 +40,25 @@ public class InMemorySagaStore(
     // Stores step logs per sagaId with a composite key "stepTypeName_handlerTypeFullName"
     private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<string, SagaStepMetadata>> _stepLogs = new();
 
+    // Compensation propagation edges keyed by (sagaId, childMessageId); a single lock guards the small,
+    // infrequently-contended claim/complete/fail state machine (mirrors the version lock's role above).
+    private readonly ConcurrentDictionary<(Guid SagaId, Guid ChildMessageId), CompensationPropagationIntent> _propagationIntents = new();
+    private readonly object _propagationLock = new();
+
     /// <inheritdoc />
     public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
-        Type handlerType, object? payload, Exception? exception)
+        Type handlerType, object? payload, Exception? exception, CancellationToken cancellationToken = default)
     {
-        return LogStepAsync(sagaId, messageId, parentMessageId, stepType, status, handlerType, payload, 
-            new SagaStepFailureInfo("Exception occurred", exception?.GetType().Name, exception?.ToString()  ));
+        return LogStepAsync(sagaId, messageId, parentMessageId, stepType, status, handlerType, payload,
+            new SagaStepFailureInfo("Exception occurred", exception?.GetType().Name, exception?.ToString()), cancellationToken);
     }
-    
+
     /// <inheritdoc />
     public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
-        Type handlerType, object? payload, SagaStepFailureInfo? failureInfo)
+        Type handlerType, object? payload, SagaStepFailureInfo? failureInfo,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var stepDict = _stepLogs.GetOrAdd(sagaId, _ => new ConcurrentDictionary<string, SagaStepMetadata>());
         var stepKey = NamingHelper.GetStepNameWithHandler(stepType, handlerType, messageId);
 
@@ -260,12 +267,13 @@ public class InMemorySagaStore(
     }
 
     /// <inheritdoc />
-    public Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data)
+    public Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data, CancellationToken cancellationToken = default)
         where TSagaData : SagaData
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (data is null) return Task.CompletedTask;
         data.SagaId = sagaId;
-        
+
         _sagaData[sagaId] = data;
         return Task.CompletedTask;
     }
@@ -300,9 +308,11 @@ public class InMemorySagaStore(
     }
 
     /// <inheritdoc />
-    public Task<long> SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData data, long expectedVersion)
+    public Task<long> SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData data, long expectedVersion,
+        CancellationToken cancellationToken = default)
         where TSagaData : SagaData
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (data is null) throw new ArgumentNullException(nameof(data));
 
         lock (_versionLock)
@@ -321,9 +331,11 @@ public class InMemorySagaStore(
     }
 
     /// <inheritdoc />
-    public Task<(TSagaData Data, long Version)> LoadSagaDataWithVersionAsync<TSagaData>(Guid sagaId)
+    public Task<(TSagaData Data, long Version)> LoadSagaDataWithVersionAsync<TSagaData>(Guid sagaId,
+        CancellationToken cancellationToken = default)
         where TSagaData : SagaData, new()
     {
+        cancellationToken.ThrowIfCancellationRequested();
         lock (_versionLock)
         {
             if (!_sagaVersions.TryGetValue(sagaId, out var version)) version = 0L;
@@ -333,4 +345,154 @@ public class InMemorySagaStore(
             return Task.FromResult((new TSagaData(), 0L));
         }
     }
+
+    /// <inheritdoc />
+    public Task<CompensationPropagationClaim> EnsureAndClaimCompensationPropagationAsync(Guid sagaId,
+        Guid childMessageId, Guid parentMessageId, string owner, TimeSpan leaseDuration, int maxAttempts,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var key = (sagaId, childMessageId);
+        lock (_propagationLock)
+        {
+            var now = DateTime.UtcNow;
+            var intent = _propagationIntents.GetOrAdd(key, _ => new CompensationPropagationIntent
+            {
+                SagaId = sagaId,
+                ChildMessageId = childMessageId,
+                ParentMessageId = parentMessageId,
+                Status = CompensationPropagationStatus.Pending,
+                AttemptCount = 0,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            });
+
+            return Task.FromResult(TryClaimLocked(intent, owner, leaseDuration, maxAttempts, now));
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <paramref name="leaseDuration"/> is accepted for interface conformance but not used here, matching
+    /// the relational providers: the batch path's only staleness threshold is <paramref name="recoveryTimeout"/>,
+    /// both for which rows are eligible and for the claim itself - see <see cref="TryClaimLocked"/>.
+    /// </remarks>
+    public Task<IReadOnlyList<CompensationPropagationIntent>> ClaimDueCompensationPropagationsAsync(int maxCount,
+        string owner, TimeSpan leaseDuration, TimeSpan recoveryTimeout, int maxAttempts,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_propagationLock)
+        {
+            var now = DateTime.UtcNow;
+            var claimed = new List<CompensationPropagationIntent>();
+            foreach (var intent in _propagationIntents.Values.OrderBy(i => i.CreatedAtUtc))
+            {
+                if (claimed.Count >= maxCount) break;
+
+                var claimable = intent.Status == CompensationPropagationStatus.Pending
+                    || (intent.Status == CompensationPropagationStatus.Claimed
+                        && now - intent.UpdatedAtUtc >= recoveryTimeout);
+                if (!claimable) continue;
+
+                var result = TryClaimLocked(intent, owner, recoveryTimeout, maxAttempts, now);
+                if (result.Outcome == CompensationPropagationClaimOutcome.Claimed) claimed.Add(intent);
+            }
+
+            return Task.FromResult<IReadOnlyList<CompensationPropagationIntent>>(claimed);
+        }
+    }
+
+    // Must be called with _propagationLock held. The sole mutual-exclusion point: a claim only succeeds
+    // from Pending, or from Claimed once its lease is considered stale per <paramref name="staleAfter"/>.
+    // Callers pass different values for that threshold on purpose: the single-edge ensure-and-claim path
+    // passes its own leaseDuration (it intentionally does NOT treat its own freshly-created or already-live
+    // Claimed row as claimable, so a concurrent second caller for the same edge correctly receives
+    // ClaimedByAnother); the batch claim path passes its recoveryTimeout, matching the exact staleness
+    // threshold it already used to decide this intent was even worth attempting - using leaseDuration there
+    // instead would wrongly re-reject an intent the caller just determined was due.
+    private CompensationPropagationClaim TryClaimLocked(CompensationPropagationIntent intent, string owner,
+        TimeSpan staleAfter, int maxAttempts, DateTime now)
+    {
+        if (intent.Status == CompensationPropagationStatus.Completed)
+            return new CompensationPropagationClaim(CompensationPropagationClaimOutcome.AlreadyCompleted, Clone(intent));
+
+        if (intent.Status == CompensationPropagationStatus.Failed)
+            return new CompensationPropagationClaim(CompensationPropagationClaimOutcome.AttemptsExhausted, Clone(intent));
+
+        if (intent.Status == CompensationPropagationStatus.Claimed && now - intent.UpdatedAtUtc < staleAfter)
+            return new CompensationPropagationClaim(CompensationPropagationClaimOutcome.ClaimedByAnother, Clone(intent));
+
+        if (intent.AttemptCount >= maxAttempts)
+        {
+            intent.Status = CompensationPropagationStatus.Failed;
+            intent.UpdatedAtUtc = now;
+            intent.FailureInfo ??= new SagaStepFailureInfo("Compensation propagation attempts exhausted", null, null);
+            return new CompensationPropagationClaim(CompensationPropagationClaimOutcome.AttemptsExhausted, Clone(intent));
+        }
+
+        intent.Status = CompensationPropagationStatus.Claimed;
+        intent.Owner = owner;
+        intent.AttemptCount++;
+        intent.UpdatedAtUtc = now;
+        return new CompensationPropagationClaim(CompensationPropagationClaimOutcome.Claimed, Clone(intent));
+    }
+
+    /// <inheritdoc />
+    public Task MarkCompensationPropagationCompletedAsync(Guid sagaId, Guid childMessageId,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_propagationLock)
+        {
+            if (_propagationIntents.TryGetValue((sagaId, childMessageId), out var intent))
+            {
+                intent.Status = CompensationPropagationStatus.Completed;
+                intent.UpdatedAtUtc = DateTime.UtcNow;
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public Task MarkCompensationPropagationFailedAsync(Guid sagaId, Guid childMessageId,
+        SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default)
+    {
+        lock (_propagationLock)
+        {
+            if (_propagationIntents.TryGetValue((sagaId, childMessageId), out var intent))
+            {
+                intent.Status = CompensationPropagationStatus.Failed;
+                intent.FailureInfo = failureInfo;
+                intent.UpdatedAtUtc = DateTime.UtcNow;
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public Task<CompensationPropagationIntent?> GetCompensationPropagationIntentAsync(Guid sagaId, Guid childMessageId,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_propagationLock)
+        {
+            return Task.FromResult(_propagationIntents.TryGetValue((sagaId, childMessageId), out var intent)
+                ? Clone(intent)
+                : null);
+        }
+    }
+
+    private static CompensationPropagationIntent Clone(CompensationPropagationIntent intent) => new()
+    {
+        SagaId = intent.SagaId,
+        ChildMessageId = intent.ChildMessageId,
+        ParentMessageId = intent.ParentMessageId,
+        Status = intent.Status,
+        AttemptCount = intent.AttemptCount,
+        Owner = intent.Owner,
+        CreatedAtUtc = intent.CreatedAtUtc,
+        UpdatedAtUtc = intent.UpdatedAtUtc,
+        FailureInfo = intent.FailureInfo
+    };
 }

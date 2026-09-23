@@ -41,7 +41,12 @@ public class OutboxMessage
 
     public OutboxMessageStatus Status { get; set; }
 
-    /// <summary>Number of transport dispatch attempts made with this stable <see cref="MessageId"/>.</summary>
+    /// <summary>
+    /// Number of transport dispatch attempts started with this stable <see cref="MessageId"/>. It is
+    /// incremented by <see cref="IOutboxStore.MarkPublishingAsync"/> before the transport is called, so it
+    /// includes an attempt whose outcome was never recorded because its worker stopped. It can therefore
+    /// reach <c>MaxAttempts + 1</c>: the extra attempt resolves an in-doubt final attempt.
+    /// </summary>
     public int RetryCount { get; set; }
 
     public SagaStepFailureInfo? FailureInfo { get; set; }

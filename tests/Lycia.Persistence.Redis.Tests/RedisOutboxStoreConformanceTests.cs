@@ -60,4 +60,35 @@ public class RedisOutboxStoreConformanceTests(RedisSagaStoreFixture fixture) : O
         await Assert.ThrowsAnyAsync<StackExchange.Redis.RedisConnectionException>(() =>
             store.AddAsync(new OutboxMessage(Guid.NewGuid(), typeof(DummyEvent).FullName!, "{}", "TestApp", null)));
     }
+
+    /// <summary>
+    /// The claim script used to pop a stale Publishing entry that had reached the attempt cap and never put
+    /// it back, so a row stranded by that behavior has a message record but no pending-set entry, and the
+    /// script has nothing to discover. Re-adding the entry is the documented remedy for such rows; this pins
+    /// that it works, and that the limitation it works around is real.
+    /// </summary>
+    [Fact]
+    public async Task A_Row_Left_Without_A_Pending_Entry_Is_Recovered_By_Re_Adding_It()
+    {
+        var keyNamespace = $"outbox-test-{Guid.NewGuid():N}";
+        var store = new RedisOutboxStore(fixture.Database, new OutboxOptions(), keyNamespace);
+        var message = new OutboxMessage(Guid.NewGuid(), typeof(DummyEvent).FullName!, "{}", "TestApp", null);
+        var window = TimeSpan.FromMilliseconds(200);
+        await store.AddAsync(message);
+        Assert.Contains(await store.ClaimPendingBatchAsync(100, maxAttempts: 1, recoveryTimeout: window),
+            claimed => claimed.MessageId == message.MessageId);
+        await store.MarkPublishingAsync(message.MessageId);
+
+        // The shape the previous script left behind: the record survives, its pending entry does not.
+        await fixture.Database.SortedSetRemoveAsync($"{keyNamespace}:pending", message.MessageId.ToString());
+        await Task.Delay(600);
+        Assert.DoesNotContain(await store.ClaimPendingBatchAsync(100, maxAttempts: 1, recoveryTimeout: window),
+            claimed => claimed.MessageId == message.MessageId);
+
+        await fixture.Database.SortedSetAddAsync($"{keyNamespace}:pending", message.MessageId.ToString(), 0);
+
+        var recovered = Assert.Single(await store.ClaimPendingBatchAsync(100, maxAttempts: 1, recoveryTimeout: window));
+        Assert.Equal(message.MessageId, recovered.MessageId);
+        Assert.Equal(1, recovered.RetryCount);
+    }
 }

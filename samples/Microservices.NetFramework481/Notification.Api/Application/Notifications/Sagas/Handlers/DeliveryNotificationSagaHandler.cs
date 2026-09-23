@@ -48,7 +48,7 @@ public sealed class DeliveryNotificationSagaHandler(
         catch (OperationCanceledException ex)
         {
             await Context.Publish(new CustomerNotifiedFailedEvent(ex.Message) { OrderId = message.OrderId }, cancellationToken);
-            await Context.MarkAsCancelled<ShipmentScheduledEvent>(ex);
+            await Context.MarkAsCancelled<ShipmentScheduledEvent>(ex, cancellationToken);
         }
         catch (Exception ex)
         {

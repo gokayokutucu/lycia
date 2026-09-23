@@ -53,21 +53,21 @@ public abstract class CoordinatedSagaHandler<TMessage, TSagaData> :
         }
         catch (OperationCanceledException ex)
         {
-            await Context.MarkAsCancelled<TMessage>(ex);
+            await Context.MarkAsCancelled<TMessage>(ex, cancellationToken);
         }
         catch (Exception ex)
         {
-            await Context.MarkAsCompensationFailed<TMessage>(ex);
+            await Context.MarkAsCompensationFailed<TMessage>(ex, cancellationToken);
         }
     }
 
     public abstract Task HandleAsync(TMessage message, CancellationToken cancellationToken = default);
     
-    public virtual Task CompensateAsync(TMessage message, CancellationToken cancellationToken = default) => 
-        Context.CompensateAndBubbleUp<TMessage>(cancellationToken);
+    public virtual Task CompensateAsync(TMessage message, CancellationToken cancellationToken = default) =>
+        Context.ContinueCompensation().ThenMarkAsCompensated<TMessage>().ThenBubbleUp(cancellationToken);
     
-    protected Task MarkAsComplete(CancellationToken cancellationToken = default) => Context.MarkAsComplete<TMessage>();
+    protected Task MarkAsComplete(CancellationToken cancellationToken = default) => Context.MarkAsComplete<TMessage>(cancellationToken);
     protected Task MarkAsFailed(CancellationToken cancellationToken = default) => Context.MarkAsFailed<TMessage>(cancellationToken);
-    protected Task MarkAsCompensationFailed(CancellationToken cancellationToken = default) => Context.MarkAsCompensationFailed<TMessage>();
+    protected Task MarkAsCompensationFailed(CancellationToken cancellationToken = default) => Context.MarkAsCompensationFailed<TMessage>(cancellationToken);
     protected Task<bool> IsAlreadyCompleted(CancellationToken cancellationToken = default) => Context.IsAlreadyCompleted<TMessage>();
 }

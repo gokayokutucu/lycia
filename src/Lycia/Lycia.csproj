@@ -138,4 +138,11 @@
         <None Include="..\..\README.md" Pack="true" PackagePath=""/>
     </ItemGroup>
 
+    <!-- CompensationWorker (Lycia.Compensating) shares SagaCompensationCoordinator.AttemptPropagationAsync
+         with the immediate in-request attempt via an internal member, not a public interface member - see
+         its remarks. Lycia.Tests needs this visibility to crash-inject that shared attempt directly. -->
+    <ItemGroup>
+        <InternalsVisibleTo Include="Lycia.Tests" />
+    </ItemGroup>
+
 </Project>

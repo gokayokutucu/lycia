@@ -50,7 +50,7 @@ public sealed class PaymentNotificationSagaHandler(
         catch (OperationCanceledException ex)
         {
             await Context.Publish(new CustomerNotifiedFailedEvent(ex.Message) { OrderId = message.OrderId }, cancellationToken);
-            await Context.MarkAsCancelled<PaymentProcessedEvent>(ex);
+            await Context.MarkAsCancelled<PaymentProcessedEvent>(ex, cancellationToken);
         }
         catch (Exception ex)
         {

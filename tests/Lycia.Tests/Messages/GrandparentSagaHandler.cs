@@ -19,8 +19,8 @@ public class GrandparentCompensationSagaHandler : StartCoordinatedSagaHandler<Du
     public override Task CompensateStartAsync(DummyGrandparentEvent message, CancellationToken cancellationToken = default)
     {
         Invocations.Add(nameof(GrandparentCompensationSagaHandler));
-        Context.CompensateAndBubbleUp<DummyGrandparentEvent>(cancellationToken);
-        return Task.CompletedTask;
+        // Root step: no logical parent, so this only marks itself compensated.
+        return Context.MarkAsCompensated<DummyGrandparentEvent>(cancellationToken);
     }
 }
 
@@ -36,8 +36,10 @@ public class ParentCompensationSagaHandler : CoordinatedSagaHandler<DummyParentE
     public override Task CompensateAsync(DummyParentEvent message, CancellationToken cancellationToken = default)
     {
         Invocations.Add(nameof(ParentCompensationSagaHandler));
-        Context.CompensateAndBubbleUp<DummyParentEvent>(cancellationToken);
-        return Task.CompletedTask;
+        return Context
+            .ContinueCompensation()
+            .ThenMarkAsCompensated<DummyParentEvent>()
+            .ThenBubbleUp(cancellationToken);
     }
 }
 
@@ -49,7 +51,7 @@ public class ChildCompensationSagaHandler : CoordinatedSagaHandler<DummyChildEve
     {
         if (message.IsFailed)
         {
-            Context.MarkAsFailed<DummyChildEvent>(cancellationToken);
+            return Context.MarkAsFailed<DummyChildEvent>(cancellationToken);
         }
         return Task.CompletedTask;
     }
@@ -58,9 +60,11 @@ public class ChildCompensationSagaHandler : CoordinatedSagaHandler<DummyChildEve
     {
         Invocations.Add(nameof(ChildCompensationSagaHandler));
         if (message.IsCompensationFailed)
-            Context.MarkAsCompensationFailed<DummyChildEvent>();
-        else
-            Context.CompensateAndBubbleUp<DummyChildEvent>(cancellationToken);
-        return Task.CompletedTask;
+            return Context.MarkAsCompensationFailed<DummyChildEvent>(cancellationToken);
+
+        return Context
+            .ContinueCompensation()
+            .ThenMarkAsCompensated<DummyChildEvent>()
+            .ThenBubbleUp(cancellationToken);
     }
 }

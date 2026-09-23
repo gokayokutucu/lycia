@@ -29,6 +29,8 @@
         <ProjectReference Include="..\..\samples\Sample.Shared\Sample.Shared.csproj" />
         <ProjectReference Include="..\..\src\Lycia\Lycia.csproj" />
         <ProjectReference Include="..\..\src\Lycia.Persistence.Redis\Lycia.Persistence.Redis.csproj" />
+        <ProjectReference Include="..\..\src\Lycia.Persistence.InMemory\Lycia.Persistence.InMemory.csproj" />
+        <ProjectReference Include="..\..\src\Lycia.Extensions.RabbitMq\Lycia.Extensions.RabbitMq.csproj" />
         <ProjectReference Include="..\Lycia.Tests.Helpers\Lycia.Tests.Helpers.csproj" />
     </ItemGroup>
 
@@ -42,4 +44,15 @@
                  Link="SagaStates\%(Filename)%(Extension)" />
     </ItemGroup>
 
+    <!-- Source shared with Lycia.IntegrationTests: the fault-injection proxy and the message contracts. -->
+    <ItemGroup>
+        <Compile Include="..\Lycia.IntegrationTests\TcpFaultProxy.cs" Link="Shared\TcpFaultProxy.cs" />
+        <Compile Include="..\Lycia.IntegrationTests\RabbitMqTestContracts.cs" Link="Shared\RabbitMqTestContracts.cs" />
+    </ItemGroup>
+
+    <!-- The compatibility contract's test images: one shared helper and the JSON it reads. -->
+    <ItemGroup>
+        <Compile Include="..\Common\InfrastructureVersions.cs" Link="Shared\InfrastructureVersions.cs" />
+        <None Include="..\..\infrastructure-versions.json" Link="infrastructure-versions.json" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
 </Project>

@@ -39,8 +39,10 @@ public class PostgreSqlSagaStoreOptions
 
     internal const string SagaDataTable = "lycia_saga_data";
     internal const string SagaStepsTable = "lycia_saga_steps";
+    internal const string CompensationPropagationTable = "lycia_compensation_propagation";
     internal string QualifiedSagaDataTable => $"\"{SchemaName}\".{SagaDataTable}";
     internal string QualifiedSagaStepsTable => $"\"{SchemaName}\".{SagaStepsTable}";
+    internal string QualifiedCompensationPropagationTable => $"\"{SchemaName}\".{CompensationPropagationTable}";
 
     /// <summary>Builds the effective connection string, injecting <see cref="SchemaName"/> as the search path when non-default.</summary>
     internal string BuildEffectiveConnectionString()

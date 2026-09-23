@@ -9,29 +9,31 @@ using Lycia.Saga.Abstractions.Messaging;
 
 namespace Lycia.Saga;
 
+/// <summary>
+/// Terminal continuation for a deferred, reactive (non-coordinated) tracked message operation created by
+/// <c>SendWithTracking</c>/<c>PublishWithTracking</c>/<c>RespondWithTracking</c>/<c>ScheduleWithTracking</c>.
+/// The underlying message operation does not run until a terminal <c>Then...</c> method here is awaited;
+/// that method's <see cref="CancellationToken"/> is the single token governing the whole deferred
+/// operation - both the outgoing message and the saga-step transition that follows it. The WithTracking
+/// call that created this instance never accepts a token of its own.
+/// </summary>
 public class ReactiveSagaStepFluent<TInitialMessage>(
     ISagaContext<TInitialMessage> context,
-    Func<CancellationToken, Task> operation,
-    CancellationToken capturedCancellationToken = default) : ISagaStepFluent
+    Func<CancellationToken, Task> operation) : ISagaStepFluent
     where TInitialMessage : IMessage
 {
-    public static object Create(Type stepType, object context, Func<CancellationToken, Task> operation,
-        CancellationToken capturedCancellationToken = default)
+    public static object Create(Type stepType, object context, Func<CancellationToken, Task> operation)
     {
         var open = typeof(ReactiveSagaStepFluent<>);
         var closed = open.MakeGenericType(stepType);
-        return Activator.CreateInstance(closed, context, operation, capturedCancellationToken)!;
+        return Activator.CreateInstance(closed, context, operation)!;
     }
 
-    // Preferred: pass the token here, not to the WithTracking(...) call that created this instance.
-    // If the caller still supplied one there, it is used as a fallback when this token is left default,
-    // for source compatibility with the WithTracking(msg, cancellationToken).Then...() call shape.
     private async Task RunAsync(CancellationToken cancellationToken, Func<CancellationToken, Task> transition)
     {
-        var token = SagaStepFluentToken.Resolve(cancellationToken, capturedCancellationToken);
-        token.ThrowIfCancellationRequested();
-        await operation(token);
-        await transition(token);
+        cancellationToken.ThrowIfCancellationRequested();
+        await operation(cancellationToken);
+        await transition(cancellationToken);
     }
 
     /// <summary>Transitions the step the context was constructed for (the step being handled, not the outgoing message).</summary>
@@ -61,6 +63,10 @@ public class ReactiveSagaStepFluent<TInitialMessage>(
     public Task ThenMarkAsCancelled<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage =>
         RunAsync(cancellationToken, token => context.MarkAsCancelled<TStep>(cancellationToken: token));
 
+    /// <summary>
+    /// Transitions the step the context was constructed for to compensated. This does not bubble
+    /// compensation up to the logical parent; use <c>Context.ContinueCompensation()</c> for that.
+    /// </summary>
     public Task ThenMarkAsCompensated(CancellationToken cancellationToken = default) =>
         RunAsync(cancellationToken, token => context.MarkAsCompensated<TInitialMessage>(token));
 

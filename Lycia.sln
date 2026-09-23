@@ -131,17 +131,21 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Persistence.Redis.Tes
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "microservices", "microservices", "{10000000-0000-4000-8000-000000000001}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Microservices.Contracts", "samples\Microservices\Shared.Contracts\Shared.Contracts.csproj", "{10000000-0000-4000-8000-000000000002}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Shared.Contracts", "samples\Microservices\Shared.Contracts\Shared.Contracts.csproj", "{10000000-0000-4000-8000-000000000002}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Microservices.Checkout", "samples\Microservices\Checkout\Checkout.csproj", "{10000000-0000-4000-8000-000000000003}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Checkout", "samples\Microservices\Checkout\Checkout.csproj", "{10000000-0000-4000-8000-000000000003}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Microservices.Order", "samples\Microservices\Order\Order.csproj", "{10000000-0000-4000-8000-000000000004}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Order", "samples\Microservices\Order\Order.csproj", "{10000000-0000-4000-8000-000000000004}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Microservices.Inventory", "samples\Microservices\Inventory\Inventory.csproj", "{10000000-0000-4000-8000-000000000005}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Inventory", "samples\Microservices\Inventory\Inventory.csproj", "{10000000-0000-4000-8000-000000000005}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Microservices.Payment", "samples\Microservices\Payment\Payment.csproj", "{10000000-0000-4000-8000-000000000006}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Payment", "samples\Microservices\Payment\Payment.csproj", "{10000000-0000-4000-8000-000000000006}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Microservices.Shipping", "samples\Microservices\Shipping\Shipping.csproj", "{10000000-0000-4000-8000-000000000007}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Shipping", "samples\Microservices\Shipping\Shipping.csproj", "{10000000-0000-4000-8000-000000000007}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Extensions.AspNetCore", "src\Lycia.Extensions.AspNetCore\Lycia.Extensions.AspNetCore.csproj", "{8E7CF89D-0750-4376-A985-FC5DF0F349E5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lycia.Extensions.AspNetCore.Tests", "tests\Lycia.Extensions.AspNetCore.Tests\Lycia.Extensions.AspNetCore.Tests.csproj", "{54FD7ECB-EF3B-4C78-83AB-8AF926BCB914}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -813,6 +817,30 @@ Global
 		{10000000-0000-4000-8000-000000000007}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{10000000-0000-4000-8000-000000000007}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{10000000-0000-4000-8000-000000000007}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8E7CF89D-0750-4376-A985-FC5DF0F349E5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8E7CF89D-0750-4376-A985-FC5DF0F349E5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8E7CF89D-0750-4376-A985-FC5DF0F349E5}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{8E7CF89D-0750-4376-A985-FC5DF0F349E5}.Debug|x64.Build.0 = Debug|Any CPU
+		{8E7CF89D-0750-4376-A985-FC5DF0F349E5}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{8E7CF89D-0750-4376-A985-FC5DF0F349E5}.Debug|x86.Build.0 = Debug|Any CPU
+		{8E7CF89D-0750-4376-A985-FC5DF0F349E5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8E7CF89D-0750-4376-A985-FC5DF0F349E5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8E7CF89D-0750-4376-A985-FC5DF0F349E5}.Release|x64.ActiveCfg = Release|Any CPU
+		{8E7CF89D-0750-4376-A985-FC5DF0F349E5}.Release|x64.Build.0 = Release|Any CPU
+		{8E7CF89D-0750-4376-A985-FC5DF0F349E5}.Release|x86.ActiveCfg = Release|Any CPU
+		{8E7CF89D-0750-4376-A985-FC5DF0F349E5}.Release|x86.Build.0 = Release|Any CPU
+		{54FD7ECB-EF3B-4C78-83AB-8AF926BCB914}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{54FD7ECB-EF3B-4C78-83AB-8AF926BCB914}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{54FD7ECB-EF3B-4C78-83AB-8AF926BCB914}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{54FD7ECB-EF3B-4C78-83AB-8AF926BCB914}.Debug|x64.Build.0 = Debug|Any CPU
+		{54FD7ECB-EF3B-4C78-83AB-8AF926BCB914}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{54FD7ECB-EF3B-4C78-83AB-8AF926BCB914}.Debug|x86.Build.0 = Debug|Any CPU
+		{54FD7ECB-EF3B-4C78-83AB-8AF926BCB914}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{54FD7ECB-EF3B-4C78-83AB-8AF926BCB914}.Release|Any CPU.Build.0 = Release|Any CPU
+		{54FD7ECB-EF3B-4C78-83AB-8AF926BCB914}.Release|x64.ActiveCfg = Release|Any CPU
+		{54FD7ECB-EF3B-4C78-83AB-8AF926BCB914}.Release|x64.Build.0 = Release|Any CPU
+		{54FD7ECB-EF3B-4C78-83AB-8AF926BCB914}.Release|x86.ActiveCfg = Release|Any CPU
+		{54FD7ECB-EF3B-4C78-83AB-8AF926BCB914}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -884,6 +912,8 @@ Global
 		{10000000-0000-4000-8000-000000000005} = {10000000-0000-4000-8000-000000000001}
 		{10000000-0000-4000-8000-000000000006} = {10000000-0000-4000-8000-000000000001}
 		{10000000-0000-4000-8000-000000000007} = {10000000-0000-4000-8000-000000000001}
+		{8E7CF89D-0750-4376-A985-FC5DF0F349E5} = {59E39671-6EFC-4EE2-B70F-DF6955451C7C}
+		{54FD7ECB-EF3B-4C78-83AB-8AF926BCB914} = {39547434-F68A-4275-8482-B1EB3CFC8F02}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {A79E706E-1C9F-4CF1-A700-5A2D09B33AC6}

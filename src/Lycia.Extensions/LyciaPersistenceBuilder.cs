@@ -5,6 +5,7 @@ using Lycia.Outbox;
 using Lycia.Extensions.Journal;
 using Lycia.Extensions.SplitStore;
 using Lycia.Saga.Abstractions;
+using Lycia.Saga.Abstractions.Compensating;
 using Lycia.Saga.Abstractions.Inbox;
 using Lycia.Saga.Abstractions.Outbox;
 using Lycia.Saga.Abstractions.Persistence;
@@ -175,6 +176,20 @@ public sealed class LyciaPersistenceBuilder
 
     /// <summary>Configures bounded retries, polling, and stale-claim recovery for Split Store reconciliation.</summary>
     public LyciaPersistenceBuilder WithReconciliationWorker(Action<ReconciliationWorkerOptions> configure)
+    {
+        if (configure == null) throw new ArgumentNullException(nameof(configure));
+        Services.Configure(configure);
+        return this;
+    }
+
+    /// <summary>
+    /// Tunes the hosted <c>CompensationWorker</c> recovery loop (batch size, bounded attempts, stale-claim
+    /// recovery window, polling and backoff). The worker itself is registered unconditionally by
+    /// <c>AddLycia</c>/<c>AddLyciaInMemory</c> - compensation propagation durability is part of SagaStore
+    /// correctness, not an optional add-on, so there is no corresponding <c>UseCompensationWorker()</c>
+    /// enable call. This method only overrides <see cref="CompensationWorkerOptions"/> defaults.
+    /// </summary>
+    public LyciaPersistenceBuilder WithCompensationWorker(Action<CompensationWorkerOptions> configure)
     {
         if (configure == null) throw new ArgumentNullException(nameof(configure));
         Services.Configure(configure);

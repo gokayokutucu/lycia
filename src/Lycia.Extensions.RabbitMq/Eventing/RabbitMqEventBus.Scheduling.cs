@@ -65,7 +65,10 @@ public sealed partial class RabbitMqEventBus
             CorrelationId = record.ScheduleId.ToString("D"),
             Headers = RabbitMqSchedulingTopology.ToRabbitHeaders(record.Headers)
         };
-        await _channel.BasicPublishAsync(string.Empty, queueName, mandatory: true, properties, record.Payload,
+        // The delay queue was just declared, so a return here means it vanished: fail the schedule rather than
+        // report a native schedule that was never stored. With publisher confirms the schedule is only
+        // reported once RabbitMQ has confirmed the delayed message.
+        await PublishToExchangeAsync(string.Empty, null, queueName, properties, record.Payload, mandatory: true,
             cancellationToken).ConfigureAwait(false);
         record.Strategy = SchedulingStrategy.RabbitMqTtlDeadLetter;
         return queueName;

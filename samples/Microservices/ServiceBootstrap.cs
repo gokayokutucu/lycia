@@ -1,4 +1,5 @@
 using Lycia.Extensions;
+using Lycia.Extensions.AspNetCore;
 using Lycia.Extensions.OpenTelemetry;
 using Lycia.Extensions.RabbitMq;
 using Lycia.Persistence.PostgreSql;
@@ -72,6 +73,10 @@ internal static class ServiceBootstrap
         app.MapGet("/health",(IPersistenceTopology topology)=>Results.Ok(new { status="healthy",applicationId,
             persistenceMode=topology.Current.Mode.ToString(),canonicalStore=topology.Current.CanonicalStore,
             operationalStore=topology.Current.OperationalStore,reconciliation=topology.Current.ReconciliationEnabled }));
+        // Distinct from /health above: this is Lycia's own opt-in configuration/topology endpoint (default
+        // route, no authorization - a sample, not a hardened deployment). It reports what Lycia resolved,
+        // never whether RabbitMQ/PostgreSQL/Redis are currently reachable.
+        app.MapLyciaDiagnostics();
         app.MapGet("/state/{orderId:guid}",async (Guid orderId,CancellationToken token)=>
         {
             await using var connection=new NpgsqlConnection(postgres); await connection.OpenAsync(token);

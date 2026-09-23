@@ -9,6 +9,11 @@ on:
     # well, and a newly created tag has no meaningful diff base, so a release tag can end up not
     # building - and therefore not publishing - depending on what its commit happened to touch.
     # Every main/dev push and v* tag therefore runs the full CI.
+  # The minimum-version compatibility run is too slow to repeat on every push, so it also runs weekly and
+  # on demand; a release tag always runs it (see the compatibility-minimum job).
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
 
 # Least privilege by default. Only the publish job additionally gets id-token: write, which is what
 # lets it mint the GitHub OIDC token that NuGet Trusted Publishing exchanges for a short-lived key.
@@ -41,49 +46,53 @@ jobs:
       - name: Build (Release)
         run: dotnet build Lycia.sln -c Release --no-restore
 
+      # Lycia.Tests targets net9.0;net10.0. One dotnet test invocation without -f runs each target
+      # framework's test host sequentially but writes every one to the same default trx path, so an
+      # earlier framework's result is silently overwritten by the next - a real failure in it can vanish
+      # from the uploaded artifact even though the step's own exit code still fails correctly. Looping per
+      # TFM with a distinct trx name each avoids that; `set +e` plus explicit FAILED tracking makes sure
+      # one TFM's failure never skips the rest, while the step still fails overall if any TFM did.
       - name: Run unit tests
-        run: dotnet test tests/Lycia.Tests/Lycia.Tests.csproj -c Release --no-build --logger "trx;LogFileName=unit.trx"
+        run: |
+          set +e
+          FAILED=0
+          for TFM in net9.0 net10.0; do
+            dotnet test tests/Lycia.Tests/Lycia.Tests.csproj -c Release --no-build -f "$TFM" --logger "trx;LogFileName=unit-$TFM.trx"
+            [ $? -ne 0 ] && FAILED=1
+          done
+          exit $FAILED
+
+      # In-memory ASP.NET Core TestServer only - no external infrastructure, so it runs alongside the
+      # plain unit tests rather than in provider-tests or integration-tests. Targets net8.0;net9.0;net10.0 -
+      # same per-TFM trx naming reasoning as above.
+      - name: Run ASP.NET Core diagnostics endpoint tests
+        if: always()
+        run: |
+          set +e
+          FAILED=0
+          for TFM in net8.0 net9.0 net10.0; do
+            dotnet test tests/Lycia.Extensions.AspNetCore.Tests/Lycia.Extensions.AspNetCore.Tests.csproj -c Release --no-build -f "$TFM" --logger "trx;LogFileName=aspnetcore-diagnostics-$TFM.trx"
+            [ $? -ne 0 ] && FAILED=1
+          done
+          exit $FAILED
 
       - name: Publish test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: unit-test-results
-          path: '**/unit.trx'
+          path: '**/unit-net*.trx'
+
+      - name: Publish ASP.NET Core diagnostics test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aspnetcore-diagnostics-test-results
+          path: '**/aspnetcore-diagnostics-net*.trx'
 
   integration-tests:
     name: Integration tests (.NET Core)
     runs-on: ubuntu-latest
-
-    services:
-      redis:
-        image: redis:7-alpine
-        ports: ['6379:6379']
-      rabbitmq:
-        image: rabbitmq:3.13-management
-        ports: ['5672:5672', '15672:15672']
-      nats:
-        image: nats:2.11-alpine
-        ports: ['4222:4222', '8222:8222']
-        options: >-
-          --health-cmd "wget -q -O - http://localhost:8222/healthz | grep -q ok"
-          --health-interval 10s --health-timeout 5s --health-retries 10
-      kafka:
-        image: confluentinc/cp-kafka:7.7.1
-        ports: ['9092:9092']
-        env:
-          KAFKA_NODE_ID: 1
-          KAFKA_PROCESS_ROLES: broker,controller
-          KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
-          KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-          KAFKA_LISTENERS: PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092
-          KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
-          KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-          KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-          KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-          KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-          KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-          CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
 
     steps:
       - name: Checkout (full history + tags for NBGV)
@@ -107,18 +116,140 @@ jobs:
       - name: Build (Release)
         run: dotnet build Lycia.sln -c Release --no-restore
 
-      - name: Run integration tests
-        env:
-          LYCIA__EVENTBUS__CONNECTIONSTRING: amqp://guest:guest@127.0.0.1:5672/
-          LYCIA__EVENTSTORE__CONNECTIONSTRING: 127.0.0.1:6379
-        run: dotnet test tests/Lycia.IntegrationTests/Lycia.IntegrationTests.csproj -c Release --no-build --logger "trx;LogFileName=integration.trx"
+      # The suite starts its own RabbitMQ, Redis, NATS and Kafka containers (Testcontainers) from the images
+      # pinned in infrastructure-versions.json - the "current" track. No service containers are declared here:
+      # they were never used by the tests and would only hide which versions actually run.
+      # Run per target framework with a distinct trx file name: a single multi-TFM invocation runs each
+      # framework's test host sequentially but writes them all to the same default trx path, so the first
+      # framework's result file is silently overwritten by the next one's - a real failure in an earlier
+      # framework can vanish from the uploaded artifact even though the step's own exit code still reports
+      # it. This is what hid the net10.0-only RabbitMqSagaCompensationIntegrationTests failure from the
+      # integration-test-results artifact.
+      - name: Run integration tests (current infrastructure versions, net9.0)
+        run: dotnet test tests/Lycia.IntegrationTests/Lycia.IntegrationTests.csproj -c Release --no-build -f net9.0 --logger "trx;LogFileName=integration-net9.0.trx"
+
+      # if: always() so a net9.0 failure (which would otherwise skip subsequent steps) never hides
+      # net10.0's result too - the job still fails overall if either step fails.
+      - name: Run integration tests (current infrastructure versions, net10.0)
+        if: always()
+        run: dotnet test tests/Lycia.IntegrationTests/Lycia.IntegrationTests.csproj -c Release --no-build -f net10.0 --logger "trx;LogFileName=integration-net10.0.trx"
 
       - name: Publish test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-results
-          path: '**/integration.trx'
+          path: '**/integration-net*.trx'
+
+  provider-tests:
+    name: Persistence provider tests (current infrastructure versions)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history + tags for NBGV)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            10.0.x
+            9.0.x
+            8.0.x
+            6.0.x
+
+      - name: Restore
+        run: dotnet restore Lycia.sln
+
+      - name: Build (Release)
+        run: dotnet build Lycia.sln -c Release --no-restore
+
+      # Redis, PostgreSQL and SQL Server containers come from infrastructure-versions.json ("current" track).
+      # Every provider project targets net8.0;net9.0;net10.0 - a bare `dotnet test` per project (no -f)
+      # runs all three TFM hosts sequentially into the *same* default trx path, silently overwriting an
+      # earlier TFM's result with the next one's. The inner TFM loop gives each project+TFM combination its
+      # own trx file; `set +e` plus FAILED tracking means one failing combination never skips the rest, and
+      # the step still fails overall if any combination did.
+      - name: Run provider tests
+        run: |
+          set +e
+          FAILED=0
+          for PROJECT in Lycia.Persistence.InMemory.Tests Lycia.Persistence.Redis.Tests Lycia.Persistence.PostgreSql.Tests Lycia.Persistence.SqlServer.Tests; do
+            for TFM in net8.0 net9.0 net10.0; do
+              dotnet test "tests/$PROJECT/$PROJECT.csproj" -c Release --no-build -f "$TFM" --logger "trx;LogFileName=$PROJECT-$TFM.trx"
+              [ $? -ne 0 ] && FAILED=1
+            done
+          done
+          exit $FAILED
+
+      - name: Publish test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-test-results
+          path: '**/Lycia.Persistence.*.Tests-net*.trx'
+
+  compatibility-minimum:
+    name: Minimum supported infrastructure versions
+    runs-on: ubuntu-latest
+    # Runs the same suites against the *minimum* versions in infrastructure-versions.json, which is what makes
+    # "supported minimum" a tested claim. It repeats the container-backed suites with older images, so it is not
+    # repeated on every push: it runs weekly, on demand, and always for a release tag (publish needs it).
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    env:
+      LYCIA_TEST_INFRA_TRACK: minimum
+    steps:
+      - name: Checkout (full history + tags for NBGV)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            10.0.x
+            9.0.x
+            8.0.x
+            6.0.x
+
+      - name: Restore
+        run: dotnet restore Lycia.sln
+
+      - name: Build (Release)
+        run: dotnet build Lycia.sln -c Release --no-restore
+
+      # Lycia.Tests/Lycia.IntegrationTests target net9.0;net10.0; the persistence provider projects target
+      # net8.0;net9.0;net10.0 - a bare `dotnet test` per project (no -f) runs every TFM host sequentially
+      # into the same default trx path, silently overwriting an earlier TFM's result. The inner TFM loop
+      # (per project's actual TargetFrameworks) gives each project+TFM its own trx file; `set +e` plus
+      # FAILED tracking means one failing combination never skips the rest, and the step still fails
+      # overall if any combination did.
+      - name: Run suites against the minimum versions
+        run: |
+          set +e
+          FAILED=0
+          for PROJECT in Lycia.Tests Lycia.Persistence.Redis.Tests Lycia.Persistence.PostgreSql.Tests Lycia.Persistence.SqlServer.Tests Lycia.IntegrationTests; do
+            case "$PROJECT" in
+              Lycia.Tests|Lycia.IntegrationTests) TFMS="net9.0 net10.0" ;;
+              *) TFMS="net8.0 net9.0 net10.0" ;;
+            esac
+            for TFM in $TFMS; do
+              dotnet test "tests/$PROJECT/$PROJECT.csproj" -c Release --no-build -f "$TFM" --logger "trx;LogFileName=minimum-$PROJECT-$TFM.trx"
+              [ $? -ne 0 ] && FAILED=1
+            done
+          done
+          exit $FAILED
+
+      - name: Publish test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compatibility-minimum-test-results
+          path: '**/minimum-*.trx'
 
   unit-tests-netframework:
     name: Unit tests (NetFramework)
@@ -193,6 +324,10 @@ jobs:
           Write-Host 'Memurai started, verifying port 6379...'
           Test-NetConnection -ComputerName localhost -Port 6379
 
+      # The Windows jobs run the net48 (RabbitMQ.Client 6.x) suites against native services, not the pinned
+      # images: Memurai stands in for Redis and Chocolatey installs whatever RabbitMQ it currently ships. They
+      # are therefore NOT part of the version contract; the net48 client path is validated against the pinned
+      # brokers by running the same suite with Testcontainers (see DEVELOPERS.md).
       - name: Setup RabbitMQ (Windows)
         run: |
           choco install rabbitmq -y
@@ -224,10 +359,10 @@ jobs:
   publish:
     name: Pack & Publish
     runs-on: ubuntu-latest
-    needs: [unit-tests, integration-tests, unit-tests-netframework, integration-tests-netframework]
+    needs: [unit-tests, integration-tests, provider-tests, compatibility-minimum, unit-tests-netframework, integration-tests-netframework]
     # Release-only: an ordinary push/merge to main must never publish NuGet packages.
-    # This job only runs when the triggering ref is a release tag matching v*.
-    if: startsWith(github.ref, 'refs/tags/v')
+    # This job only runs for a push of a release tag matching v*; a schedule or manual run never publishes.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     # NuGet Trusted Publishing (https://learn.microsoft.com/nuget/nuget-org/trusted-publishing).
     # id-token: write lets this job request a GitHub OIDC token; NuGet/login exchanges it for a
     # short-lived nuget.org API key after checking it against the "lycia-release" trusted publishing
@@ -336,7 +471,7 @@ jobs:
           for PROJECT in \
             Lycia.Extensions.RabbitMq Lycia.Extensions.Scheduling \
             Lycia.Extensions.Nats Lycia.Extensions.Kafka \
-            Lycia.Extensions.OpenTelemetry \
+            Lycia.Extensions.OpenTelemetry Lycia.Extensions.AspNetCore \
             Lycia.Persistence.InMemory Lycia.Persistence.Redis Lycia.Persistence.SqlServer Lycia.Persistence.PostgreSql; do
             dotnet restore "src/$PROJECT/$PROJECT.csproj" \
               -p:UsePackageRefForLyciaOnPack=true \
@@ -353,11 +488,11 @@ jobs:
       - name: Validate all public packages before publishing
         run: |
           VER='${{ steps.package-version.outputs.version }}'
-          PACKAGES="Lycia Lycia.Extensions Lycia.Extensions.RabbitMq Lycia.Extensions.Scheduling Lycia.Extensions.Nats Lycia.Extensions.Kafka Lycia.Extensions.OpenTelemetry Lycia.Persistence.InMemory Lycia.Persistence.Redis Lycia.Persistence.SqlServer Lycia.Persistence.PostgreSql"
+          PACKAGES="Lycia Lycia.Extensions Lycia.Extensions.RabbitMq Lycia.Extensions.Scheduling Lycia.Extensions.Nats Lycia.Extensions.Kafka Lycia.Extensions.OpenTelemetry Lycia.Extensions.AspNetCore Lycia.Persistence.InMemory Lycia.Persistence.Redis Lycia.Persistence.SqlServer Lycia.Persistence.PostgreSql"
           COUNT=$(find artifacts/nupkgs -maxdepth 1 -name '*.nupkg' | wc -l)
           echo "nupkg count: $COUNT"
-          if [ "$COUNT" -ne 11 ]; then
-            echo "ERROR: expected exactly 11 public packages, found $COUNT:"; ls artifacts/nupkgs; exit 1
+          if [ "$COUNT" -ne 12 ]; then
+            echo "ERROR: expected exactly 12 public packages, found $COUNT:"; ls artifacts/nupkgs; exit 1
           fi
           for PROJECT in $PACKAGES; do
             PKG="artifacts/nupkgs/$PROJECT.$VER.nupkg"
@@ -391,7 +526,7 @@ jobs:
           NUGET_TRUSTED_PUBLISHING_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
         run: |
           VER='${{ steps.package-version.outputs.version }}'
-          for PROJECT in Lycia Lycia.Extensions Lycia.Extensions.RabbitMq Lycia.Extensions.Scheduling Lycia.Extensions.Nats Lycia.Extensions.Kafka Lycia.Extensions.OpenTelemetry Lycia.Persistence.InMemory Lycia.Persistence.Redis Lycia.Persistence.SqlServer Lycia.Persistence.PostgreSql; do
+          for PROJECT in Lycia Lycia.Extensions Lycia.Extensions.RabbitMq Lycia.Extensions.Scheduling Lycia.Extensions.Nats Lycia.Extensions.Kafka Lycia.Extensions.OpenTelemetry Lycia.Extensions.AspNetCore Lycia.Persistence.InMemory Lycia.Persistence.Redis Lycia.Persistence.SqlServer Lycia.Persistence.PostgreSql; do
             dotnet nuget push "artifacts/nupkgs/$PROJECT.$VER.nupkg" \
               --source https://api.nuget.org/v3/index.json \
               --api-key "$NUGET_TRUSTED_PUBLISHING_KEY" \

@@ -15,11 +15,13 @@ public static class SchedulingContextExtensions
     /// <see cref="ISagaContext"/>-typed <c>Context</c> property (for example inside a
     /// <c>CoordinatedSagaHandler&lt;TMessage,TSagaData&gt;</c>), mirroring how <see cref="Schedule{TMessage}(ISagaContext,TMessage,ScheduleDelay,CancellationToken)"/>
     /// is reachable for the standalone form. The underlying schedule call is not made until a terminal
-    /// method on the returned <see cref="ISagaStepFluent"/> is awaited.
+    /// method on the returned <see cref="ISagaStepFluent"/> is awaited, and that terminal method's
+    /// <see cref="CancellationToken"/> governs the whole deferred operation. This entry point never accepts
+    /// a token itself.
     /// </summary>
     public static ISagaStepFluent ScheduleWithTracking<TMessage>(this ISagaContext context, TMessage message,
-        ScheduleDelay delay, CancellationToken cancellationToken = default) where TMessage : IMessage =>
-        GetSchedulingContext(context).ScheduleWithTracking(message, delay, cancellationToken);
+        ScheduleDelay delay) where TMessage : IMessage =>
+        GetSchedulingContext(context).ScheduleWithTracking(message, delay);
 
     /// <summary>Schedules a command, event, or response using a recommended predefined delay bucket.</summary>
     public static Task<Guid> Schedule<TMessage>(this ISagaContext context, TMessage message, ScheduleDelay delay,

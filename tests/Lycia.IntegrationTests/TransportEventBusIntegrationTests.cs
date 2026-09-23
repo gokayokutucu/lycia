@@ -30,7 +30,7 @@ public sealed class NatsEventBusIntegrationTests : IAsyncLifetime
             : "LYCIA_INTEGRATION_TESTS";
         if (string.IsNullOrWhiteSpace(_externalUrl))
             _container = new ContainerBuilder()
-                .WithImage("nats:2.11-alpine")
+                .WithImage(Lycia.Tests.Infrastructure.InfrastructureVersions.Image("nats"))
                 .WithCommand("-js")
                 .WithPortBinding(4222, true)
                 .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("Server is ready"))
@@ -103,6 +103,40 @@ public sealed class NatsEventBusIntegrationTests : IAsyncLifetime
         var eventHandlers = (await receiveEvents).Select(message => message.HandlerType).ToArray();
         eventHandlers.Should().Contain(typeof(OwnedEventHandlerA));
         eventHandlers.Should().Contain(typeof(OwnedEventHandlerB));
+    }
+
+    /// <summary>
+    /// JetStream returns a publish acknowledgement, so an Outbox message sent through it is confirmed and
+    /// recorded as Published. Core NATS has no acknowledgement: the transport implements IConfirmedEventBus but
+    /// cannot confirm, so the Outbox must treat it as unconfirming (ConfirmationUnknown) rather than call
+    /// confirmed methods that throw and fail every attempt.
+    /// </summary>
+    [Theory]
+    [InlineData(true, Saga.Abstractions.Outbox.OutboxMessageStatus.Published)]
+    [InlineData(false, Saga.Abstractions.Outbox.OutboxMessageStatus.ConfirmationUnknown)]
+    public async Task The_outbox_records_JetStream_publishes_as_Published_and_Core_NATS_as_ConfirmationUnknown(
+        bool useJetStream, Saga.Abstractions.Outbox.OutboxMessageStatus expected)
+    {
+        var options = new NatsEventBusOptions
+        {
+            Url = NatsUrl,
+            ApplicationId = "OutboxService",
+            StreamName = _streamName,
+            UseJetStream = useJetStream
+        };
+        var serializer = new NewtonsoftJsonMessageSerializer();
+        await using var bus = new NatsEventBus(new Dictionary<string, (Type, Type)>(), options, serializer);
+        var store = new Lycia.Persistence.InMemory.InMemoryOutboxStore();
+        var evt = new OwnedEvent { Value = "outbox" };
+        await new Lycia.Outbox.OutboxOutgoingMessagePipeline(store, serializer).Publish(evt, null, null);
+        var dispatcher = new Lycia.Outbox.OutboxDispatcher(store, bus, serializer,
+            new Lycia.Observability.LyciaActivitySourceHolder(), NullLogger<Lycia.Outbox.OutboxDispatcher>.Instance);
+
+        var result = await dispatcher.DispatchPendingBatchAsync(50, default, 5, TimeSpan.Zero);
+
+        bus.ConfirmationsAvailable.Should().Be(useJetStream);
+        (await store.GetByMessageIdAsync(evt.MessageId))!.Status.Should().Be(expected);
+        result.Abandoned.Should().Be(0);
     }
 
     [Fact]
@@ -206,23 +240,20 @@ public sealed class NatsEventBusIntegrationTests : IAsyncLifetime
 
 public sealed class KafkaEventBusIntegrationTests : IAsyncLifetime
 {
-    private readonly KafkaContainer? _container;
+    private readonly KafkaBroker? _broker;
     private readonly string? _externalBootstrapServers;
 
     public KafkaEventBusIntegrationTests()
     {
         _externalBootstrapServers = Environment.GetEnvironmentVariable("LYCIA_KAFKA_BOOTSTRAP_SERVERS");
         if (string.IsNullOrWhiteSpace(_externalBootstrapServers))
-            _container = new KafkaBuilder()
-                .WithImage("confluentinc/cp-kafka:7.7.1")
-                .WithCleanUp(true)
-                .Build();
+            _broker = new KafkaBroker(Lycia.Tests.Infrastructure.InfrastructureVersions.Image("kafka"));
     }
 
-    private string KafkaBootstrapServers => _externalBootstrapServers ?? _container!.GetBootstrapAddress();
+    private string KafkaBootstrapServers => _externalBootstrapServers ?? _broker!.BootstrapServers;
 
-    public Task InitializeAsync() => _container?.StartAsync() ?? Task.CompletedTask;
-    public Task DisposeAsync() => _container?.DisposeAsync().AsTask() ?? Task.CompletedTask;
+    public Task InitializeAsync() => _broker?.StartAsync() ?? Task.CompletedTask;
+    public Task DisposeAsync() => _broker?.DisposeAsync().AsTask() ?? Task.CompletedTask;
 
     [Fact]
     public async Task Kafka_preserves_command_ownership_and_independent_event_groups()

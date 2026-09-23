@@ -4,6 +4,7 @@
 #if NETSTANDARD2_0
 using Lycia.Extensions.Helpers;
 using Lycia.Helpers;
+using RabbitMQ.Client;
 using Lycia.Saga.Abstractions.Scheduling;
 
 namespace Lycia.Extensions.Eventing;
@@ -57,13 +58,21 @@ public sealed partial class RabbitMqEventBus
                 exception);
         }
 
-        var properties = _channel.CreateBasicProperties();
-        properties.Persistent = true;
-        properties.MessageId = record.MessageId.ToString("D");
-        properties.CorrelationId = record.ScheduleId.ToString("D");
-        properties.Headers = RabbitMqSchedulingTopology.ToRabbitHeaders(record.Headers);
-        await Task.Run(() => _channel.BasicPublish(string.Empty, queueName, mandatory: true, properties,
-            record.Payload), cancellationToken).ConfigureAwait(false);
+        IBasicProperties BuildProperties(IModel channel)
+        {
+            var properties = channel.CreateBasicProperties();
+            properties.Persistent = true;
+            properties.MessageId = record.MessageId.ToString("D");
+            properties.CorrelationId = record.ScheduleId.ToString("D");
+            properties.Headers = RabbitMqSchedulingTopology.ToRabbitHeaders(record.Headers);
+            return properties;
+        }
+
+        // The delay queue was just declared, so a return here means it vanished: fail the schedule rather than
+        // report a native schedule that was never stored. With publisher confirms the schedule is only
+        // reported once RabbitMQ has confirmed the delayed message.
+        await PublishToExchangeAsync(string.Empty, null, queueName, BuildProperties, record.Payload, mandatory: true,
+            cancellationToken).ConfigureAwait(false);
         record.Strategy = SchedulingStrategy.RabbitMqTtlDeadLetter;
         return queueName;
     }

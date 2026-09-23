@@ -69,16 +69,19 @@ public class PostgreSqlSagaStore(
 
     /// <inheritdoc />
     public Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
-        Type handlerType, object? payload, Exception? exception)
+        Type handlerType, object? payload, Exception? exception, CancellationToken cancellationToken = default)
     {
         return LogStepAsync(sagaId, messageId, parentMessageId, stepType, status, handlerType, payload,
-            new SagaStepFailureInfo("Exception occurred", exception?.GetType().Name, exception?.ToString()));
+            new SagaStepFailureInfo("Exception occurred", exception?.GetType().Name, exception?.ToString()),
+            cancellationToken);
     }
 
     /// <inheritdoc />
     public async Task LogStepAsync(Guid sagaId, Guid messageId, Guid? parentMessageId, Type stepType, StepStatus status,
-        Type handlerType, object? payload, SagaStepFailureInfo? failureInfo)
+        Type handlerType, object? payload, SagaStepFailureInfo? failureInfo,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var stepTypeName = stepType.GetSimplifiedQualifiedName();
         var handlerTypeName = handlerType.GetSimplifiedQualifiedName();
         var messageTypeName = SagaStoreLogicHelper.GetMessageTypeName(stepType);
@@ -398,8 +401,10 @@ public class PostgreSqlSagaStore(
     }
 
     /// <inheritdoc />
-    public async Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data) where TSagaData : SagaData
+    public async Task SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData? data,
+        CancellationToken cancellationToken = default) where TSagaData : SagaData
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (data is null) return;
         data.SagaId = sagaId;
 
@@ -424,7 +429,7 @@ public class PostgreSqlSagaStore(
             RETURNING version;
             """, lease.Transaction);
         AddSagaDataParameters(command, sagaId, dataJson, dataType, data);
-        data.Version = Convert.ToInt64(await command.ExecuteScalarAsync().ConfigureAwait(false));
+        data.Version = Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
 
         // The database assigns the new version, so persist the now-authoritative value in the
         // canonical JSON within the same transaction as the row/version update.
@@ -436,7 +441,7 @@ public class PostgreSqlSagaStore(
         AddJsonb(synchronizeJson, "dataJson", JsonHelper.SerializeSafe(data));
         synchronizeJson.Parameters.AddWithValue("sagaId", sagaId);
         synchronizeJson.Parameters.AddWithValue("version", data.Version);
-        await synchronizeJson.ExecuteNonQueryAsync().ConfigureAwait(false);
+        await synchronizeJson.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private void AddSagaDataParameters<TSagaData>(NpgsqlCommand command, Guid sagaId, string dataJson, string dataType,
@@ -452,9 +457,11 @@ public class PostgreSqlSagaStore(
     }
 
     /// <inheritdoc />
-    public async Task<long> SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData data, long expectedVersion)
+    public async Task<long> SaveSagaDataAsync<TSagaData>(Guid sagaId, TSagaData data, long expectedVersion,
+        CancellationToken cancellationToken = default)
         where TSagaData : SagaData
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (data == null) throw new ArgumentNullException(nameof(data));
         data.SagaId = sagaId;
 
@@ -477,7 +484,7 @@ public class PostgreSqlSagaStore(
                 """, lease.Transaction))
             {
                 AddSagaDataParameters(updatePlaceholder, sagaId, dataJson, dataType, data);
-                var updatedRows = await updatePlaceholder.ExecuteNonQueryAsync().ConfigureAwait(false);
+                var updatedRows = await updatePlaceholder.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
                 if (updatedRows > 0)
                 {
                     data.Version = 1;
@@ -492,13 +499,13 @@ public class PostgreSqlSagaStore(
                     VALUES (@sagaId, @applicationId, @dataType, @dataJson, 1, @isCompleted, @completedAt, @failedAt, now());
                     """, lease.Transaction);
                 AddSagaDataParameters(insert, sagaId, dataJson, dataType, data);
-                await insert.ExecuteNonQueryAsync().ConfigureAwait(false);
+                await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
                 data.Version = 1;
                 return 1;
             }
             catch (PostgresException ex) when (ex.SqlState == UniqueViolationSqlState)
             {
-                var actual = await SelectCurrentVersionAsync(lease.Connection, lease.Transaction, sagaId)
+                var actual = await SelectCurrentVersionAsync(lease.Connection, lease.Transaction, sagaId, cancellationToken)
                     .ConfigureAwait(false) ?? 0;
                 throw new SagaConcurrencyException(sagaId, 0, actual);
             }
@@ -513,7 +520,7 @@ public class PostgreSqlSagaStore(
         {
             AddSagaDataParameters(update, sagaId, dataJson, dataType, data);
             update.Parameters.AddWithValue("expectedVersion", expectedVersion);
-            var rows = await update.ExecuteNonQueryAsync().ConfigureAwait(false);
+            var rows = await update.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             if (rows > 0)
             {
                 var newVersion = expectedVersion + 1;
@@ -522,23 +529,25 @@ public class PostgreSqlSagaStore(
             }
         }
 
-        var actualVersion = await SelectCurrentVersionAsync(lease.Connection, lease.Transaction, sagaId)
+        var actualVersion = await SelectCurrentVersionAsync(lease.Connection, lease.Transaction, sagaId, cancellationToken)
             .ConfigureAwait(false) ?? 0;
         throw new SagaConcurrencyException(sagaId, expectedVersion, actualVersion);
     }
 
     /// <inheritdoc />
-    public async Task<(TSagaData Data, long Version)> LoadSagaDataWithVersionAsync<TSagaData>(Guid sagaId)
+    public async Task<(TSagaData Data, long Version)> LoadSagaDataWithVersionAsync<TSagaData>(Guid sagaId,
+        CancellationToken cancellationToken = default)
         where TSagaData : SagaData, new()
     {
+        cancellationToken.ThrowIfCancellationRequested();
         await using var lease = await RelationalConnectionLease<NpgsqlConnection, NpgsqlTransaction>.OpenAsync(
             sessionAccessor, CreateConnection).ConfigureAwait(false);
         using var command = CreateCommand(lease.Connection,
             $"SELECT data_json, version FROM {DataTable} WHERE saga_id = @sagaId;", lease.Transaction);
         command.Parameters.AddWithValue("sagaId", sagaId);
 
-        using var reader = await command.ExecuteReaderAsync().ConfigureAwait(false);
-        if (!await reader.ReadAsync().ConfigureAwait(false)) return (new TSagaData(), 0);
+        using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) return (new TSagaData(), 0);
 
         var data = JsonConvert.DeserializeObject<TSagaData>(reader.GetString(0)) ?? new TSagaData();
         data.SagaId = sagaId;
@@ -548,12 +557,12 @@ public class PostgreSqlSagaStore(
     }
 
     private async Task<long?> SelectCurrentVersionAsync(NpgsqlConnection connection, NpgsqlTransaction? transaction,
-        Guid sagaId)
+        Guid sagaId, CancellationToken cancellationToken = default)
     {
         using var command = CreateCommand(connection, $"SELECT version FROM {DataTable} WHERE saga_id = @sagaId;",
             transaction);
         command.Parameters.AddWithValue("sagaId", sagaId);
-        var result = await command.ExecuteScalarAsync().ConfigureAwait(false);
+        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
         return result == null || result == DBNull.Value ? null : (long)result;
     }
 
@@ -602,4 +611,210 @@ public class PostgreSqlSagaStore(
             return false;
         }
     }
+
+    private string CompensationTable => options.QualifiedCompensationPropagationTable;
+
+    /// <inheritdoc />
+    public async Task<CompensationPropagationClaim> EnsureAndClaimCompensationPropagationAsync(Guid sagaId,
+        Guid childMessageId, Guid parentMessageId, string owner, TimeSpan leaseDuration, int maxAttempts,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        await using var lease = await RelationalConnectionLease<NpgsqlConnection, NpgsqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
+        using var ownedTransaction = lease.OwnsConnection ? lease.Connection.BeginTransaction() : null;
+        var transaction = lease.Transaction ?? ownedTransaction
+            ?? throw new InvalidOperationException("A relational saga operation requires a transaction.");
+
+        try
+        {
+            using (var insert = CreateCommand(lease.Connection, $"""
+                INSERT INTO {CompensationTable} (saga_id, child_message_id, parent_message_id, status, attempt_count, created_at_utc, updated_at_utc)
+                VALUES (@sagaId, @childId, @parentId, 0, 0, now(), now())
+                ON CONFLICT (saga_id, child_message_id) DO NOTHING;
+                """, transaction))
+            {
+                insert.Parameters.AddWithValue("sagaId", sagaId);
+                insert.Parameters.AddWithValue("childId", childMessageId);
+                insert.Parameters.AddWithValue("parentId", parentMessageId);
+                await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            var claim = await ClaimEdgeAsync(lease.Connection, transaction, sagaId, childMessageId, owner,
+                leaseDuration, maxAttempts, cancellationToken).ConfigureAwait(false);
+            if (ownedTransaction != null) await ownedTransaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return claim;
+        }
+        catch
+        {
+            if (ownedTransaction != null) await ownedTransaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    // Single point of mutual exclusion for one edge: an UPDATE...RETURNING that only matches a claimable
+    // row (Pending, or Claimed past its lease) and reports back a row only when it actually claimed one.
+    private async Task<CompensationPropagationClaim> ClaimEdgeAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        Guid sagaId, Guid childMessageId, string owner, TimeSpan leaseDuration, int maxAttempts,
+        CancellationToken cancellationToken)
+    {
+        var staleBefore = DateTime.UtcNow - leaseDuration;
+
+        using (var claim = CreateCommand(connection, $"""
+            UPDATE {CompensationTable}
+            SET status = 1, owner = @owner, attempt_count = attempt_count + 1, updated_at_utc = now()
+            WHERE saga_id = @sagaId AND child_message_id = @childId AND attempt_count < @maxAttempts
+              AND (status = 0 OR (status = 1 AND updated_at_utc <= @staleBefore))
+            RETURNING saga_id, child_message_id, parent_message_id, status, attempt_count, owner, created_at_utc, updated_at_utc, failure_info_json;
+            """, transaction))
+        {
+            claim.Parameters.AddWithValue("sagaId", sagaId);
+            claim.Parameters.AddWithValue("childId", childMessageId);
+            claim.Parameters.AddWithValue("owner", owner);
+            claim.Parameters.AddWithValue("maxAttempts", maxAttempts);
+            claim.Parameters.AddWithValue("staleBefore", staleBefore);
+            using var reader = await claim.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            if (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                return new CompensationPropagationClaim(CompensationPropagationClaimOutcome.Claimed, ReadIntent(reader));
+        }
+
+        CompensationPropagationIntent? current;
+        using (var select = CreateCommand(connection,
+            $"SELECT saga_id, child_message_id, parent_message_id, status, attempt_count, owner, created_at_utc, updated_at_utc, failure_info_json " +
+            $"FROM {CompensationTable} WHERE saga_id = @sagaId AND child_message_id = @childId;", transaction))
+        {
+            select.Parameters.AddWithValue("sagaId", sagaId);
+            select.Parameters.AddWithValue("childId", childMessageId);
+            using var reader = await select.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            current = await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ReadIntent(reader) : null;
+        }
+
+        if (current == null)
+            throw new InvalidOperationException("The compensation propagation edge was not found immediately after being created.");
+        if (current.Status == CompensationPropagationStatus.Completed)
+            return new CompensationPropagationClaim(CompensationPropagationClaimOutcome.AlreadyCompleted, current);
+        if (current.Status == CompensationPropagationStatus.Failed)
+            return new CompensationPropagationClaim(CompensationPropagationClaimOutcome.AttemptsExhausted, current);
+        if (current.AttemptCount >= maxAttempts)
+        {
+            using var fail = CreateCommand(connection, $"""
+                UPDATE {CompensationTable} SET status = 3, updated_at_utc = now(),
+                    failure_info_json = COALESCE(failure_info_json, @failureInfo)
+                WHERE saga_id = @sagaId AND child_message_id = @childId;
+                """, transaction);
+            fail.Parameters.AddWithValue("sagaId", sagaId);
+            fail.Parameters.AddWithValue("childId", childMessageId);
+            AddJsonb(fail, "failureInfo",
+                JsonHelper.SerializeSafe(new SagaStepFailureInfo("Compensation propagation attempts exhausted", null, null)));
+            await fail.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            current.Status = CompensationPropagationStatus.Failed;
+            return new CompensationPropagationClaim(CompensationPropagationClaimOutcome.AttemptsExhausted, current);
+        }
+
+        return new CompensationPropagationClaim(CompensationPropagationClaimOutcome.ClaimedByAnother, current);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<CompensationPropagationIntent>> ClaimDueCompensationPropagationsAsync(int maxCount,
+        string owner, TimeSpan leaseDuration, TimeSpan recoveryTimeout, int maxAttempts,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        await using var lease = await RelationalConnectionLease<NpgsqlConnection, NpgsqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
+        var staleBefore = DateTime.UtcNow - recoveryTimeout;
+        var claimed = new List<CompensationPropagationIntent>();
+
+        using (var claim = CreateCommand(lease.Connection, $"""
+            UPDATE {CompensationTable}
+            SET status = 1, owner = @owner, attempt_count = attempt_count + 1, updated_at_utc = now()
+            WHERE (saga_id, child_message_id) IN (
+                SELECT saga_id, child_message_id FROM {CompensationTable}
+                WHERE attempt_count < @maxAttempts
+                  AND (status = 0 OR (status = 1 AND updated_at_utc <= @staleBefore))
+                ORDER BY created_at_utc
+                LIMIT @maxCount
+                FOR UPDATE SKIP LOCKED
+            )
+            RETURNING saga_id, child_message_id, parent_message_id, status, attempt_count, owner, created_at_utc, updated_at_utc, failure_info_json;
+            """, lease.Transaction))
+        {
+            claim.Parameters.AddWithValue("owner", owner);
+            claim.Parameters.AddWithValue("maxAttempts", maxAttempts);
+            claim.Parameters.AddWithValue("staleBefore", staleBefore);
+            claim.Parameters.AddWithValue("maxCount", maxCount);
+            using var reader = await claim.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                claimed.Add(ReadIntent(reader));
+        }
+
+        using (var exhaust = CreateCommand(lease.Connection, $"""
+            UPDATE {CompensationTable}
+            SET status = 3, updated_at_utc = now(), failure_info_json = COALESCE(failure_info_json, @failureInfo)
+            WHERE status IN (0, 1) AND attempt_count >= @maxAttempts;
+            """, lease.Transaction))
+        {
+            exhaust.Parameters.AddWithValue("maxAttempts", maxAttempts);
+            AddJsonb(exhaust, "failureInfo",
+                JsonHelper.SerializeSafe(new SagaStepFailureInfo("Compensation propagation attempts exhausted", null, null)));
+            await exhaust.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return claimed;
+    }
+
+    /// <inheritdoc />
+    public Task MarkCompensationPropagationCompletedAsync(Guid sagaId, Guid childMessageId,
+        CancellationToken cancellationToken = default) =>
+        UpdateCompensationStatusAsync(sagaId, childMessageId, CompensationPropagationStatus.Completed, null, cancellationToken);
+
+    /// <inheritdoc />
+    public Task MarkCompensationPropagationFailedAsync(Guid sagaId, Guid childMessageId,
+        SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken = default) =>
+        UpdateCompensationStatusAsync(sagaId, childMessageId, CompensationPropagationStatus.Failed, failureInfo, cancellationToken);
+
+    private async Task UpdateCompensationStatusAsync(Guid sagaId, Guid childMessageId,
+        CompensationPropagationStatus status, SagaStepFailureInfo? failureInfo, CancellationToken cancellationToken)
+    {
+        await using var lease = await RelationalConnectionLease<NpgsqlConnection, NpgsqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
+        using var command = CreateCommand(lease.Connection, $"""
+            UPDATE {CompensationTable}
+            SET status = @status, updated_at_utc = now(), failure_info_json = @failureInfo
+            WHERE saga_id = @sagaId AND child_message_id = @childId;
+            """, lease.Transaction);
+        command.Parameters.AddWithValue("status", (int)status);
+        command.Parameters.AddWithValue("sagaId", sagaId);
+        command.Parameters.AddWithValue("childId", childMessageId);
+        AddNullableJsonb(command, "failureInfo", failureInfo != null ? JsonHelper.SerializeSafe(failureInfo) : null);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<CompensationPropagationIntent?> GetCompensationPropagationIntentAsync(Guid sagaId,
+        Guid childMessageId, CancellationToken cancellationToken = default)
+    {
+        await using var lease = await RelationalConnectionLease<NpgsqlConnection, NpgsqlTransaction>.OpenAsync(
+            sessionAccessor, CreateConnection, cancellationToken).ConfigureAwait(false);
+        using var command = CreateCommand(lease.Connection,
+            $"SELECT saga_id, child_message_id, parent_message_id, status, attempt_count, owner, created_at_utc, updated_at_utc, failure_info_json " +
+            $"FROM {CompensationTable} WHERE saga_id = @sagaId AND child_message_id = @childId;", lease.Transaction);
+        command.Parameters.AddWithValue("sagaId", sagaId);
+        command.Parameters.AddWithValue("childId", childMessageId);
+        using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ReadIntent(reader) : null;
+    }
+
+    private static CompensationPropagationIntent ReadIntent(NpgsqlDataReader reader) => new()
+    {
+        SagaId = reader.GetGuid(0),
+        ChildMessageId = reader.GetGuid(1),
+        ParentMessageId = reader.GetGuid(2),
+        Status = (CompensationPropagationStatus)reader.GetInt32(3),
+        AttemptCount = reader.GetInt32(4),
+        Owner = reader.IsDBNull(5) ? null : reader.GetString(5),
+        CreatedAtUtc = reader.GetDateTime(6),
+        UpdatedAtUtc = reader.GetDateTime(7),
+        FailureInfo = reader.IsDBNull(8) ? null : JsonConvert.DeserializeObject<SagaStepFailureInfo>(reader.GetString(8))
+    };
 }

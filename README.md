@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="assets/transparent_logo.png" alt="Lycia Logo" width="220">
-</p>
+![Lycia Logo](https://raw.githubusercontent.com/gokayokutucu/lycia/main/assets/transparent_logo.png)
 
 # Lycia
 
@@ -9,7 +7,6 @@
 ![Target Framework](https://img.shields.io/badge/.NET-netstandard2.0%20%7C%20net8.0%20%7C%20net9.0%20%7C%20net10.0-blue)
 [![Build](https://github.com/gokayokutucu/lycia/actions/workflows/dotnet.yml/badge.svg)](https://github.com/gokayokutucu/lycia/actions/workflows/dotnet.yml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![GitHub release](https://img.shields.io/github/v/release/gokayokutucu/lycia)](https://github.com/gokayokutucu/lycia/releases)
 
 **Lycia** is a message-driven saga framework for .NET applications.
 
@@ -40,6 +37,19 @@ For architecture, internals and contributor documentation, see [DEVELOPERS.md](D
 
 ---
 
+## Project History
+
+Lycia has been in development since May 28, 2023, with the goal of making distributed saga workflows easier
+to model, operate, and understand. The name is inspired by the Lycian Way and the idea of turning difficult
+paths into understandable routes.
+
+`1.18.0` was Lycia's first stable release (11 packages). `2.0.0` is the current major version line: it
+intentionally includes source-breaking changes over `1.18.0` — cleaning up the public API at the
+appropriate major-version boundary rather than carrying it forward — and adds `Lycia.Extensions.AspNetCore`
+as a 12th package. Upgrading from `1.18.x`? See [`docs/MIGRATION-2.0.md`](docs/MIGRATION-2.0.md).
+
+---
+
 ## Packages
 
 | Package | Purpose |
@@ -51,13 +61,15 @@ For architecture, internals and contributor documentation, see [DEVELOPERS.md](D
 | `Lycia.Extensions.Kafka` | Kafka transport |
 | `Lycia.Extensions.Scheduling` | Durable, transport-independent scheduling: dispatch worker, Redis and in-memory schedule stores, leases and fencing, vacuum |
 | `Lycia.Extensions.OpenTelemetry` | OpenTelemetry tracing and W3C trace-context propagation |
+| `Lycia.Extensions.AspNetCore` | Opt-in `app.MapLyciaDiagnostics()` Minimal API endpoint exposing the reliability/persistence topology snapshot as JSON |
 | `Lycia.Persistence.InMemory` | In-memory SagaStore, Inbox, Outbox and journal registration. Tests and local development only — not durable |
 | `Lycia.Persistence.Redis` | Redis SagaStore, Inbox and Outbox, and the Split Store operational projection |
 | `Lycia.Persistence.SqlServer` | SQL Server SagaStore, Inbox, Outbox, reconciliation and journal stores with embedded schema migration |
 | `Lycia.Persistence.PostgreSql` | PostgreSQL SagaStore, Inbox, Outbox, reconciliation and journal stores with embedded schema migration |
 
 Every package targets `netstandard2.0`, `net8.0`, `net9.0` and `net10.0`, except
-`Lycia.Persistence.PostgreSql`, which targets `net8.0`, `net9.0` and `net10.0`.
+`Lycia.Persistence.PostgreSql` (`net8.0`, `net9.0`, `net10.0`) and `Lycia.Extensions.AspNetCore`
+(`net8.0`, `net9.0`, `net10.0` only - Minimal API routing does not exist for `netstandard2.0`/net48).
 
 `Lycia.Extensions` never depends on a transport, scheduling or persistence-provider package. Each of
 those packages contributes its own methods to the shared DSL builders (for example
@@ -83,9 +95,15 @@ dotnet add package Lycia.Extensions.RabbitMq
 Add a persistence provider. A SagaStore provider is required:
 
 ```bash
-dotnet add package Lycia.Persistence.PostgreSql
-# or: Lycia.Persistence.SqlServer / Lycia.Persistence.Redis / Lycia.Persistence.InMemory
+dotnet add package Lycia.Persistence.Redis
 ```
+
+Alternatives:
+
+- `Lycia.Persistence.PostgreSql` — relational, and required for the `LocalAtomic` boundary (see
+  [Atomic persistence boundary](#atomic-persistence-boundary))
+- `Lycia.Persistence.SqlServer` — relational, same `LocalAtomic` support as PostgreSQL
+- `Lycia.Persistence.InMemory` — tests and local development; requires no external infrastructure
 
 Optional:
 
@@ -114,10 +132,14 @@ services.AddLycia(configuration, lycia =>
 
     lycia
         .UsePersistence()
-            .WithPostgreSqlSagaStore(options =>
+            .WithRedisSagaStore(options =>
                 options.ConnectionString = configuration.GetConnectionString("Lycia"));
 });
 ```
+
+`WithRedisSagaStore` is one of several provider methods on `UsePersistence()`; `WithPostgreSqlSagaStore(...)`
+and `WithSqlServerSagaStore(...)` are the relational equivalents, used when the [atomic persistence
+boundary](#atomic-persistence-boundary) or [Split Store](#split-store) is needed.
 
 The DSL is organized by concern:
 
@@ -217,12 +239,157 @@ public sealed class InventorySagaHandler
 }
 ```
 
+### Deferred tracked operations
+
+`SendWithTracking`, `PublishWithTracking`, `RespondWithTracking` and `ScheduleWithTracking` defer the
+outgoing operation until a terminal `Then...` method on the returned fluent object is awaited - nothing
+is sent, published, responded or scheduled before that. **The `CancellationToken` belongs only to the
+terminal call**, never to the entry method, and that one token governs the whole deferred operation
+(the outgoing message and the saga-step transition that follows it):
+
+```csharp
+await Context
+    .SendWithTracking(command)
+    .ThenMarkAsComplete(cancellationToken);
+```
+
+Not `SendWithTracking(command, cancellationToken)` - the entry methods do not accept a token at all. The
+same rule applies to `PublishWithTracking`, `RespondWithTracking` and `ScheduleWithTracking`, and to the
+compensation continuation fluent API below.
+
 ### Handler failures
 
 When a handler throws, the saga handler base classes catch the exception, record the step as `Failed`
 in the SagaStore and start compensation; the message itself is acknowledged, not redelivered. The
 failure is logged as a warning and the handler's trace span is marked as an error with `exception.*`
 tags. Cancellation records the step as `Cancelled`.
+
+---
+
+## Compensation
+
+Several distinct things are all called "compensation," and Lycia keeps them separate:
+
+- **Business compensation** — your own undo logic (`inventory.ReleaseReservation(...)`, a refund, a
+  cancellation). Lycia never performs this; it only tracks that a step compensated and, optionally,
+  propagates that fact.
+- **`Context.Compensate(failedEvent, cancellationToken)`** — publishes a reactive compensation *event*.
+  This starts a choreography flow (other handlers' `CompensateAsync` react to that event); it is not the
+  same thing as coordinated parent-lineage bubble-up below, and it is not a required first step of every
+  coordinated compensation flow.
+- **`Context.MarkAsCompensated<TStep>(cancellationToken)`** — a standalone, terminal state transition. It
+  records that the current step's compensation completed and stops there; **it never propagates to the
+  parent by itself** — marking a step compensated and requiring that its parent also compensate are two
+  separately tracked facts, on purpose (see "Advanced" below for why).
+
+### Recommended: staged compensation continuation
+
+This is the form to reach for by default. It exists specifically to make forgetting parent propagation
+hard: the type system stages the operation so the compiler, not a code reviewer, enforces the shape.
+
+```csharp
+public override async Task CompensateAsync(
+    ProcessPaymentCommand message,
+    CancellationToken cancellationToken = default)
+{
+    await paymentGateway.RefundAsync(message.OrderId, cancellationToken);
+
+    await Context
+        .ContinueCompensation()
+        .ThenMarkAsCompensated<PaymentProcessedEvent>()
+        .ThenBubbleUp(cancellationToken);
+}
+```
+
+- **`Context.ContinueCompensation()`** — begins the continuation. It performs no business rollback and
+  executes nothing by itself; it only returns a staged fluent object with two valid next calls.
+- **`.ThenMarkAsCompensated<TStep>()`** (no token) — marks the step compensated as the first stage of a
+  three-stage chain and returns a continuation whose only member is `ThenBubbleUp`. Nothing runs until
+  that is awaited.
+- **`.ThenBubbleUp(cancellationToken)`** — terminal: continues compensation through the logical parent
+  (via `ParentMessageId`), invoking the parent's compensation handler. This is what "bubble up" means in
+  Lycia: parent-lineage propagation, never a global broadcast.
+
+`ContinueCompensation()` never accepts a `CancellationToken`. As with
+[the deferred tracked operations above](#deferred-tracked-operations), **the token belongs only to the
+terminal call in the chain** — here, `ThenBubbleUp`. A two-stage form exists for when compensation
+completes at this step without a separate bubble-up call — a root/final step has no logical parent, so it
+only ever marks itself compensated, equivalent to `MarkAsCompensated<TStep>(cancellationToken)` directly:
+
+```csharp
+public override async Task CompensateStartAsync(
+    CreateOrderCommand command,
+    CancellationToken cancellationToken = default)
+{
+    await orderService.Cancel(command.OrderId);
+
+    await Context.MarkAsCompensated<CreateOrderCommand>(
+        cancellationToken);
+}
+```
+
+**Bubble-up is recoverable after process failure.** Marking a step compensated and requiring that its
+parent also be compensated are two separately durable facts — the framework never treats "this step is
+Compensated" as proof that its parent's compensation happened, or even started. If the process crashes
+after `ThenBubbleUp` durably records that requirement but before the parent's handler finishes, a hosted
+recovery worker resumes it automatically; you don't call anything extra to opt into this; it is part of
+what makes a `SagaStore` a `SagaStore`. Like every other handler invocation in Lycia, this recovery is
+**at-least-once, not exactly-once** — a parent's compensation handler can run more than once for the same
+logical propagation. Write it the way you'd write any Lycia handler: make the external side effect it
+performs (refunding a payment, releasing inventory, cancelling a shipment) idempotent, so running it twice
+is harmless.
+
+### Advanced: explicit imperative compensation control
+
+Most sagas should never need this — reach for it only when you genuinely need step-by-step imperative
+control that the staged form can't express. It uses the exact same durable propagation implementation as
+`ThenBubbleUp` above; the difference is API composition, never reliability.
+
+```csharp
+public override async Task CompensateAsync(
+    ProcessPaymentCommand message,
+    CancellationToken cancellationToken = default)
+{
+    await paymentGateway.RefundAsync(message.OrderId, cancellationToken);
+
+    await Context.MarkAsCompensated<ProcessPaymentCommand>(cancellationToken);
+
+    await Context.BubbleUpCompensation(message, cancellationToken);
+}
+```
+
+- **`Context.MarkAsCompensated<TStep>(cancellationToken)`** — as above: records the step's own
+  compensation and stops there.
+- **`Context.BubbleUpCompensation(failedEvent, cancellationToken)`** — explicitly requests durable
+  parent-lineage propagation for the exact message supplied. `failedEvent` must be the same message this
+  handler's `CompensateAsync` received; Lycia validates this (and that the step is already
+  `Compensated`) and throws `InvalidOperationException` rather than guessing, propagating the wrong step,
+  or silently doing nothing.
+
+> [!WARNING]
+> **If you omit `BubbleUpCompensation` after `MarkAsCompensated`, Lycia cannot infer that parent
+> propagation was intended.** `MarkAsCompensated` alone is also a fully valid, terminal root/final
+> compensation call — the framework has no way to distinguish "this really was the last step" from "the
+> developer forgot to bubble up." This is an application programming error, not a crash: nothing durable
+> was ever requested, so there is nothing for the recovery worker to resume. This is the main reason the
+> staged fluent form is recommended over this one — it makes that mistake impossible to write.
+
+`Compensate(...)`, `MarkAsCompensated(...)`, and `BubbleUpCompensation(...)` are not synonyms and do not
+imply each other — see [DEVELOPERS.md](DEVELOPERS.md#coordinated-compensation-continuation) for each
+one's exact semantics, and specifically "Forgotten bubble-up vs. crash recovery" for the distinction
+between an application never requesting propagation and propagation being requested but interrupted by a
+crash (which *is* recoverable).
+
+**Lineage, not global order.** `ParentMessageId` is the only field bubble-up traverses, in either form. A
+strictly sequential coordinated saga (A → B → C) makes bubble-up look like simple reverse-order
+compensation (C → B → A), but that is a special case of a single unbranched chain, not a rule: a saga with
+branching lineage (two children of the same parent) bubbles each branch independently toward its own
+parent, never across siblings. Reactive choreography compensation (`Context.Compensate(...)` and handlers
+reacting to the resulting event) has no such structure to traverse at all, and therefore no strict global
+reverse-delivery-order guarantee — handlers react as the compensation event reaches them.
+
+See [DEVELOPERS.md](DEVELOPERS.md#coordinated-compensation-continuation) for the compensation
+coordinator's parent-lookup algorithm, the durable propagation state machine, and idempotency guarantees.
 
 ---
 
@@ -322,18 +489,55 @@ header normalization and the fixed TTL + DLX scheduling buckets. Consumers expos
 signal once their queues, bindings and consumers are registered, which avoids startup races where a
 message could be published before its binding exists.
 
-RabbitMQ publishes are currently reported to the Outbox as `ConfirmationUnknown` rather than
-`Published`, because the transport abstraction does not yet await a per-publish broker confirmation for
-RabbitMQ. See [Outbox](#outbox) for what that means operationally. This is the current validated
-behavior and may be revisited.
+#### Publisher confirms
+
+RabbitMQ publishing uses **publisher confirms** by default. Every `Send`, `Publish` and `Respond` waits
+for RabbitMQ's server-side confirmation, and an Outbox message the broker confirmed is recorded as
+`Published`.
+
+```csharp
+lycia
+    .UseTransport()
+        .RabbitMq(options =>
+        {
+            options.PublisherConfirms = true;                          // default
+            options.PublisherConfirmTimeout = TimeSpan.FromSeconds(30); // default; keep the Outbox RecoveryTimeout longer
+            options.RequireRoutableEvents = false;                     // default
+        });
+```
+
+| Outcome of a publish | What Lycia does |
+| --- | --- |
+| Confirmed (`basic.ack`) | The publish returns; the Outbox records `Published` |
+| Rejected (`basic.nack`) | Throws `RabbitMqPublishNackedException`. RabbitMQ only nacks when a queue process fails, for example a queue that rejects publishes because it is full. The message was not taken |
+| Unroutable (`basic.return`) | Throws `RabbitMqUnroutableMessageException`. No queue received the message, so it is never reported as delivered |
+| Unknown — no confirm within the timeout, or the connection was lost while waiting | Throws `RabbitMqPublishOutcomeUnknownException`. The broker may already hold the message, so this is not reported as a failure of delivery; the Outbox keeps the message and publishes it again with the same `MessageId` |
+| Broker unreachable before anything was sent | The connection error; nothing was published |
+
+Commands and responses are always published as *mandatory*: each has exactly one owner queue, so no route
+is a failure (and, through the Outbox, a command whose owner has not declared its queue yet is retried
+instead of being lost). An event may legitimately have no subscriber, so by default the broker confirms it
+and the exchange drops it; set `RequireRoutableEvents = true` to have such an event returned as unroutable.
+
+A confirm is RabbitMQ accepting responsibility for the message. It is **not** consumer delivery or
+processing: consumer acknowledgements are separate. What accepting responsibility means depends on the
+queue. Lycia publishes persistent messages to durable queues; for those, RabbitMQ confirms after it has
+persisted the message (classic queues may batch that write for up to a few hundred milliseconds), and for
+quorum queues after a quorum of replicas accepted it. Lycia is still at-least-once: if the connection is
+lost after the broker accepted a message but before the confirm is observed, the publish is retried and the
+consumer receives a duplicate, which the Inbox and idempotent handlers absorb.
+
+Setting `PublisherConfirms = false` restores fire-and-forget publishing: Outbox messages then settle as
+`ConfirmationUnknown`, and an unroutable command is dropped by the broker without an error.
 
 ### NATS and Kafka
 
 NATS uses JetStream by default, with explicit acknowledgements, bounded redelivery and durable
 consumers; Core NATS is available for intentionally ephemeral workloads. Kafka commits an offset only
 after the handler acknowledges, and ordering is partition-scoped (partition key `CorrelationId`, then
-`SagaId`, then `MessageId`). Kafka's idempotent `acks=all` producer and NATS JetStream report positive
-broker acceptance, so Outbox messages sent through them become `Published`.
+`SagaId`, then `MessageId`). Kafka's idempotent `acks=all` producer, NATS JetStream and RabbitMQ publisher
+confirms report positive broker acceptance, so Outbox messages sent through them become `Published`. Core
+NATS has no acknowledgement, so Outbox messages sent through it stay `ConfirmationUnknown`.
 
 ---
 
@@ -471,10 +675,10 @@ creates a new logical message.
 | `Pending` | Captured durably; not yet claimed |
 | `Claimed` | Claimed by a worker for dispatch |
 | `Publishing` | A publish attempt is in flight |
-| `Published` | The transport positively confirmed the publish (Kafka, NATS JetStream) |
-| `ConfirmationUnknown` | The publish may have succeeded but was not confirmed — the transport cannot confirm (RabbitMQ, Core NATS) or the attempt threw. Never auto-promoted to `Published` |
+| `Published` | The transport positively confirmed the publish (RabbitMQ publisher confirms, Kafka, NATS JetStream) |
+| `ConfirmationUnknown` | The publish may have succeeded but was not confirmed — the transport cannot confirm (Core NATS, or RabbitMQ with publisher confirms disabled), the outcome could not be established, or the attempt threw. Never auto-promoted to `Published` |
 | `Failed` | A permanent local error before any publish, such as an unresolvable message type or an invalid envelope. Not retried |
-| `Abandoned` | Terminal: the last permitted attempt never reached the transport. Needs operator attention |
+| `Abandoned` | Terminal: the last permitted attempt never reached the transport, or workers stopped on both the final attempt and its recovery attempt. Needs operator attention |
 
 **Bounded retry.** A `ConfirmationUnknown` message becomes eligible for another attempt only after
 `RecoveryTimeout` has elapsed, so attempts are spread over roughly `MaxAttempts × RecoveryTimeout`
@@ -482,14 +686,22 @@ rather than consumed back to back. Claims left in `Claimed` or `Publishing` by a
 recovered after the same window. Recovery can duplicate a publish whose original worker was only slow,
 which is part of the at-least-once contract.
 
+**If a worker stops mid-dispatch.** A worker that crashes, or is stopped, after starting an attempt but
+before recording its outcome leaves the message in `Publishing`. That includes the last permitted
+attempt. After `RecoveryTimeout` another worker picks it up. Lycia cannot know whether the broker
+accepted the message, so it publishes it once more with the same `MessageId`: the worst case is a
+duplicate, never a silent loss. That recovery publish is the only attempt allowed beyond `MaxAttempts`,
+so a message is started at most `MaxAttempts + 1` times and only when a worker died on it. If the
+recovery attempt is lost as well, the message becomes `Abandoned` instead of looping.
+
 **When attempts run out**, the outcome depends on the last attempt:
 
-- **It never reached the transport** — the publish threw, for example because the broker was down, or
-  shutdown cancelled it. The message becomes `Abandoned`, the reason is recorded in its failure info,
+- **It never reached the transport** — the publish threw, for example because the broker was down. The
+  message becomes `Abandoned`, the reason is recorded in its failure info,
   and a warning naming the `MessageId` and `SagaId` is logged. `OutboxDispatchResult.Abandoned` carries
   the count, so you can alert on it. The message is not dispatched again automatically.
-- **The transport accepted it but cannot confirm it** — the normal case for RabbitMQ and Core NATS. The
-  message stays `ConfirmationUnknown` and is not dispatched again. It was handed to the broker on each
+- **The transport accepted it but cannot confirm it** — the normal case for Core NATS, and for RabbitMQ
+  when publisher confirms are disabled. The message stays `ConfirmationUnknown` and is not dispatched again. It was handed to the broker on each
   attempt, so this is ordinary at-least-once delivery, not a failure, and raises no warning.
 
 Because an unconfirming transport receives the same message on every attempt, consumers must be
@@ -527,13 +739,26 @@ are always `Independent`.
 ### Split Store
 
 Split Store makes PostgreSQL or SQL Server the canonical store and Redis an asynchronously reconciled,
-rebuildable operational projection:
+rebuildable operational projection. Either relational provider offers the same canonical SagaStore, Inbox
+and Outbox role; Redis is always the operational side:
 
 ```csharp
 lycia.UsePersistence()
     .WithPostgreSqlCanonicalSagaStore(options => options.ConnectionString = postgres)
     .WithPostgreSqlInbox(options => options.ConnectionString = postgres)
     .WithPostgreSqlOutbox(options => options.ConnectionString = postgres)
+    .WithRedisOperationalSagaStore(options => options.ConnectionString = redis)
+    .RequireAtomicBoundary()
+    .UseSplitStore();
+```
+
+SQL Server is the equivalent canonical provider, with the same Inbox/Outbox and Split Store calls:
+
+```csharp
+lycia.UsePersistence()
+    .WithSqlServerCanonicalSagaStore(options => options.ConnectionString = sqlServer)
+    .WithSqlServerInbox(options => options.ConnectionString = sqlServer)
+    .WithSqlServerOutbox(options => options.ConnectionString = sqlServer)
     .WithRedisOperationalSagaStore(options => options.ConnectionString = redis)
     .RequireAtomicBoundary()
     .UseSplitStore();
@@ -578,13 +803,69 @@ var snapshot = serviceProvider
     .GetRequiredService<ILyciaReliabilityDiagnostics>()
     .GetSnapshot();
 
-// snapshot.Mode, snapshot.CanonicalStore, snapshot.OperationalStore, snapshot.ResolvedStrategy,
-// snapshot.ReconciliationEnabled, snapshot.JournalEnabled, snapshot.JournalRebuildAvailable,
-// snapshot.InboxEnabled, snapshot.OutboxEnabled, snapshot.DeliveryGuarantee ("AtLeastOnce")
+// snapshot.Mode, snapshot.SagaStoreProvider, snapshot.CanonicalStore, snapshot.OperationalStore,
+// snapshot.ResolvedStrategy, snapshot.ReconciliationEnabled, snapshot.JournalEnabled,
+// snapshot.JournalRebuildAvailable, snapshot.InboxEnabled, snapshot.OutboxEnabled,
+// snapshot.DeliveryGuarantee ("AtLeastOnce")
 ```
 
-It never contains connection strings, credentials or payloads. Use it for a startup log line or a
-diagnostics endpoint.
+It never contains connection strings, credentials or payloads. Use it for a startup log line, custom
+tooling, or the HTTP diagnostics endpoint below.
+
+### HTTP diagnostics endpoint
+
+`Lycia.Extensions.AspNetCore` adds an **opt-in** Minimal API endpoint that serves the same snapshot as JSON:
+
+```csharp
+dotnet add package Lycia.Extensions.AspNetCore
+```
+
+```csharp
+app.MapLyciaDiagnostics();
+```
+
+Default route: `GET /diagnostics/lycia`. Custom route:
+
+```csharp
+app.MapLyciaDiagnostics("/internal/lycia");
+```
+
+The returned builder is a standard `IEndpointConventionBuilder`, so it composes with ordinary ASP.NET Core
+conventions - Lycia implements no authentication or authorization of its own:
+
+```csharp
+app.MapLyciaDiagnostics()
+    .RequireAuthorization("Operations");
+```
+
+Calling `AddLycia(...)` never maps this route; an application that does not call `MapLyciaDiagnostics()`
+exposes no Lycia diagnostics endpoint. A response looks like:
+
+```json
+{
+  "deliveryGuarantee": "AtLeastOnce",
+  "persistence": {
+    "mode": "SplitStore",
+    "provider": null,
+    "resolvedStrategy": "LocalAtomic",
+    "canonicalStore": "PostgreSql",
+    "operationalStore": "Redis"
+  },
+  "capabilities": {
+    "inbox": true,
+    "outbox": true,
+    "journal": true,
+    "journalRebuild": true,
+    "reconciliation": true
+  }
+}
+```
+
+This is a **configuration/topology endpoint, not a health check**: it answers "how is Lycia configured and
+what did it resolve?", not "is RabbitMQ/Redis/PostgreSQL/SQL Server/Kafka/NATS reachable right now?". It
+performs no network calls and probes no configured infrastructure, and it normally returns `200 OK`. Only
+`Lycia.Extensions.AspNetCore` depends on ASP.NET Core - no other Lycia package does, so a plain
+worker/console consumer never acquires that dependency.
 
 ---
 
@@ -743,6 +1024,55 @@ built-in providers.
 
 ---
 
+## Supported Infrastructure Versions
+
+Lycia talks to real servers, so which server versions it works with is part of its contract. The contract
+is the single file [`infrastructure-versions.json`](infrastructure-versions.json); the test images, the CI
+service images, the compose files and this table are all checked against it, so none of them can drift
+silently.
+
+| Integration | Supported minimum | Tested minimum | Tested current | Current capability | Not supported |
+| --- | --- | --- | --- | --- | --- |
+| RabbitMQ | 3.13 | 3.13 | 4.3 | Transport; publisher confirms (`Published`/`ConfirmationUnknown`); native TTL + DLX scheduling | RabbitMQ Streams and Super Streams (not implemented) |
+| Redis | 6.2 | 6.2 | 8.10 | SagaStore, Inbox, Outbox; Split Store operational projection; scheduling store | Redis Cluster |
+| PostgreSQL | 14 | 14 | 18 | SagaStore, Inbox, Outbox; `LocalAtomic` boundary; Split Store canonical side; journal | — |
+| SQL Server | 2017 | 2017 (CU31) | 2025 (CU9) | SagaStore, Inbox, Outbox; `LocalAtomic` boundary; Split Store canonical side; journal | — |
+| Kafka | 3.8 | 3.8 | 4.3 | Transport (no publisher confirms; Outbox stays `ConfirmationUnknown`) | Kafka Share Groups (KIP-932) |
+| NATS | 2.9 | 2.9 | 2.15 | Transport; JetStream confirms (`Published`) when `UseJetStream = true` (default); Core NATS has no confirmation | — |
+
+`Lycia.Persistence.InMemory` requires no external infrastructure and therefore has no version entry above —
+it is for tests and local development, not a durable store.
+
+The four terms are kept apart on purpose:
+
+- **Supported minimum** — the oldest version Lycia commits to. A defect on it is a Lycia defect.
+- **Tested minimum** — the oldest version the automated suites actually run against. It always equals the
+  supported minimum; Lycia does not claim support for a version it does not test.
+- **Tested current** — the recent version every CI run exercises. Newer versions are expected to work but
+  are not promised until they are added to the file; there is no maximum, and nothing is known to break on
+  a newer release.
+- **Technical floor** — the oldest version the implementation could work on, from the features it uses.
+  This is analysis, not a promise, and it can be lower than the supported minimum.
+
+| Integration | Technical floor and the feature that sets it | Why the supported minimum is higher |
+| --- | --- | --- |
+| RabbitMQ | AMQP 0-9-1 publisher confirms, `mandatory`, per-message expiration and dead-lettering. Nothing above the 3.x baseline is used; 3.12 also passes the suite, older releases were not run | 3.13 is the oldest series that still has a vendor support window |
+| Redis | 4.0: the Redis schedule store's Lua scripts call `HSET` with several field/value pairs, which Redis 3.2 rejects (measured); every other command the providers use predates 4.0. Not run below 6.2 | 6.2 is the oldest series the Redis project still maintains |
+| PostgreSQL | 9.5: `FOR UPDATE SKIP LOCKED` (Outbox and Inbox claims) and `ON CONFLICT` (idempotent inserts); 9.4 rejects both (measured). `JSONB` needs 9.4. Not run below 14 | 14 is the oldest series the PostgreSQL project still maintains (its final release is 12 November 2026) |
+| SQL Server | 2012: `THROW` and `SEQUENCE` (Outbox/Inbox/journal T-SQL), with `DATETIME2`, `OUTPUT INSERTED`, `UPDLOCK` and `READPAST` (2008 or earlier). Not run below 2017 | 2017 is the oldest release still in Microsoft extended support (until 13 October 2027) |
+| Kafka | 0.11: idempotent producer and record headers | 3.8 is the oldest series with a current vendor support window; 3.7 also passes, older releases were not run |
+| NATS | 2.9.0: the JetStream consumer create API (2.7 and 2.8 fail the suite, measured). Core NATS (no JetStream) has no persistence and no Outbox confirmations | NATS publishes no support window for server releases, so 2.9 is supported because it is the lowest version that is tested |
+
+Two things follow from the differences between those columns. A version between the technical floor and the
+supported minimum may well work, but it is neither tested nor supported. And raising a *tested current*
+version never changes what is supported: the supported minimum only moves when the maintainers deliberately
+edit the contract (see [DEVELOPERS.md](DEVELOPERS.md#supported-infrastructure-versions)).
+
+RabbitMQ Streams and Kafka Share Groups are not part of any supported column: Lycia does not implement the
+former, and the latter is not yet a stable Kafka feature. They are tracked as possible future work only.
+
+---
+
 ## Samples
 
 The [samples/](samples) directory contains runnable examples.
@@ -761,8 +1091,6 @@ The [samples/](samples) directory contains runnable examples.
 
 Deferred work, not available today:
 
-- **RabbitMQ publish confirmation.** Reporting RabbitMQ publishes as `Published` requires awaiting a
-  per-publish broker confirmation in the transport; until then RabbitMQ stays `ConfirmationUnknown`.
 - **Redis Cluster.** The Redis Inbox/Outbox scripts touch several keys without hash tags, so they
   target standalone (non-clustered) Redis.
 - **Journal acceleration and tracking.** A durable snapshot table, and persistent, queryable
@@ -782,16 +1110,6 @@ Deferred work, not available today:
 - delivery is at least once, handlers remain idempotent, and retries are bounded
 - transport behavior stays outside the core
 - operational guarantees are documented without exactly-once claims
-
----
-
-## Project History
-
-Lycia began on **May 28, 2023** with the goal of making distributed saga workflows easier to model,
-operate and understand. The name is inspired by the Lycian Way and the idea of turning difficult paths
-into understandable routes.
-
----
 
 ## License
 

@@ -59,6 +59,6 @@ public sealed class PaymentSagaHandler :
         // Refund the successful payment idempotently.
         PaymentService.Refund(failed.OrderId);
 
-        await Context.MarkAsCompensated<OrderShippingFailedEvent>();
+        await Context.MarkAsCompensated<OrderShippingFailedEvent>(cancellationToken);
     }
 }
