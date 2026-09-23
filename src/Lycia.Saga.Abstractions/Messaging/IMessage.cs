@@ -76,10 +76,6 @@ public interface IRequestRoutingMetadata
 
     /// <summary>Gets or sets the logical application endpoint waiting for the response.</summary>
     string? ResponseEndpoint { get; set; }
-
-    /// <summary>Compatibility alias for <see cref="ResponseEndpoint"/>.</summary>
-    [Obsolete("Use ResponseEndpoint. ReplyTo now represents the same logical endpoint and will be removed in a future major version.")]
-    string? ReplyTo { get; set; }
 }
 
 /// <summary>Canonicalizes logical application identities used by transport topology.</summary>

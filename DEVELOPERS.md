@@ -1075,6 +1075,140 @@ batch-claim staleness parameter, the Redis Lua key-reconstruction separator, and
 serialization mismatch, all noted above) were only caught by actually running these tests against real
 behavior, not by reasoning about the design on paper.
 
+### Advanced imperative compensation API
+
+Lycia 2.0 supports two compensation programming styles over the exact same durable propagation
+implementation: the staged fluent grammar above (recommended, canonical) and an explicit imperative form
+for application code that genuinely needs step-by-step control the staged grammar can't express. Both are
+call-shape choices, not reliability choices.
+
+```csharp
+await Context.MarkAsCompensated<ProcessPaymentCommand>(cancellationToken);
+await Context.BubbleUpCompensation(failedEvent, cancellationToken);
+```
+
+**1. Why the fluent form is recommended.** `ContinueCompensation()...ThenMarkAsCompensated<T>().ThenBubbleUp(ct)`
+marks the step compensated *and* propagates as a single composite call - there is no ordering to get
+wrong, and no way to compile a call that marks compensated without ever requesting propagation when that
+was the intent. `BubbleUpCompensation` is a second call the application makes at its own discretion; the
+framework cannot see into that discretion.
+
+**2. Why the imperative form exists.** Some handlers need to interleave business compensation logic with
+the exact two framework transitions - conditionally, with intermediate state, or to reuse
+`failedEvent` in ways the staged chain doesn't expose. That is a legitimate need; it is just not the
+common case.
+
+**3. `Context.Compensate(failedEvent, cancellationToken)`.** Publishes a reactive compensation *event*
+through the outgoing message pipeline (`OutgoingMessagePipeline.Publish`), starting a choreography flow -
+other handlers' `CompensateAsync` react to it as `IEvent` delivery, exactly like any other published event.
+It does not touch `ISagaStore`, does not mark any step compensated, and does not by itself imply or require
+`MarkAsCompensated`/`BubbleUpCompensation` afterward. Its `CancellationToken` was already present and
+already propagated correctly before this phase (`ImperativeCompensationTests.Compensate_Publishes_The_FailedEvent_And_Propagates_The_Token`
+proves it directly against the pipeline call).
+
+**4. `Context.MarkAsCompensated<TStep>(cancellationToken)`.** Logs the current step `Compensated` in the
+SagaStore. Nothing more. It is fully valid on its own for a root/final step.
+
+**5. `Context.BubbleUpCompensation(failedEvent, cancellationToken)`.** The imperative primitive behind
+durable parent-lineage propagation - `ISagaContext<TInitialMessage>.BubbleUpCompensation<TStep>(TStep failedEvent, ...)`,
+implemented on every built-in context by delegating to `ISagaCompensationCoordinator.BubbleUpCompensationAsync`.
+Unlike the fluent form's `CompensateParentAsync` (which marks *and* propagates atomically, because both
+happen in the same call), this method does **not** mark anything compensated - it requires that to have
+already happened, and validates it:
+
+- `failedEvent.MessageId` must equal the `MessageId` of the step the calling `ISagaContext` was
+  constructed for. A sibling step, an unrelated message, or a different message that happens to share the
+  same type all fail this check identically - there is no fallback to "the current step" or to a type- or
+  order-based lookup. `ImperativeCompensationTests` (`..._Uses_The_Exact_MessageId_Never_Any_Step_Of_The_Same_Type`,
+  `..._Does_Not_Touch_A_Sibling_Branch`, `..._With_An_Unrelated_Event_Throws_And_Mutates_Nothing`) prove
+  this directly, including two steps of the identical message type with distinct `MessageId`s/`ParentMessageId`s.
+- The step's persisted status must already be `Compensated`. If not, `InvalidOperationException` is thrown
+  naming the actual status and pointing at `MarkAsCompensated`/the recommended fluent form -
+  `ImperativeCompensationTests.BubbleUpCompensation_Before_MarkAsCompensated_Throws_And_Creates_No_Intent`.
+
+Both checks run entirely before anything durable is touched - a failing call creates no propagation
+intent and mutates no step.
+
+**6. Why `MarkAsCompensated` alone must remain valid.** It is the correct, complete call for a root/final
+step. Making it implicitly try to bubble up would either create meaningless propagation work for steps
+that have no parent, or require guessing intent from context that doesn't reliably indicate it.
+
+**7. Root vs. intermediate**, imperative form: root steps call only `MarkAsCompensated`; an intermediate
+step calls `MarkAsCompensated` then `BubbleUpCompensation(failedEvent, ct)` - matching the fluent form's
+two-stage vs. three-stage split exactly.
+
+**8. Why Lycia cannot infer a forgotten `BubbleUpCompensation`.** `MarkAsCompensated` alone is *also* a
+completely valid, terminal call (see 6/7) - there is no distinguishable "this step is missing a bubble-up
+call" state the framework could detect and repair. This is a genuine application programming error, not a
+recoverable fault.
+
+**9. Application-never-requested vs. propagation-requested-then-crashed.** These are different failure
+classes with different outcomes:
+
+```
+NEVER REQUESTED (application error - NOT recoverable)
+
+    MarkAsCompensated(ct)
+        ↓
+    (developer forgot BubbleUpCompensation)
+        ↓
+    no CompensationPropagationIntent ever created
+        ↓
+    nothing for CompensationWorker to find or resume
+```
+
+```
+REQUESTED, THEN CRASHED (framework recovery - IS recoverable)
+
+    MarkAsCompensated(ct)
+        ↓
+    BubbleUpCompensation(failedEvent, ct)
+        ↓
+    durable CompensationPropagationIntent claimed
+        ↓
+    process crashes before the immediate parent attempt finishes
+        ↓
+    CompensationWorker resumes it from the durable Claimed record
+```
+
+**10-11. `CompensationPropagationIntent` / `CompensationWorker`.** Unchanged from the fluent-form
+description above - `BubbleUpCompensationAsync` calls the exact same `EnsureClaimAndAttemptPropagationAsync`
+private helper `CompensateParentAsync` does (`SagaCompensationCoordinator`), so both forms produce and
+recover identical durable state.
+
+**12-13. `ParentMessageId` lineage / `MessageId`-based exact step identity.** `failedEvent.ParentMessageId`
+is the lineage the propagation edge follows, and `failedEvent.MessageId` (validated against the current
+step, see 5) is the edge's own identity half (`SagaId` + `ChildMessageId`) - identical to the fluent form.
+
+**14. Branching/sibling behavior.** Identical to the fluent form: propagation follows the one edge named by
+`failedEvent`, never a type-based or global scan - `ImperativeCompensationTests.BubbleUpCompensation_Does_Not_Touch_A_Sibling_Branch`.
+
+**15. Repeated same-message-type behavior.** Two steps sharing a message type but distinct `MessageId`s/
+`ParentMessageId`s resolve to their own, independent edges - never each other's.
+
+**16. At-least-once semantics.** Identical to the fluent form: a parent's compensation handler can run
+again if the process crashes after invoking it but before recording completion. Lycia makes no
+exactly-once claim here or anywhere else.
+
+**17. Business compensation idempotency.** External side effects performed by a compensation handler
+(refunds, inventory release, shipment cancellation) must be idempotent, exactly as for any other
+at-least-once handler invocation in Lycia - not specific to `BubbleUpCompensation`.
+
+**18-19. Cancellation before/after durable handoff.** Before the durable claim: `cancellationToken.ThrowIfCancellationRequested()`
+runs first, so a pre-cancelled token prevents the claim from ever being created
+(`Cancellation_Before_BubbleUpCompensation_Prevents_The_Durable_Handoff`). After the claim commits:
+cancellation (or a crash) of the immediate attempt never erases the durable requirement -
+`CompensationWorker` recovers it (`Cancellation_After_The_Durable_Handoff_Does_Not_Erase_The_Propagation_Requirement`).
+
+**20. Imperative runtime validation.** Both checks in point 5 above - message identity and prerequisite
+status - are exactly the runtime validation the imperative form needs *instead of* compile-time staging;
+the fluent form never needs them because marking and propagating are one call there, never two.
+
+**21. Convergence.** `ImperativeCompensationTests.Fluent_And_Imperative_Forms_Produce_The_Same_Durable_Propagation_Artifact_Shape`
+drives one edge through each form in the same test and asserts both reach `CompensationPropagationStatus.Completed`
+with the same shape (`AttemptCount == 1`, same identity structure) - proof, not just design intent, that
+there is one propagation implementation, never two.
+
 ---
 
 ## Configuration
@@ -1231,9 +1365,11 @@ Redis Cluster. They appear in no supported column and are tracked in the ledger.
 
 ### Versioning
 
-Versions come from Nerdbank.GitVersioning. `version.json` holds the base version (`1.18.0` is the target
-first stable release), and `publicReleaseRefSpec` (`^refs/tags/v\d+\.\d+\.\d+$`) makes a build of a
-matching tag a public release with exactly that version. Builds of branches carry a prerelease suffix.
+Versions come from Nerdbank.GitVersioning. `version.json` holds the base version - `1.18.0` was the
+first stable release; `2.0.0` is the current major version line, bumped in `version.json` for the
+intentional source-breaking changes described in `docs/MIGRATION-2.0.md` - and `publicReleaseRefSpec`
+(`^refs/tags/v\d+\.\d+\.\d+$`) makes a build of a matching tag a public release with exactly that version.
+Builds of branches carry a prerelease suffix.
 
 ### Release contract
 

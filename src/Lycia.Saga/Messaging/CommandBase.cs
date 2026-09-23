@@ -57,11 +57,4 @@ public abstract class CommandBase: ICommand, IRequestRoutingMetadata
     public Guid RequestId { get; set; }
     /// <inheritdoc />
     public string? ResponseEndpoint { get; set; }
-    /// <inheritdoc />
-    [Obsolete("Use ResponseEndpoint.")]
-    public string? ReplyTo
-    {
-        get => ResponseEndpoint;
-        set => ResponseEndpoint = value;
-    }
 }

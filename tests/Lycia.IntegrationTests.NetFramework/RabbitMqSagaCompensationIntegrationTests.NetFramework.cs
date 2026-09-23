@@ -724,4 +724,10 @@ internal class DummySagaCompensationCoordinator : ISagaCompensationCoordinator
     {
         throw new NotImplementedException();
     }
+
+    public Task BubbleUpCompensationAsync(Guid sagaId, Type stepType, Type handlerType, IMessage currentStep,
+        IMessage failedEvent, CancellationToken cancellationToken = default)
+    {
+        throw new NotImplementedException();
+    }
 }

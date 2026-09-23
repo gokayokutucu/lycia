@@ -43,6 +43,11 @@ Lycia has been in development since May 28, 2023, with the goal of making distri
 to model, operate, and understand. The name is inspired by the Lycian Way and the idea of turning difficult
 paths into understandable routes.
 
+`1.18.0` was Lycia's first stable release (11 packages). `2.0.0` is the current major version line: it
+intentionally includes source-breaking changes over `1.18.0` — cleaning up the public API at the
+appropriate major-version boundary rather than carrying it forward — and adds `Lycia.Extensions.AspNetCore`
+as a 12th package. Upgrading from `1.18.x`? See [`docs/MIGRATION-2.0.md`](docs/MIGRATION-2.0.md).
+
 ---
 
 ## Packages
@@ -270,13 +275,34 @@ Several distinct things are all called "compensation," and Lycia keeps them sepa
   propagates that fact.
 - **`Context.Compensate(failedEvent, cancellationToken)`** — publishes a reactive compensation *event*.
   This starts a choreography flow (other handlers' `CompensateAsync` react to that event); it is not the
-  same thing as coordinated parent-lineage bubble-up below.
+  same thing as coordinated parent-lineage bubble-up below, and it is not a required first step of every
+  coordinated compensation flow.
 - **`Context.MarkAsCompensated<TStep>(cancellationToken)`** — a standalone, terminal state transition. It
-  marks the current step compensated in the SagaStore and stops there; nothing propagates further. Use
-  this for a root step, or any step with no logical parent to continue to.
-- **`Context.ContinueCompensation()`** — begins a coordinated compensation *continuation* for the current
-  step. It performs no business rollback and executes nothing by itself; it only returns a staged fluent
-  object with two valid next calls.
+  records that the current step's compensation completed and stops there; **it never propagates to the
+  parent by itself** — marking a step compensated and requiring that its parent also compensate are two
+  separately tracked facts, on purpose (see "Advanced" below for why).
+
+### Recommended: staged compensation continuation
+
+This is the form to reach for by default. It exists specifically to make forgetting parent propagation
+hard: the type system stages the operation so the compiler, not a code reviewer, enforces the shape.
+
+```csharp
+public override async Task CompensateAsync(
+    ProcessPaymentCommand message,
+    CancellationToken cancellationToken = default)
+{
+    await paymentGateway.RefundAsync(message.OrderId, cancellationToken);
+
+    await Context
+        .ContinueCompensation()
+        .ThenMarkAsCompensated<PaymentProcessedEvent>()
+        .ThenBubbleUp(cancellationToken);
+}
+```
+
+- **`Context.ContinueCompensation()`** — begins the continuation. It performs no business rollback and
+  executes nothing by itself; it only returns a staged fluent object with two valid next calls.
 - **`.ThenMarkAsCompensated<TStep>()`** (no token) — marks the step compensated as the first stage of a
   three-stage chain and returns a continuation whose only member is `ThenBubbleUp`. Nothing runs until
   that is awaited.
@@ -284,19 +310,11 @@ Several distinct things are all called "compensation," and Lycia keeps them sepa
   (via `ParentMessageId`), invoking the parent's compensation handler. This is what "bubble up" means in
   Lycia: parent-lineage propagation, never a global broadcast.
 
-**Bubble-up is recoverable after process failure.** Marking a step compensated and requiring that its
-parent also be compensated are two separately durable facts — the framework never treats "this step is
-Compensated" as proof that its parent's compensation happened, or even started. If the process crashes
-after `ThenBubbleUp` durably records that requirement but before the parent's handler finishes, a hosted
-recovery worker resumes it automatically; you don't call anything extra to opt into this; it is part of
-what makes a `SagaStore` a `SagaStore`. Like every other handler invocation in Lycia, this recovery is
-**at-least-once, not exactly-once** — a parent's compensation handler can run more than once for the same
-logical propagation. Write it the way you'd write any Lycia handler: make the external side effect it
-performs (refunding a payment, releasing inventory, cancelling a shipment) idempotent, so running it twice
-is harmless.
-
-**Root vs. intermediate.** A root/final step has no logical parent, so it only ever marks itself
-compensated:
+`ContinueCompensation()` never accepts a `CancellationToken`. As with
+[the deferred tracked operations above](#deferred-tracked-operations), **the token belongs only to the
+terminal call in the chain** — here, `ThenBubbleUp`. A two-stage form exists for when compensation
+completes at this step without a separate bubble-up call — a root/final step has no logical parent, so it
+only ever marks itself compensated, equivalent to `MarkAsCompensated<TStep>(cancellationToken)` directly:
 
 ```csharp
 public override async Task CompensateStartAsync(
@@ -310,46 +328,68 @@ public override async Task CompensateStartAsync(
 }
 ```
 
-An intermediate coordinated step does its business compensation first, then marks itself compensated
-*and* continues to its logical parent:
+**Bubble-up is recoverable after process failure.** Marking a step compensated and requiring that its
+parent also be compensated are two separately durable facts — the framework never treats "this step is
+Compensated" as proof that its parent's compensation happened, or even started. If the process crashes
+after `ThenBubbleUp` durably records that requirement but before the parent's handler finishes, a hosted
+recovery worker resumes it automatically; you don't call anything extra to opt into this; it is part of
+what makes a `SagaStore` a `SagaStore`. Like every other handler invocation in Lycia, this recovery is
+**at-least-once, not exactly-once** — a parent's compensation handler can run more than once for the same
+logical propagation. Write it the way you'd write any Lycia handler: make the external side effect it
+performs (refunding a payment, releasing inventory, cancelling a shipment) idempotent, so running it twice
+is harmless.
+
+### Advanced: explicit imperative compensation control
+
+Most sagas should never need this — reach for it only when you genuinely need step-by-step imperative
+control that the staged form can't express. It uses the exact same durable propagation implementation as
+`ThenBubbleUp` above; the difference is API composition, never reliability.
 
 ```csharp
 public override async Task CompensateAsync(
-    ReserveInventoryCommand command,
+    ProcessPaymentCommand message,
     CancellationToken cancellationToken = default)
 {
-    await inventory.ReleaseReservation(command.OrderId);
+    await paymentGateway.RefundAsync(message.OrderId, cancellationToken);
 
-    await Context
-        .ContinueCompensation()
-        .ThenMarkAsCompensated<ReserveInventoryCommand>()
-        .ThenBubbleUp(cancellationToken);
+    await Context.MarkAsCompensated<ProcessPaymentCommand>(cancellationToken);
+
+    await Context.BubbleUpCompensation(message, cancellationToken);
 }
 ```
 
-`ContinueCompensation()` never accepts a `CancellationToken`. As with
-[the deferred tracked operations above](#deferred-tracked-operations), **the token belongs only to the
-terminal call in the chain** — here, `ThenBubbleUp`. A two-stage form exists for when compensation
-completes at this step without a separate bubble-up call, equivalent to
-`MarkAsCompensated<TStep>(cancellationToken)` above:
+- **`Context.MarkAsCompensated<TStep>(cancellationToken)`** — as above: records the step's own
+  compensation and stops there.
+- **`Context.BubbleUpCompensation(failedEvent, cancellationToken)`** — explicitly requests durable
+  parent-lineage propagation for the exact message supplied. `failedEvent` must be the same message this
+  handler's `CompensateAsync` received; Lycia validates this (and that the step is already
+  `Compensated`) and throws `InvalidOperationException` rather than guessing, propagating the wrong step,
+  or silently doing nothing.
 
-```csharp
-await Context
-    .ContinueCompensation()
-    .ThenMarkAsCompensated<TStep>(cancellationToken);
-```
+> [!WARNING]
+> **If you omit `BubbleUpCompensation` after `MarkAsCompensated`, Lycia cannot infer that parent
+> propagation was intended.** `MarkAsCompensated` alone is also a fully valid, terminal root/final
+> compensation call — the framework has no way to distinguish "this really was the last step" from "the
+> developer forgot to bubble up." This is an application programming error, not a crash: nothing durable
+> was ever requested, so there is nothing for the recovery worker to resume. This is the main reason the
+> staged fluent form is recommended over this one — it makes that mistake impossible to write.
 
-**Lineage, not global order.** `ParentMessageId` is the only field bubble-up traverses. A strictly
-sequential coordinated saga (A → B → C) makes bubble-up look like simple reverse-order compensation
-(C → B → A), but that is a special case of a single unbranched chain, not a rule: a saga with branching
-lineage (two children of the same parent) bubbles each branch independently toward its own parent, never
-across siblings. Reactive choreography compensation (`Context.Compensate(...)` and handlers reacting to
-the resulting event) has no such structure to traverse at all, and therefore no strict global
+`Compensate(...)`, `MarkAsCompensated(...)`, and `BubbleUpCompensation(...)` are not synonyms and do not
+imply each other — see [DEVELOPERS.md](DEVELOPERS.md#coordinated-compensation-continuation) for each
+one's exact semantics, and specifically "Forgotten bubble-up vs. crash recovery" for the distinction
+between an application never requesting propagation and propagation being requested but interrupted by a
+crash (which *is* recoverable).
+
+**Lineage, not global order.** `ParentMessageId` is the only field bubble-up traverses, in either form. A
+strictly sequential coordinated saga (A → B → C) makes bubble-up look like simple reverse-order
+compensation (C → B → A), but that is a special case of a single unbranched chain, not a rule: a saga with
+branching lineage (two children of the same parent) bubbles each branch independently toward its own
+parent, never across siblings. Reactive choreography compensation (`Context.Compensate(...)` and handlers
+reacting to the resulting event) has no such structure to traverse at all, and therefore no strict global
 reverse-delivery-order guarantee — handlers react as the compensation event reaches them.
 
 See [DEVELOPERS.md](DEVELOPERS.md#coordinated-compensation-continuation) for the compensation
-coordinator's parent-lookup algorithm, idempotency guarantees, and the currently known limits of
-bubble-up's crash recovery.
+coordinator's parent-lookup algorithm, the durable propagation state machine, and idempotency guarantees.
 
 ---
 
