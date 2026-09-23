@@ -782,14 +782,6 @@ public class RabbitMqSagaCompensationIntegrationTests : IAsyncLifetime
     {
         public Guid RequestId { get; set; }
         public string? ResponseEndpoint { get; set; }
-
-#pragma warning disable CS0618
-        public string? ReplyTo
-        {
-            get => ResponseEndpoint;
-            set => ResponseEndpoint = value;
-        }
-#pragma warning restore CS0618
     }
 
     // Dummy handler that always throws (simulates saga failure and compensation path)
@@ -812,6 +804,12 @@ internal class DummySagaCompensationCoordinator : ISagaCompensationCoordinator
     }
 
     public Task CompensateParentAsync(Guid sagaId, Type stepType, Type handlerType, IMessage message, CancellationToken cancellationToken = default)
+    {
+        throw new NotImplementedException();
+    }
+
+    public Task BubbleUpCompensationAsync(Guid sagaId, Type stepType, Type handlerType, IMessage currentStep,
+        IMessage failedEvent, CancellationToken cancellationToken = default)
     {
         throw new NotImplementedException();
     }
