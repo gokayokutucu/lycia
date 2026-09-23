@@ -7,6 +7,7 @@ using Lycia.Dispatching;
 using Lycia.Extensions;
 using Lycia.Saga.Abstractions;
 using Lycia.Saga.Abstractions.Inbox;
+using Lycia.Saga.Abstractions.Messaging;
 using Lycia.Saga.Abstractions.Persistence;
 using Lycia.Saga.Exceptions;
 using Lycia.Saga.Messaging;
@@ -825,6 +826,62 @@ public class SagaDispatcherTests
 
         // Assert: Was the flag set in overridden CompensateStartAsync?
         Assert.True(TestStartReactiveCompensateHandler.CompensateCalled);
+    }
+
+    // --- IFailedEventBase dispatch recognition: FindMethodName must key off the public IFailedEventBase
+    // interface (the constraint Context.Publish(failedEvent, ct) callers actually see for reactive
+    // compensation), not the concrete Lycia.Saga.Messaging.FailedEventBase base class. DummyFailedEvent
+    // below implements IFailedEventBase directly - via Messages.DummyEvent : IMessage - without deriving
+    // from FailedEventBase at all, so this is the one case that would have silently fallen through to
+    // HandleAsyncInternal instead of CompensateAsync if the two surfaces were still inconsistent.
+    [Fact]
+    public async Task DispatchAsync_Routes_A_Bare_IFailedEventBase_Implementer_To_CompensateAsync()
+    {
+        var fixedSagaId = Guid.NewGuid();
+        var services = new ServiceCollection();
+
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string> { ["ApplicationId"] = "TestApp" }!)
+            .Build();
+        services.AddLyciaInMemory(configuration)
+            .AddSaga(typeof(BareFailedEventCompensationHandler))
+            .Build();
+
+        services.AddScoped<ISagaIdGenerator>(_ => new TestSagaIdGenerator(fixedSagaId));
+
+        var provider = services.BuildServiceProvider();
+        var dispatcher = provider.GetRequiredService<ISagaDispatcher>();
+
+        BareFailedEventCompensationHandler.CompensateCalled = false;
+        var failed = new DummyFailedEvent { SagaId = fixedSagaId, MessageId = Guid.NewGuid(), Reason = "boom" };
+
+        await dispatcher.DispatchAsync(failed, handlerType: typeof(BareFailedEventCompensationHandler),
+            sagaId: fixedSagaId, CancellationToken.None);
+
+        Assert.True(BareFailedEventCompensationHandler.CompensateCalled);
+    }
+
+    /// <summary>Implements <see cref="IFailedEventBase"/> directly - never derives from <c>FailedEventBase</c>.</summary>
+    public sealed class DummyFailedEvent : DummyEvent, IFailedEventBase
+    {
+        public string Reason { get; set; } = string.Empty;
+    }
+
+    public class BareFailedEventCompensationHandler : ReactiveSagaHandler<DummyFailedEvent>
+    {
+        public static bool CompensateCalled;
+
+        public override Task HandleAsync(DummyFailedEvent message, CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException(
+                "HandleAsync must not be invoked for a failed event - dispatch must route to CompensateAsync.");
+        }
+
+        public override Task CompensateAsync(DummyFailedEvent message, CancellationToken cancellationToken = default)
+        {
+            CompensateCalled = true;
+            return Task.CompletedTask;
+        }
     }
 
     public class InitialCommand : CommandBase, ITestAppCommand

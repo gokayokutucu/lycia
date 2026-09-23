@@ -27,18 +27,24 @@ Git rules. Agents must update this file as phases move through the milestone.
   reconciliation never turns Redis into request-path authority.
 - Replay/rebuild must be deterministic and must not invoke business handlers.
 - In a deferred/composite fluent chain (`SendWithTracking`/`PublishWithTracking`/`RespondWithTracking`/
-  `ScheduleWithTracking` → `ISagaStepFluent.Then...`; `ContinueCompensation()` →
-  `ICompensationContinuation`/`ICompensatedContinuation`), the entry method never accepts a
-  `CancellationToken` and only the terminal method does; that one token governs the whole deferred
-  operation. Do not reintroduce a captured/fallback token at the entry method.
-- Coordinated compensation continuation is `Context.ContinueCompensation().ThenMarkAsCompensated<TStep>()`
-  (defers) `.ThenBubbleUp(cancellationToken)` (terminal; propagates to the logical parent) — or the
-  two-stage `.ThenMarkAsCompensated<TStep>(cancellationToken)` (terminal; does not propagate). Do not have
-  `ThenBubbleUp` also call `MarkAsCompensated` first: the internal bubble-up primitive it calls already
-  logs the step Compensated as one step of its own durable propagation walk. That primitive
-  (`IBubbleUpCompensationPrimitive`, `Lycia.Saga.Abstractions.Compensating`) is deliberately internal, not
-  a member of `ISagaContext` — never re-add a public `Context.BubbleUpCompensationAsync<TStep>(...)` or any
-  equivalent direct-call escape hatch; `ThenBubbleUp` must remain its only application-facing entry point.
+  `ScheduleWithTracking` → `ISagaStepFluent.Then...`; the no-token `MarkAsCompensated<TStep>()` →
+  `ICompensatedContinuation`), the entry method never accepts a `CancellationToken` and only the terminal
+  method does; that one token governs the whole deferred operation. Do not reintroduce a captured/fallback
+  token at the entry method.
+- Coordinated compensation is `Context.MarkAsCompensated<TStep>()` (no token; defers)
+  `.ThenBubbleUp(cancellationToken)` (terminal; marks the step Compensated *and* propagates to the logical
+  parent) — or the token-bearing `Context.MarkAsCompensated<TStep>(cancellationToken)` (terminal on its
+  own; does not propagate), for a root/final step. As of 2.0.1 there is no `ContinueCompensation()` entry
+  point and no `Context.BubbleUpCompensation(...)`/`Context.Compensate(...)` imperative API — do not
+  reintroduce them. `ThenBubbleUp` calls the internal bubble-up primitive, which logs the step Compensated
+  as one step of its own durable propagation walk — never call `MarkAsCompensated` first as a separate
+  step. That primitive (`IBubbleUpCompensationPrimitive`, `Lycia.Saga.Abstractions.Compensating`) is
+  deliberately internal, not a member of `ISagaContext` — never re-add a public
+  `Context.BubbleUpCompensationAsync<TStep>(...)` or any equivalent direct-call escape hatch; `ThenBubbleUp`
+  must remain its only application-facing entry point. Reactive/choreography compensation uses plain
+  `Context.Publish(failedEvent, ct)` where `failedEvent : IFailedEventBase` — `SagaDispatcher.FindMethodName`
+  routes it to `CompensateAsync` by checking the `IFailedEventBase` interface, not the concrete
+  `FailedEventBase` class; do not narrow that check back to the concrete class.
 - Compensation propagation durability is part of `ISagaStore` correctness, not an optional add-on: the
   current step's `Compensated` status is never treated as proof that propagation to its logical parent
   completed, started, or is even required — those are separate durable facts

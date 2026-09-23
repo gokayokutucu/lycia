@@ -69,7 +69,7 @@ public class CoordinatedSagaStepFluent<TInitialMessage, TSagaData>(
     /// <summary>
     /// Transitions the step the context was constructed for to compensated. This does not bubble
     /// compensation up to the logical parent; use
-    /// <c>Context.ContinueCompensation().ThenMarkAsCompensated&lt;TStep&gt;().ThenBubbleUp(ct)</c> for that.
+    /// <c>Context.MarkAsCompensated&lt;TStep&gt;().ThenBubbleUp(ct)</c> for that.
     /// </summary>
     public Task ThenMarkAsCompensated(CancellationToken cancellationToken = default) =>
         RunAsync(cancellationToken, token => context.MarkAsCompensated<TInitialMessage>(token));

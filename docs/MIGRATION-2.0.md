@@ -1,12 +1,23 @@
-# Migrating from Lycia 1.18.x to 2.0.0
+# Migrating from Lycia 1.18.x to 2.0.x
 
 Lycia 2.0.0 intentionally contains source-breaking public API changes over `1.18.0`. This is the
 major-version boundary where the API is cleaned up rather than carrying every 1.x shape forward; every
 break below is deliberate and every one of them is documented. Lycia remains at-least-once, never
-exactly-once, in 2.0.0 exactly as it was in 1.18.0 - that guarantee has not changed.
+exactly-once, in 2.0.x exactly as it was in 1.18.0 - that guarantee has not changed.
 
 If something you rely on isn't covered here, it almost certainly didn't change: this guide only lists
 actual differences from `1.18.0`, verified against the source.
+
+> [!IMPORTANT]
+> **If you are migrating (or upgrading) to `2.0.1` or later, read [Update: Lycia 2.0.1 simplifies
+> compensation further](#update-lycia-201-simplifies-compensation-further) at the bottom of this guide
+> first.** `2.0.1` is an immediate correction release: it removes the `ContinueCompensation()`/
+> `ICompensationContinuation` staged entry point, `Context.Compensate(...)`, and the advanced imperative
+> `Context.BubbleUpCompensation(...)` that sections 3, 4 and 6 below describe - all three existed only in
+> `2.0.0` and are gone again in `2.0.1`. The `2.0.0` packages are unlisted on NuGet.org once `2.0.1` is
+> confirmed available, so a reader migrating from `1.18.x` today should go directly to the `2.0.1` grammar
+> in that section rather than adopting the intermediate `2.0.0`-only shapes below. Sections 1, 2, 5, 7 and 8
+> are unaffected and remain accurate for `2.0.1`.
 
 ## Source-breaking changes
 
@@ -189,9 +200,75 @@ The following are explicitly **not** 2.0.0 work and are unaffected by this relea
 - Supported infrastructure version floors/ceilings - unchanged from `1.18.0` (see `infrastructure-versions.json`
   and `DEVELOPERS.md`, "Supported infrastructure versions").
 
+## Update: Lycia 2.0.1 simplifies compensation further
+
+`2.0.1` is an immediate correction release over `2.0.0` (not a new major version): it collapses the
+`2.0.0` compensation API described in sections 2, 3, 4 and 6 above into a simpler, two-stage form, and
+removes `Context.Compensate(...)` entirely. Everything else in this guide (sections 1, 5, 7, 8, and the
+additive/behavioral-change lists) is unchanged and still describes `2.0.1` accurately.
+
+**Coordinated compensation** is now exactly two call shapes, both directly on `ISagaContext` - there is no
+`ContinueCompensation()` entry point and no separate continuation interface for the two-stage terminal form:
+
+```csharp
+// Intermediate step - marks compensated, then propagates to the logical parent, atomically:
+await Context
+    .MarkAsCompensated<TStep>()
+    .ThenBubbleUp(cancellationToken);
+
+// Root/final step - marks compensated and stops there (unchanged since 1.18.0):
+await Context.MarkAsCompensated<TStep>(cancellationToken);
+```
+
+If you already migrated to `2.0.0`'s three-stage form, replace it directly:
+
+```csharp
+// 2.0.0
+await Context
+    .ContinueCompensation()
+    .ThenMarkAsCompensated<TStep>()
+    .ThenBubbleUp(cancellationToken);
+
+// 2.0.1
+await Context
+    .MarkAsCompensated<TStep>()
+    .ThenBubbleUp(cancellationToken);
+```
+
+**Removed entirely, not obsolete, does not compile in `2.0.1`:**
+
+- `Context.ContinueCompensation()` and `ICompensationContinuation` (`Lycia.Saga.Abstractions.Compensating`) -
+  the no-token `MarkAsCompensated<TStep>()` overload on `ISagaContext` is the new, sole staging entry
+  point, and it returns `ICompensatedContinuation` (kept, unchanged) directly.
+- `Context.Compensate<T>(T @event, CancellationToken ct) where T : IFailedEventBase` - the advanced
+  imperative `2.0.0` API added specifically to back the now-removed `BubbleUpCompensation`. If you used
+  `Context.Compensate(...)` for reactive/choreography compensation, use `Context.Publish(failedEvent, ct)`
+  instead - it is the exact same publish `Compensate` performed internally, since `Compensate` never did
+  anything beyond that publish. See `DEVELOPERS.md`, "Reactive/choreography compensation:
+  `Context.Publish(failedEvent, ct)`".
+- `Context.BubbleUpCompensation<TStep>(TStep failedEvent, CancellationToken ct)` (the `2.0.0` advanced
+  imperative primitive) and `ISagaCompensationCoordinator.BubbleUpCompensationAsync(...)` (its backing
+  coordinator method, from section 6 above) - both existed only to back the two-call imperative form; the
+  staged `MarkAsCompensated<TStep>().ThenBubbleUp(ct)` form is now the only application-facing entry point
+  to parent-lineage propagation, matching the original `2.0.0` recommendation, not a new restriction.
+
+**Unaffected by this correction:** the durable propagation machinery itself
+(`CompensationPropagationIntent`, `CompensationWorker`, at-least-once recovery semantics, exact `MessageId`/
+`ParentMessageId`-based identity, sibling isolation) - `2.0.1` routes through the exact same
+`SagaCompensationCoordinator.CompensateParentAsync`/`EnsureClaimAndAttemptPropagationAsync` implementation
+`2.0.0`'s staged fluent form already used. This is an API-surface simplification, not a reliability change.
+
+**Bug fix verified during this correction:** the reactive dispatcher's failed-event routing
+(`SagaDispatcher.FindMethodName`) now recognizes any `IFailedEventBase` implementer, not only the concrete
+`Lycia.Saga.Messaging.FailedEventBase` base class - previously, an event implementing `IFailedEventBase`
+directly (without deriving from `FailedEventBase`) would not have dispatched to `CompensateAsync` even
+though `Context.Compensate<T>`'s generic constraint in `2.0.0` suggested it should. This only affects
+custom failed-event types that implement `IFailedEventBase` directly; every event deriving from the
+concrete `FailedEventBase` class dispatched correctly both before and after this fix.
+
 ## Getting help
 
 If an upgrade issue isn't covered above, check `DEVELOPERS.md` first - it documents the current
 architecture in depth, including the compensation state machine, persistence provider contracts, and the
-release process. If you believe a change here is missing or inaccurate against the actual `2.0.0` source,
+release process. If you believe a change here is missing or inaccurate against the actual `2.0.x` source,
 open an issue.

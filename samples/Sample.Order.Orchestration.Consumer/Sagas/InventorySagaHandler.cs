@@ -26,8 +26,7 @@ public class InventorySagaHandler :
     {
         Context.Data.InventoryCompensated = true;
         return Context
-            .ContinueCompensation()
-            .ThenMarkAsCompensated<ReserveInventoryCommand>()
+            .MarkAsCompensated<ReserveInventoryCommand>()
             .ThenBubbleUp(cancellationToken);
     }
 }

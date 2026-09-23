@@ -43,10 +43,11 @@ Lycia has been in development since May 28, 2023, with the goal of making distri
 to model, operate, and understand. The name is inspired by the Lycian Way and the idea of turning difficult
 paths into understandable routes.
 
-`1.18.0` was Lycia's first stable release (11 packages). `2.0.0` is the current major version line: it
+`1.18.0` was Lycia's first stable release (11 packages). `2.0.x` is the current major version line: it
 intentionally includes source-breaking changes over `1.18.0` — cleaning up the public API at the
 appropriate major-version boundary rather than carrying it forward — and adds `Lycia.Extensions.AspNetCore`
-as a 12th package. Upgrading from `1.18.x`? See [`docs/MIGRATION-2.0.md`](docs/MIGRATION-2.0.md).
+as a 12th package. `2.0.1` is an immediate correction release over `2.0.0` that further simplifies the
+compensation API. Upgrading from `1.18.x`? See [`docs/MIGRATION-2.0.md`](docs/MIGRATION-2.0.md).
 
 ---
 
@@ -273,16 +274,17 @@ Several distinct things are all called "compensation," and Lycia keeps them sepa
 - **Business compensation** — your own undo logic (`inventory.ReleaseReservation(...)`, a refund, a
   cancellation). Lycia never performs this; it only tracks that a step compensated and, optionally,
   propagates that fact.
-- **`Context.Compensate(failedEvent, cancellationToken)`** — publishes a reactive compensation *event*.
-  This starts a choreography flow (other handlers' `CompensateAsync` react to that event); it is not the
-  same thing as coordinated parent-lineage bubble-up below, and it is not a required first step of every
-  coordinated compensation flow.
+- **`Context.Publish(failedEvent, cancellationToken)`** — publishing an event that implements
+  `IFailedEventBase` starts a reactive compensation *choreography* flow: the dispatcher recognizes it and
+  routes it to the matching `ISagaCompensationHandler<T>.CompensateAsync`, the same as any other published
+  event reaching its handler. This is not the same thing as coordinated parent-lineage bubble-up below, and
+  it is not a required first step of every coordinated compensation flow.
 - **`Context.MarkAsCompensated<TStep>(cancellationToken)`** — a standalone, terminal state transition. It
   records that the current step's compensation completed and stops there; **it never propagates to the
   parent by itself** — marking a step compensated and requiring that its parent also compensate are two
-  separately tracked facts, on purpose (see "Advanced" below for why).
+  separately tracked facts, on purpose.
 
-### Recommended: staged compensation continuation
+### Staged compensation continuation
 
 This is the form to reach for by default. It exists specifically to make forgetting parent propagation
 hard: the type system stages the operation so the compiler, not a code reviewer, enforces the shape.
@@ -295,26 +297,24 @@ public override async Task CompensateAsync(
     await paymentGateway.RefundAsync(message.OrderId, cancellationToken);
 
     await Context
-        .ContinueCompensation()
-        .ThenMarkAsCompensated<PaymentProcessedEvent>()
+        .MarkAsCompensated<PaymentProcessedEvent>()
         .ThenBubbleUp(cancellationToken);
 }
 ```
 
-- **`Context.ContinueCompensation()`** — begins the continuation. It performs no business rollback and
-  executes nothing by itself; it only returns a staged fluent object with two valid next calls.
-- **`.ThenMarkAsCompensated<TStep>()`** (no token) — marks the step compensated as the first stage of a
-  three-stage chain and returns a continuation whose only member is `ThenBubbleUp`. Nothing runs until
-  that is awaited.
-- **`.ThenBubbleUp(cancellationToken)`** — terminal: continues compensation through the logical parent
-  (via `ParentMessageId`), invoking the parent's compensation handler. This is what "bubble up" means in
-  Lycia: parent-lineage propagation, never a global broadcast.
+- **`Context.MarkAsCompensated<TStep>()`** (no token) — begins the staged continuation. It performs no
+  business rollback and executes nothing by itself; it only returns a continuation whose only member is
+  `ThenBubbleUp`. Nothing runs until that is awaited.
+- **`.ThenBubbleUp(cancellationToken)`** — terminal: marks the step compensated and continues compensation
+  through the logical parent (via `ParentMessageId`), invoking the parent's compensation handler, as one
+  atomic operation. This is what "bubble up" means in Lycia: parent-lineage propagation, never a global
+  broadcast.
 
-`ContinueCompensation()` never accepts a `CancellationToken`. As with
+The no-token `MarkAsCompensated<TStep>()` overload never accepts a `CancellationToken`. As with
 [the deferred tracked operations above](#deferred-tracked-operations), **the token belongs only to the
-terminal call in the chain** — here, `ThenBubbleUp`. A two-stage form exists for when compensation
-completes at this step without a separate bubble-up call — a root/final step has no logical parent, so it
-only ever marks itself compensated, equivalent to `MarkAsCompensated<TStep>(cancellationToken)` directly:
+terminal call in the chain** — here, `ThenBubbleUp`. The token-bearing overload exists for when
+compensation completes at this step without a separate bubble-up call — a root/final step has no logical
+parent, so it only ever marks itself compensated:
 
 ```csharp
 public override async Task CompensateStartAsync(
@@ -339,52 +339,15 @@ logical propagation. Write it the way you'd write any Lycia handler: make the ex
 performs (refunding a payment, releasing inventory, cancelling a shipment) idempotent, so running it twice
 is harmless.
 
-### Advanced: explicit imperative compensation control
+`MarkAsCompensated(...)` (either overload) and `Context.Publish(failedEvent, ...)` are not synonyms and do
+not imply each other — see [DEVELOPERS.md](DEVELOPERS.md#coordinated-compensation-continuation) for each
+one's exact semantics.
 
-Most sagas should never need this — reach for it only when you genuinely need step-by-step imperative
-control that the staged form can't express. It uses the exact same durable propagation implementation as
-`ThenBubbleUp` above; the difference is API composition, never reliability.
-
-```csharp
-public override async Task CompensateAsync(
-    ProcessPaymentCommand message,
-    CancellationToken cancellationToken = default)
-{
-    await paymentGateway.RefundAsync(message.OrderId, cancellationToken);
-
-    await Context.MarkAsCompensated<ProcessPaymentCommand>(cancellationToken);
-
-    await Context.BubbleUpCompensation(message, cancellationToken);
-}
-```
-
-- **`Context.MarkAsCompensated<TStep>(cancellationToken)`** — as above: records the step's own
-  compensation and stops there.
-- **`Context.BubbleUpCompensation(failedEvent, cancellationToken)`** — explicitly requests durable
-  parent-lineage propagation for the exact message supplied. `failedEvent` must be the same message this
-  handler's `CompensateAsync` received; Lycia validates this (and that the step is already
-  `Compensated`) and throws `InvalidOperationException` rather than guessing, propagating the wrong step,
-  or silently doing nothing.
-
-> [!WARNING]
-> **If you omit `BubbleUpCompensation` after `MarkAsCompensated`, Lycia cannot infer that parent
-> propagation was intended.** `MarkAsCompensated` alone is also a fully valid, terminal root/final
-> compensation call — the framework has no way to distinguish "this really was the last step" from "the
-> developer forgot to bubble up." This is an application programming error, not a crash: nothing durable
-> was ever requested, so there is nothing for the recovery worker to resume. This is the main reason the
-> staged fluent form is recommended over this one — it makes that mistake impossible to write.
-
-`Compensate(...)`, `MarkAsCompensated(...)`, and `BubbleUpCompensation(...)` are not synonyms and do not
-imply each other — see [DEVELOPERS.md](DEVELOPERS.md#coordinated-compensation-continuation) for each
-one's exact semantics, and specifically "Forgotten bubble-up vs. crash recovery" for the distinction
-between an application never requesting propagation and propagation being requested but interrupted by a
-crash (which *is* recoverable).
-
-**Lineage, not global order.** `ParentMessageId` is the only field bubble-up traverses, in either form. A
-strictly sequential coordinated saga (A → B → C) makes bubble-up look like simple reverse-order
-compensation (C → B → A), but that is a special case of a single unbranched chain, not a rule: a saga with
-branching lineage (two children of the same parent) bubbles each branch independently toward its own
-parent, never across siblings. Reactive choreography compensation (`Context.Compensate(...)` and handlers
+**Lineage, not global order.** `ParentMessageId` is the only field bubble-up traverses. A strictly
+sequential coordinated saga (A → B → C) makes bubble-up look like simple reverse-order compensation
+(C → B → A), but that is a special case of a single unbranched chain, not a rule: a saga with branching
+lineage (two children of the same parent) bubbles each branch independently toward its own parent, never
+across siblings. Reactive choreography compensation (`Context.Publish(failedEvent, ...)` and handlers
 reacting to the resulting event) has no such structure to traverse at all, and therefore no strict global
 reverse-delivery-order guarantee — handlers react as the compensation event reaches them.
 
@@ -558,8 +521,7 @@ A response has its own `MessageId`, preserves the workflow `CorrelationId` and `
 and may be consumed by any replica of the requester application.
 
 Responses must be sent with `Respond`. Publishing an `IResponse` through `Context.Publish` fails
-explicitly, because responses are targeted continuations, not broadcast facts. `ReplyTo` remains an
-obsolete compatibility alias for `ResponseEndpoint`.
+explicitly, because responses are targeted continuations, not broadcast facts.
 
 A saga step never depends on the process that sent the preceding message staying alive: if replica A
 sends a command and stops, replica B receives the response, loads the saga from the SagaStore and
@@ -904,8 +866,7 @@ lycia
 ```
 
 `WithDispatch(...)` configures batching, claim lifetime, lease renewal and bounded retry with backoff
-and jitter for due-schedule dispatch. (`WithWorker(...)` remains as an `[Obsolete]` alias.)
-`WithInMemoryStore()` is available for tests.
+and jitter for due-schedule dispatch. `WithInMemoryStore()` is available for tests.
 
 Schedule a message from a saga context:
 

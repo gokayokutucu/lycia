@@ -155,12 +155,6 @@ public class SagaContext<TInitialMessage>(
         async Task Operation(CancellationToken ct) => await ScheduleMessageAsync(message, delay, null, ct);
     }
 
-    public Task Compensate<T>(T @event, CancellationToken cancellationToken = default) where T : IFailedEventBase
-    {
-        @event.PrepareEvent(CurrentStep, SagaId);
-        return OutgoingMessagePipeline.Publish(@event, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
-    }
-
     public virtual Task MarkAsCompensated<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage
     {
         return SagaStore.LogStepAsync(sagaId, CurrentStep.MessageId, CurrentStep.ParentMessageId, CurrentStep.GetType(),
@@ -168,18 +162,13 @@ public class SagaContext<TInitialMessage>(
     }
 
     /// <inheritdoc />
-    public Task BubbleUpCompensation<TStep>(TStep failedEvent, CancellationToken cancellationToken = default)
-        where TStep : IMessage
-    {
-        if (failedEvent == null) throw new ArgumentNullException(nameof(failedEvent));
-        return compensationCoordinator.BubbleUpCompensationAsync(SagaId, CurrentStep.GetType(),
-            HandlerTypeOfCurrentStep, CurrentStep, failedEvent, cancellationToken);
-    }
+    public ICompensatedContinuation MarkAsCompensated<TStep>() where TStep : IMessage =>
+        new SagaCompensatedContinuation(((IBubbleUpCompensationPrimitive)this).BubbleUpCompensationAsync<TStep>);
 
     /// <summary>
     /// Explicit implementation of the internal bubble-up primitive - not reachable through <see cref="ISagaContext{TInitialMessage}"/>
     /// or this class's own public surface. Application code reaches it only via
-    /// <c>ContinueCompensation()...ThenBubbleUp(ct)</c>. Delegates to the protected, overridable
+    /// <c>MarkAsCompensated&lt;TStep&gt;()...ThenBubbleUp(ct)</c>. Delegates to the protected, overridable
     /// <see cref="BubbleUpCompensationCoreAsync{TStep}"/> so <see cref="SagaContext{TInitialMessage,TSagaData}"/>
     /// can still customize the behavior without itself exposing a public/explicit-interface method.
     /// </summary>
@@ -195,9 +184,6 @@ public class SagaContext<TInitialMessage>(
         return compensationCoordinator.CompensateParentAsync(SagaId, CurrentStep.GetType(), HandlerTypeOfCurrentStep,
             CurrentStep, cancellationToken);
     }
-
-    /// <inheritdoc />
-    public ICompensationContinuation ContinueCompensation() => new SagaCompensationContinuation<TInitialMessage>(this);
 
     public virtual Task MarkAsComplete<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage
     {
@@ -586,12 +572,6 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
         async Task Operation(CancellationToken ct) => await ScheduleMessageAsync(message, delay, null, ct);
     }
 
-    public Task Compensate<T>(T @event, CancellationToken cancellationToken = default) where T : IFailedEventBase
-    {
-        @event.PrepareEvent(CurrentStep, SagaId);
-        return OutgoingMessagePipeline.Publish(@event, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
-    }
-
     public Task MarkAsComplete<TAdapterStep>(CancellationToken cancellationToken = default) where TAdapterStep : IMessage
     {
         return sagaStore.LogStepAsync(SagaId, CurrentStep.MessageId, CurrentStep.ParentMessageId, CurrentStep.GetType(),
@@ -632,17 +612,12 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
     }
 
     /// <inheritdoc />
-    public Task BubbleUpCompensation<TAdapterStep>(TAdapterStep failedEvent, CancellationToken cancellationToken = default)
-        where TAdapterStep : IMessage
-    {
-        if (failedEvent == null) throw new ArgumentNullException(nameof(failedEvent));
-        return compensationCoordinator.BubbleUpCompensationAsync(SagaId, CurrentStep.GetType(),
-            HandlerTypeOfCurrentStep, CurrentStep, failedEvent, cancellationToken);
-    }
+    public ICompensatedContinuation MarkAsCompensated<TAdapterStep>() where TAdapterStep : IMessage =>
+        new SagaCompensatedContinuation(((IBubbleUpCompensationPrimitive)this).BubbleUpCompensationAsync<TAdapterStep>);
 
     /// <summary>
     /// Explicit implementation of the internal bubble-up primitive - not reachable through <see cref="ISagaContext{TCurrentStepAdapter}"/>.
-    /// Application code reaches it only via <c>ContinueCompensation()...ThenBubbleUp(ct)</c>.
+    /// Application code reaches it only via <c>MarkAsCompensated&lt;TStep&gt;()...ThenBubbleUp(ct)</c>.
     /// </summary>
     Task IBubbleUpCompensationPrimitive.BubbleUpCompensationAsync<TAdapterStep>(CancellationToken cancellationToken)
     {
@@ -652,10 +627,6 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter>(
         return compensationCoordinator.CompensateParentAsync(SagaId, CurrentStep.GetType(), HandlerTypeOfCurrentStep,
             CurrentStep, cancellationToken);
     }
-
-    /// <inheritdoc />
-    public ICompensationContinuation ContinueCompensation() =>
-        new SagaCompensationContinuation<TCurrentStepAdapter>(this);
 
     public Task MarkAsCompensationFailed<TAdapterStep>(CancellationToken cancellationToken = default) where TAdapterStep : IMessage
     {
@@ -912,13 +883,6 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
         async Task Operation(CancellationToken ct) => await ScheduleMessageAsync(message, delay, null, ct);
     }
 
-    // Assuming FailedEventBase is accessible here or defined appropriately
-    public Task Compensate<T>(T @event, CancellationToken cancellationToken = default) where T : IFailedEventBase
-    {
-        @event.PrepareEvent(StepAdapter, SagaId);
-        return OutgoingMessagePipeline.Publish(@event, HandlerTypeOfCurrentStep, SagaId, cancellationToken);
-    }
-
     public async Task MarkAsComplete<TMarkStep>(CancellationToken cancellationToken = default)
         where TMarkStep : IMessage
     {
@@ -969,18 +933,13 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
     }
 
     /// <inheritdoc />
-    public Task BubbleUpCompensation<TMarkStep>(TMarkStep failedEvent, CancellationToken cancellationToken = default)
-        where TMarkStep : IMessage
-    {
-        if (failedEvent == null) throw new ArgumentNullException(nameof(failedEvent));
-        return compensationCoordinator.BubbleUpCompensationAsync(SagaId, StepAdapter.GetType(),
-            HandlerTypeOfCurrentStep, StepAdapter, failedEvent, cancellationToken);
-    }
+    public ICompensatedContinuation MarkAsCompensated<TMarkStep>() where TMarkStep : IMessage =>
+        new SagaCompensatedContinuation(((IBubbleUpCompensationPrimitive)this).BubbleUpCompensationAsync<TMarkStep>);
 
     /// <summary>
     /// Explicit implementation of the internal bubble-up primitive - not reachable through
     /// <see cref="ISagaContext{TCurrentStepAdapter,TSagaDataAdapter}"/>. Application code reaches it only
-    /// via <c>ContinueCompensation()...ThenBubbleUp(ct)</c>.
+    /// via <c>MarkAsCompensated&lt;TStep&gt;()...ThenBubbleUp(ct)</c>.
     /// </summary>
     async Task IBubbleUpCompensationPrimitive.BubbleUpCompensationAsync<TMarkStep>(CancellationToken cancellationToken)
     {
@@ -990,10 +949,6 @@ internal class StepSpecificSagaContextAdapter<TCurrentStepAdapter, TSagaDataAdap
         await compensationCoordinator.CompensateParentAsync(SagaId, StepAdapter.GetType(), HandlerTypeOfCurrentStep,
             StepAdapter, cancellationToken);
     }
-
-    /// <inheritdoc />
-    public ICompensationContinuation ContinueCompensation() =>
-        new SagaCompensationContinuation<TCurrentStepAdapter>(this);
 
     public Task MarkAsCompensationFailed<TMarkStep>(CancellationToken cancellationToken = default)
         where TMarkStep : IMessage

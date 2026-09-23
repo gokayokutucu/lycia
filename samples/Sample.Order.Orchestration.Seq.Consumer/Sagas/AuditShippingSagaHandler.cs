@@ -29,8 +29,7 @@ public class AuditShippingSagaHandler :
         try
         {
             await Context
-                .ContinueCompensation()
-                .ThenMarkAsCompensated<PaymentProcessedEvent>()
+                .MarkAsCompensated<PaymentProcessedEvent>()
                 .ThenBubbleUp(cancellationToken);
         }
         catch (Exception)

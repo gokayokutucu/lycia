@@ -6,13 +6,14 @@ using Lycia.Saga.Abstractions.Messaging;
 namespace Lycia.Saga.Abstractions.Compensating;
 
 /// <summary>
-/// The execution primitive behind <c>ContinueCompensation().ThenMarkAsCompensated&lt;TStep&gt;().ThenBubbleUp(ct)</c>:
-/// marks the current step compensated and durably requires - then immediately attempts - propagation to the
-/// logical parent. Deliberately <c>internal</c>, not a member of <see cref="Contexts.ISagaContext{TInitialMessage}"/>:
+/// The execution primitive behind <c>MarkAsCompensated&lt;TStep&gt;().ThenBubbleUp(ct)</c>: marks the
+/// current step compensated and durably requires - then immediately attempts - propagation to the logical
+/// parent. Deliberately <c>internal</c>, not a member of <see cref="Contexts.ISagaContext{TInitialMessage}"/>:
 /// application code must reach it only through the staged fluent grammar
-/// (<c>ContinueCompensation()...ThenBubbleUp(ct)</c>), never by calling it directly on the context. Every
-/// saga context implementation also implements this interface so <see cref="SagaCompensationContinuation{TInitialMessage}"/>
-/// (the only intended caller, in the same assembly via <c>InternalsVisibleTo</c>) can reach it by casting.
+/// (<c>MarkAsCompensated&lt;TStep&gt;()...ThenBubbleUp(ct)</c>), never by calling it directly on the
+/// context. Every saga context implementation implements both this interface and the no-token
+/// <c>MarkAsCompensated&lt;TStep&gt;()</c> overload that constructs the <see cref="SagaCompensatedContinuation"/>
+/// closing over it by casting <c>this</c>.
 /// </summary>
 internal interface IBubbleUpCompensationPrimitive
 {
