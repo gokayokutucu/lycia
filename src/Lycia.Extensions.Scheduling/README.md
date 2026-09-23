@@ -25,7 +25,7 @@ The older `services.AddLyciaScheduling(options => ...)` and `services.AddLyciaIn
 still compile as `[Obsolete]` wrappers over the same `SchedulingOptions`.
 
 `WithDispatch(...)` configures `SchedulingOptions.Worker` — batching, claim lifetime, lease renewal, and
-bounded backoff-with-jitter retry for due-schedule dispatch. It replaces `WithWorker(...)`, kept as an `[Obsolete]` wrapper for existing callers.
+bounded backoff-with-jitter retry for due-schedule dispatch.
 
 Schedule from any saga context:
 

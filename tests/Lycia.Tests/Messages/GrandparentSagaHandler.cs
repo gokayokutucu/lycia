@@ -37,8 +37,7 @@ public class ParentCompensationSagaHandler : CoordinatedSagaHandler<DummyParentE
     {
         Invocations.Add(nameof(ParentCompensationSagaHandler));
         return Context
-            .ContinueCompensation()
-            .ThenMarkAsCompensated<DummyParentEvent>()
+            .MarkAsCompensated<DummyParentEvent>()
             .ThenBubbleUp(cancellationToken);
     }
 }
@@ -63,8 +62,7 @@ public class ChildCompensationSagaHandler : CoordinatedSagaHandler<DummyChildEve
             return Context.MarkAsCompensationFailed<DummyChildEvent>(cancellationToken);
 
         return Context
-            .ContinueCompensation()
-            .ThenMarkAsCompensated<DummyChildEvent>()
+            .MarkAsCompensated<DummyChildEvent>()
             .ThenBubbleUp(cancellationToken);
     }
 }

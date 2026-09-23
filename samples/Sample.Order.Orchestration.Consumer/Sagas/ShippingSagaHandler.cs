@@ -32,8 +32,7 @@ public class ShippingSagaHandler :
     {
         Context.Data.ShippingCompensated = true; // Sample flag to indicate compensation
         return Context
-            .ContinueCompensation()
-            .ThenMarkAsCompensated<ShipOrderCommand>()
+            .MarkAsCompensated<ShipOrderCommand>()
             .ThenBubbleUp(cancellationToken);
     }
 }

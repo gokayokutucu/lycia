@@ -137,9 +137,8 @@ never contain a pod, host, process or container identity.
   are replicas, not duplicate registrations.
 - An event may have any number of subscriptions. Each `MessageType + HandlerType + ApplicationId`
   combination is an independent logical subscription shared by its replicas.
-- A response targets the requesting application through canonical `ResponseEndpoint`; `ReplyTo` is an
-  obsolete forwarding alias. `RequestId`, `CorrelationId` and `SagaId` correlate it without creating
-  per-saga transport resources.
+- A response targets the requesting application through canonical `ResponseEndpoint`. `RequestId`,
+  `CorrelationId` and `SagaId` correlate it without creating per-saga transport resources.
 
 Startup validation rejects missing or multiple endpoint markers, a wrong `ApplicationId`, and
 conflicting command handler types. Owner matching is `OrdinalIgnoreCase`; generated names keep the
@@ -574,8 +573,7 @@ Redis schedule store live in `Lycia.Extensions.Scheduling`; the RabbitMQ TTL + D
 `Lycia.Extensions.RabbitMq`. Kafka and the supported NATS baseline use the durable dispatch worker.
 
 `LyciaSchedulingBuilder.WithDispatch(Action<SchedulerWorkerOptions>)` is the public entry point. It
-configures `SchedulingOptions.Worker`, read by the internal hosted `SchedulerWorker`. `WithWorker(...)`
-is an `[Obsolete]` wrapper over the same options.
+configures `SchedulingOptions.Worker`, read by the internal hosted `SchedulerWorker`.
 
 Redis creation and claiming use scripts. A claim has an expiring lease and a monotonic fencing token;
 active dispatches renew the lease, and every state mutation checks both owner and fence
@@ -697,7 +695,7 @@ eager-connection risk is also covered directly against `LyciaReliabilityDiagnost
 | Pattern | State | Handlers |
 | --- | --- | --- |
 | Choreography (reactive) | Stateless, no `TSagaData`; compensation through `ISagaCompensationHandler<T>` | `StartReactiveSagaHandler<TStart>`, `ReactiveSagaHandler<TMessage>` |
-| Sequential orchestration (coordinated) | `TSagaData`; failures compensate through `Context.ContinueCompensation().ThenMarkAsCompensated<T>().ThenBubbleUp(ct)` (the only public entry point to parent propagation) | `StartCoordinatedSagaHandler<TStart, TSagaData>`, `CoordinatedSagaHandler<TMessage, TSagaData>` |
+| Sequential orchestration (coordinated) | `TSagaData`; failures compensate through `Context.MarkAsCompensated<T>().ThenBubbleUp(ct)` (the only public entry point to parent propagation) | `StartCoordinatedSagaHandler<TStart, TSagaData>`, `CoordinatedSagaHandler<TMessage, TSagaData>` |
 | Request-response orchestration | `TSagaData`; each step sends a command and continues on the response | `StartCoordinatedResponsiveSagaHandler<TStart, TResponse, TSagaData>`, `CoordinatedResponsiveSagaHandler<TMessage, TResponse, TSagaData>`, `IResponseSagaHandler<TResponse>` |
 
 `Sample.Order.Orchestration.Consumer` and the Microservices sample use request-response orchestration.
@@ -731,8 +729,8 @@ a token; only the terminal method does.**
   `SagaStepFluentToken.Resolve(terminal, captured)` (terminal wins unless left `default`, in which case the
   captured token was used as a fallback). That type, and the captured-token constructor parameters on both
   fluent classes, are removed: there is now exactly one token per deferred tracked operation.
-- **Compensation continuation** (`ContinueCompensation()` → `ICompensationContinuation`/`ICompensatedContinuation`,
-  below) follows the identical shape, deliberately, for consistency.
+- **Compensation continuation** (the no-token `MarkAsCompensated<TStep>()` overload →
+  `ICompensatedContinuation`, below) follows the identical shape, deliberately, for consistency.
 
 This invariant does not extend to plain synchronous accessors or to APIs that were never deferred
 (`Context.Send`/`Publish`/`Respond`/`Schedule`, `MarkAsComplete`, etc., which already took a token
@@ -743,13 +741,9 @@ directly and still do).
 ### Staged fluent interfaces
 
 ```csharp
-ICompensationContinuation ContinueCompensation();   // on ISagaContext<TInitialMessage>
-
-public interface ICompensationContinuation
-{
-    Task ThenMarkAsCompensated<TStep>(CancellationToken cancellationToken) where TStep : IMessage;
-    ICompensatedContinuation ThenMarkAsCompensated<TStep>() where TStep : IMessage;
-}
+// on ISagaContext<TInitialMessage>
+Task MarkAsCompensated<TStep>(CancellationToken cancellationToken = default) where TStep : IMessage;
+ICompensatedContinuation MarkAsCompensated<TStep>() where TStep : IMessage;
 
 public interface ICompensatedContinuation
 {
@@ -757,41 +751,36 @@ public interface ICompensatedContinuation
 }
 ```
 
-(`Lycia.Saga.Abstractions.Compensating`, implemented by `SagaCompensationContinuation`/
-`SagaCompensatedContinuation` in `Lycia.Saga.Compensating`.) The two-parameter-list overload of
-`ThenMarkAsCompensated<TStep>` is what makes `ThenBubbleUp` unreachable before it: the no-token overload
-is the only one that returns `ICompensatedContinuation`, so the compiler only exposes `ThenBubbleUp` after
-that specific call. `ContinueCompensation()` itself, and the no-token `ThenMarkAsCompensated<TStep>()`,
-touch neither the SagaStore nor the compensation coordinator - `SagaCompensationContinuation` holds only a
-context reference, and `SagaCompensatedContinuation` holds only a closed-over `Func<CancellationToken, Task>`.
+(`Lycia.Saga.Abstractions.Compensating`, implemented by `SagaCompensatedContinuation` in
+`Lycia.Saga.Compensating`.) The two overloads of `MarkAsCompensated<TStep>` are what makes `ThenBubbleUp`
+unreachable before it: only the no-token overload returns `ICompensatedContinuation`, so the compiler only
+exposes `ThenBubbleUp` after that specific call. The no-token `MarkAsCompensated<TStep>()` touches neither
+the SagaStore nor the compensation coordinator by itself - the `SagaCompensatedContinuation` it returns
+holds only a closed-over `Func<CancellationToken, Task>`.
 
-- **Two-stage terminal**: `ThenMarkAsCompensated<TStep>(ct)` calls only `context.MarkAsCompensated<TStep>(ct)`
-  - the same call `Context.MarkAsCompensated<TStep>(ct)` makes directly. No propagation. Use this for a
-  root step, or for an intermediate step where you deliberately do not want to continue the chain.
-- **Three-stage**: `ThenMarkAsCompensated<TStep>()` (no token) defers; `ThenBubbleUp(ct)` calls only the
-  internal bubble-up primitive (below), which both marks the step compensated *and* durably requires -
-  then immediately attempts - propagation to the logical parent. It does **not** also call
-  `MarkAsCompensated` first; the two are one call into the coordinator, not two.
+- **Terminal, no propagation**: `MarkAsCompensated<TStep>(ct)` (token-bearing) logs the step `Compensated`
+  and stops there. Use this for a root step, or for an intermediate step where you deliberately do not
+  want to continue the chain.
+- **Staged, with propagation**: `MarkAsCompensated<TStep>()` (no token) defers; `ThenBubbleUp(ct)` calls
+  only the internal bubble-up primitive (below), which both marks the step compensated *and* durably
+  requires - then immediately attempts - propagation to the logical parent, as one call into the
+  coordinator, never two.
 
 #### The staged-fluent encapsulation invariant
 
 An intermediate stage of a staged fluent chain must never be an independently callable application
-operation - only the type system's own shape should decide what is reachable, with a runtime check
-reserved for the one case that genuinely cannot be expressed at compile time. Compensation is the clearest
+operation - only the type system's own shape should decide what is reachable. Compensation is the clearest
 example: the execution primitive behind `ThenBubbleUp` is `IBubbleUpCompensationPrimitive.BubbleUpCompensationAsync<TStep>`
 (`Lycia.Saga.Abstractions.Compensating`) - an **internal** interface, not a member of `ISagaContext<TInitialMessage>`.
 Every built-in saga context (`SagaContext<TInitialMessage>` and its `TSagaData` override, both
 `StepSpecificSagaContextAdapter` variants) implements it as an *explicit* interface implementation, so it
 is invisible even on the concrete, public `SagaContext<T>` type - `Context.BubbleUpCompensationAsync<T>(ct)`
-does not compile, and never did as a matter of the type system rather than convention.
-`SagaCompensationContinuation` (the only intended caller, in the same assembly via `InternalsVisibleTo`)
-reaches it with `context is IBubbleUpCompensationPrimitive primitive`; a custom `ISagaContext<T>`
-implementation that doesn't implement it gets a clear `InvalidOperationException` from `ThenMarkAsCompensated<TStep>()`
-instead of continuing silently or throwing an opaque `InvalidCastException` - this is the one place the
-invariant is a runtime check, because "does this arbitrary external context support bubble-up" cannot be
-expressed in the public type system without exposing the primitive itself. `SagaContext<TInitialMessage>`'s
-own core implementation is `protected virtual BubbleUpCompensationCoreAsync<TStep>`, so
-`SagaContext<TInitialMessage, TSagaData>` can still override the behavior without either level exposing a
+does not compile, and never did as a matter of the type system rather than convention. Each context's own
+no-token `MarkAsCompensated<TStep>()` implementation (the only intended caller, in the same assembly)
+reaches it by casting `this` to `IBubbleUpCompensationPrimitive` - which can never fail, since the cast
+target is the same concrete class the method body runs on, not an arbitrary external context.
+`SagaContext<TInitialMessage>`'s own core implementation is `protected virtual BubbleUpCompensationCoreAsync<TStep>`,
+so `SagaContext<TInitialMessage, TSagaData>` can still override the behavior without either level exposing a
 public or even internally-callable-by-name method. `FluentApiEncapsulationTests.cs` (`Lycia.Tests`) proves
 the absence by reflecting over the actual compiled public surface, not by code review.
 
@@ -1020,9 +1009,9 @@ A root step - one with no logical parent (`ParentMessageId == Guid.Empty`) - onl
 `LogStepAsync(..., Compensated, ...)`. `CompensateParentAsync` returns immediately after that check, before
 ever calling `EnsureAndClaimCompensationPropagationAsync`: **no propagation intent is created for a root
 step**, matching `Root_Step_Compensation_Creates_No_Propagation_Intent` in
-`CompensationCrashInjectionTests.cs`. `Context.MarkAsCompensated<T>(ct)` and the two-stage
-`ContinueCompensation().ThenMarkAsCompensated<T>(ct)` form remain the recommended way to write a root
-compensation handler precisely because they never touch propagation machinery at all.
+`CompensationCrashInjectionTests.cs`. The token-bearing `Context.MarkAsCompensated<T>(ct)` overload remains
+the recommended way to write a root compensation handler precisely because it never touches propagation
+machinery at all.
 
 ### Branching and `ParentMessageId` lineage
 
@@ -1075,139 +1064,48 @@ batch-claim staleness parameter, the Redis Lua key-reconstruction separator, and
 serialization mismatch, all noted above) were only caught by actually running these tests against real
 behavior, not by reasoning about the design on paper.
 
-### Advanced imperative compensation API
+### Reactive/choreography compensation: `Context.Publish(failedEvent, ct)`
 
-Lycia 2.0 supports two compensation programming styles over the exact same durable propagation
-implementation: the staged fluent grammar above (recommended, canonical) and an explicit imperative form
-for application code that genuinely needs step-by-step control the staged grammar can't express. Both are
-call-shape choices, not reliability choices.
+Coordinated parent-lineage bubble-up (above) is one of two compensation models Lycia supports; the other
+is reactive choreography, where a handler publishes a failed-event and any handler with a matching
+`ISagaCompensationHandler<T>.CompensateAsync` reacts to it - the same as any other published `IEvent`
+delivery, with no `ParentMessageId` traversal involved.
 
 ```csharp
-await Context.MarkAsCompensated<ProcessPaymentCommand>(cancellationToken);
-await Context.BubbleUpCompensation(failedEvent, cancellationToken);
+await Context.Publish(failedEvent, cancellationToken); // failedEvent : IFailedEventBase
 ```
 
-**1. Why the fluent form is recommended.** `ContinueCompensation()...ThenMarkAsCompensated<T>().ThenBubbleUp(ct)`
-marks the step compensated *and* propagates as a single composite call - there is no ordering to get
-wrong, and no way to compile a call that marks compensated without ever requesting propagation when that
-was the intent. `BubbleUpCompensation` is a second call the application makes at its own discretion; the
-framework cannot see into that discretion.
+There is no dedicated `Context.Compensate(...)` method for this - `Publish` is the same method used for
+any other event, and `IFailedEventBase` is a plain marker interface
+(`Lycia.Saga.Abstractions.Messaging`) with no special members beyond `Reason`:
 
-**2. Why the imperative form exists.** Some handlers need to interleave business compensation logic with
-the exact two framework transitions - conditionally, with intermediate state, or to reuse
-`failedEvent` in ways the staged chain doesn't expose. That is a legitimate need; it is just not the
-common case.
-
-**3. `Context.Compensate(failedEvent, cancellationToken)`.** Publishes a reactive compensation *event*
-through the outgoing message pipeline (`OutgoingMessagePipeline.Publish`), starting a choreography flow -
-other handlers' `CompensateAsync` react to it as `IEvent` delivery, exactly like any other published event.
-It does not touch `ISagaStore`, does not mark any step compensated, and does not by itself imply or require
-`MarkAsCompensated`/`BubbleUpCompensation` afterward. Its `CancellationToken` was already present and
-already propagated correctly before this phase (`ImperativeCompensationTests.Compensate_Publishes_The_FailedEvent_And_Propagates_The_Token`
-proves it directly against the pipeline call).
-
-**4. `Context.MarkAsCompensated<TStep>(cancellationToken)`.** Logs the current step `Compensated` in the
-SagaStore. Nothing more. It is fully valid on its own for a root/final step.
-
-**5. `Context.BubbleUpCompensation(failedEvent, cancellationToken)`.** The imperative primitive behind
-durable parent-lineage propagation - `ISagaContext<TInitialMessage>.BubbleUpCompensation<TStep>(TStep failedEvent, ...)`,
-implemented on every built-in context by delegating to `ISagaCompensationCoordinator.BubbleUpCompensationAsync`.
-Unlike the fluent form's `CompensateParentAsync` (which marks *and* propagates atomically, because both
-happen in the same call), this method does **not** mark anything compensated - it requires that to have
-already happened, and validates it:
-
-- `failedEvent.MessageId` must equal the `MessageId` of the step the calling `ISagaContext` was
-  constructed for. A sibling step, an unrelated message, or a different message that happens to share the
-  same type all fail this check identically - there is no fallback to "the current step" or to a type- or
-  order-based lookup. `ImperativeCompensationTests` (`..._Uses_The_Exact_MessageId_Never_Any_Step_Of_The_Same_Type`,
-  `..._Does_Not_Touch_A_Sibling_Branch`, `..._With_An_Unrelated_Event_Throws_And_Mutates_Nothing`) prove
-  this directly, including two steps of the identical message type with distinct `MessageId`s/`ParentMessageId`s.
-- The step's persisted status must already be `Compensated`. If not, `InvalidOperationException` is thrown
-  naming the actual status and pointing at `MarkAsCompensated`/the recommended fluent form -
-  `ImperativeCompensationTests.BubbleUpCompensation_Before_MarkAsCompensated_Throws_And_Creates_No_Intent`.
-
-Both checks run entirely before anything durable is touched - a failing call creates no propagation
-intent and mutates no step.
-
-**6. Why `MarkAsCompensated` alone must remain valid.** It is the correct, complete call for a root/final
-step. Making it implicitly try to bubble up would either create meaningless propagation work for steps
-that have no parent, or require guessing intent from context that doesn't reliably indicate it.
-
-**7. Root vs. intermediate**, imperative form: root steps call only `MarkAsCompensated`; an intermediate
-step calls `MarkAsCompensated` then `BubbleUpCompensation(failedEvent, ct)` - matching the fluent form's
-two-stage vs. three-stage split exactly.
-
-**8. Why Lycia cannot infer a forgotten `BubbleUpCompensation`.** `MarkAsCompensated` alone is *also* a
-completely valid, terminal call (see 6/7) - there is no distinguishable "this step is missing a bubble-up
-call" state the framework could detect and repair. This is a genuine application programming error, not a
-recoverable fault.
-
-**9. Application-never-requested vs. propagation-requested-then-crashed.** These are different failure
-classes with different outcomes:
-
-```
-NEVER REQUESTED (application error - NOT recoverable)
-
-    MarkAsCompensated(ct)
-        ↓
-    (developer forgot BubbleUpCompensation)
-        ↓
-    no CompensationPropagationIntent ever created
-        ↓
-    nothing for CompensationWorker to find or resume
+```csharp
+public interface IFailedEventBase : IEvent
+{
+    string Reason { get; }
+}
 ```
 
-```
-REQUESTED, THEN CRASHED (framework recovery - IS recoverable)
+**Dispatch recognition.** `SagaDispatcher.FindMethodName` decides which method a dispatched message
+invokes; for a failed event it must return `"CompensateAsync"` instead of the ordinary `"HandleAsyncInternal"`.
+As of 2.0.1 this check is `typeof(IFailedEventBase).IsAssignableFrom(msgType)` - the same public interface
+`IFailedEventBase` that `Context.Publish(failedEvent, ct)` callers see, not the concrete
+`Lycia.Saga.Messaging.FailedEventBase` base class. This was verified against source before 2.0.1: 2.0.0's
+now-removed `Context.Compensate<T>(T @event, ct)` was constrained by the `IFailedEventBase` *interface*,
+but `FindMethodName` recognized only the concrete `FailedEventBase` *class* - since `FailedEventBase : IFailedEventBase`,
+every event built by deriving from `FailedEventBase` dispatched correctly either way, but a hand-written
+event implementing `IFailedEventBase` directly (without deriving from `FailedEventBase`) would have
+silently fallen through to `HandleAsyncInternal` instead of `CompensateAsync`. Fixed by widening dispatch
+recognition to the interface, which is a strict superset of the old class check - every existing
+`FailedEventBase`-derived event keeps dispatching exactly as before.
+`SagaDispatcherTests.DispatchAsync_Routes_A_Bare_IFailedEventBase_Implementer_To_CompensateAsync` proves
+the fix with an event that implements `IFailedEventBase` directly.
 
-    MarkAsCompensated(ct)
-        ↓
-    BubbleUpCompensation(failedEvent, ct)
-        ↓
-    durable CompensationPropagationIntent claimed
-        ↓
-    process crashes before the immediate parent attempt finishes
-        ↓
-    CompensationWorker resumes it from the durable Claimed record
-```
-
-**10-11. `CompensationPropagationIntent` / `CompensationWorker`.** Unchanged from the fluent-form
-description above - `BubbleUpCompensationAsync` calls the exact same `EnsureClaimAndAttemptPropagationAsync`
-private helper `CompensateParentAsync` does (`SagaCompensationCoordinator`), so both forms produce and
-recover identical durable state.
-
-**12-13. `ParentMessageId` lineage / `MessageId`-based exact step identity.** `failedEvent.ParentMessageId`
-is the lineage the propagation edge follows, and `failedEvent.MessageId` (validated against the current
-step, see 5) is the edge's own identity half (`SagaId` + `ChildMessageId`) - identical to the fluent form.
-
-**14. Branching/sibling behavior.** Identical to the fluent form: propagation follows the one edge named by
-`failedEvent`, never a type-based or global scan - `ImperativeCompensationTests.BubbleUpCompensation_Does_Not_Touch_A_Sibling_Branch`.
-
-**15. Repeated same-message-type behavior.** Two steps sharing a message type but distinct `MessageId`s/
-`ParentMessageId`s resolve to their own, independent edges - never each other's.
-
-**16. At-least-once semantics.** Identical to the fluent form: a parent's compensation handler can run
-again if the process crashes after invoking it but before recording completion. Lycia makes no
-exactly-once claim here or anywhere else.
-
-**17. Business compensation idempotency.** External side effects performed by a compensation handler
-(refunds, inventory release, shipment cancellation) must be idempotent, exactly as for any other
-at-least-once handler invocation in Lycia - not specific to `BubbleUpCompensation`.
-
-**18-19. Cancellation before/after durable handoff.** Before the durable claim: `cancellationToken.ThrowIfCancellationRequested()`
-runs first, so a pre-cancelled token prevents the claim from ever being created
-(`Cancellation_Before_BubbleUpCompensation_Prevents_The_Durable_Handoff`). After the claim commits:
-cancellation (or a crash) of the immediate attempt never erases the durable requirement -
-`CompensationWorker` recovers it (`Cancellation_After_The_Durable_Handoff_Does_Not_Erase_The_Propagation_Requirement`).
-
-**20. Imperative runtime validation.** Both checks in point 5 above - message identity and prerequisite
-status - are exactly the runtime validation the imperative form needs *instead of* compile-time staging;
-the fluent form never needs them because marking and propagating are one call there, never two.
-
-**21. Convergence.** `ImperativeCompensationTests.Fluent_And_Imperative_Forms_Produce_The_Same_Durable_Propagation_Artifact_Shape`
-drives one edge through each form in the same test and asserts both reach `CompensationPropagationStatus.Completed`
-with the same shape (`AttemptCount == 1`, same identity structure) - proof, not just design intent, that
-there is one propagation implementation, never two.
+**Not the same as coordinated bubble-up.** `Context.Publish(failedEvent, ct)` never touches `ISagaStore`,
+never marks any step `Compensated`, and does not by itself imply or require `MarkAsCompensated`/`ThenBubbleUp`
+afterward - it is purely a message delivery. Reacting handlers decide their own next steps, which may
+include `MarkAsCompensated`/`ThenBubbleUp` if they are themselves part of a coordinated saga, or nothing
+framework-level at all if they are a pure choreography participant.
 
 ---
 
@@ -1366,10 +1264,12 @@ Redis Cluster. They appear in no supported column and are tracked in the ledger.
 ### Versioning
 
 Versions come from Nerdbank.GitVersioning. `version.json` holds the base version - `1.18.0` was the
-first stable release; `2.0.0` is the current major version line, bumped in `version.json` for the
+first stable release; `2.0.x` is the current major version line, bumped in `version.json` for the
 intentional source-breaking changes described in `docs/MIGRATION-2.0.md` - and `publicReleaseRefSpec`
 (`^refs/tags/v\d+\.\d+\.\d+$`) makes a build of a matching tag a public release with exactly that version.
-Builds of branches carry a prerelease suffix.
+Builds of branches carry a prerelease suffix. `2.0.1` is an immediate correction release over `2.0.0`
+(same major version line, no further source-breaking changes beyond the compensation-API correction
+itself).
 
 ### Release contract
 

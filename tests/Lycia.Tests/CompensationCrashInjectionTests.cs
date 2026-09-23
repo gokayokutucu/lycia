@@ -280,7 +280,7 @@ public class CompensationCrashInjectionTests
         Assert.Single(parentHandler.Invocations);
 
         // Simulates the parent's own handler, after finishing its business undo, calling
-        // ContinueCompensation().ThenBubbleUp() itself - which durably records hop 2 (parent -> grandparent)
+        // MarkAsCompensated<TStep>().ThenBubbleUp() itself - which durably records hop 2 (parent -> grandparent)
         // and then crashes before that edge's own propagation attempt runs.
         var hop2Claim = await store.EnsureAndClaimCompensationPropagationAsync(sagaId, parentMessageId,
             grandparentMessageId, "dead-inline-owner", options.RecoveryTimeout, options.MaxAttempts);

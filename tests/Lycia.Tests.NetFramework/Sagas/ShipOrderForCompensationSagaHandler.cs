@@ -57,8 +57,7 @@ public class ShipOrderForCompensationSagaHandler :
             }
             
             await Context
-                .ContinueCompensation()
-                .ThenMarkAsCompensated<OrderCreatedEvent>()
+                .MarkAsCompensated<OrderCreatedEvent>()
                 .ThenBubbleUp(cancellationToken);
         }
         catch (Exception ex)

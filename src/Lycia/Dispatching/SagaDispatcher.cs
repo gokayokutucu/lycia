@@ -303,9 +303,12 @@ public class SagaDispatcher(
 
     private static string FindMethodName(Type msgType)
     {
-        if (typeof(FailedEventBase).IsAssignableFrom(msgType))
+        if (typeof(IFailedEventBase).IsAssignableFrom(msgType))
         {
-            // Choreography: failed events should invoke ISagaCompensationHandler<TFailed>.CompensateAsync
+            // Choreography: failed events should invoke ISagaCompensationHandler<TFailed>.CompensateAsync.
+            // Keyed off the public IFailedEventBase interface - the constraint Context.Publish(failedEvent, ct)
+            // callers actually see - not the concrete FailedEventBase base class, so an event that implements
+            // IFailedEventBase directly (without deriving from FailedEventBase) still dispatches correctly.
             return "CompensateAsync";
         }
         

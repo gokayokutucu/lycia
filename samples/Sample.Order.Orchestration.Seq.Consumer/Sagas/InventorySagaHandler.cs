@@ -40,10 +40,9 @@ public class InventorySagaHandler :
 
         // Then the framework-level transition: mark this step compensated and continue compensation
         // through the logical parent (via ParentMessageId). Only the terminal ThenBubbleUp call carries
-        // the CancellationToken; it governs the whole three-stage operation.
+        // the CancellationToken; it governs the whole two-stage operation.
         await Context
-            .ContinueCompensation()
-            .ThenMarkAsCompensated<ReserveInventoryCommand>()
+            .MarkAsCompensated<ReserveInventoryCommand>()
             .ThenBubbleUp(cancellationToken);
     }
 }
